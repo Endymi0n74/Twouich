@@ -29,6 +29,13 @@ publicités** fonctionnant sur les flux *server-side stitched* (SSAI) de Twitch.
 
 ![](images/splash-twouich.jpg)
 
+Mise à jour autonome, capturée sur l'appareil pendant le test de bout en bout : l'app ouvre **seule**
+son écran de mise à jour, puis passe l'APK téléchargé à l'installeur du système
+([`TEST-DEVICE.md` § 0.2](TEST-DEVICE.md)).
+
+![](images/maj-dialogue.jpg)
+![](images/maj-installeur.jpg)
+
 L'UI Android TV, le chat, les emotes BTTV/FFZ/7TV, le PiP, la VOD avec chat et les notifications
 viennent de S0undTV et ne sont pas modifiés : ce build change le comportement (anti-pub, mises à
 jour, identité), pas les écrans.
