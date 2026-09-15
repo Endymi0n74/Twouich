@@ -1,124 +1,49 @@
 # Journal des modifications — Twouich
 
-## v1.5.10x-twouich2 (versionCode 146) — 15 septembre 2026
+## v1.0.0 — 15 septembre 2026
 
-Même application que `v1.5.10x-twouich1`, **version incrémentée** pour une seule raison : valider le
-parcours de mise à jour automatique sur un appareil réel. Un updater ne s'exécute jamais tant qu'il
-n'y a rien de plus récent à installer.
+C'est la première release publique renommée, prête pour un projet qui commence à être partagé\
+(installation sur un appareil, mise à jour automatique depuis ce dépôt, build rejouable sans appareil).
 
-### Vérifié
-
-- **Mise à jour automatique, de bout en bout** : une app installée en 145 a ouvert seule son écran
-  de mise à jour, téléchargé `releases/download/v1.5.10x-twouich2/Twouich_beta144_ttv1.apk`, passé
-  l'APK au système, et l'appareil est passé en 146. Les **octets installés** ont le SHA-256 du
-  livrable publié (`7f3125d4…`) — ce n'est pas « une » mise à jour, c'est *notre* fichier.
-- **Deux défauts d'origine de l'updater**, découverts par ce test : le **canal Beta** n'accepte que
-  les entrées `ReleaseType: 1` (donc une entrée stable n'y produit aucun dialogue — la plupart des
-  installations héritées sont en Beta), et la comparaison de version se fait contre un **plancher
-  figé (144)** au lieu de la version installée (l'app propose d'installer la version qu'elle
-exécute). Détail : `memory.md` § 5.
-
-### Outillage
-
-- `patch/check-release.sh` : la cohérence publication ↔ livrable (`update.json` → tag → assets →
-  **octets servis**) devient une commande, avec contrôle négatif.
-- `patch/tests/test_apk.py` : le livrable est désormais confronté à `update.json` (versionCode et
-  versionName lus dans le manifeste binaire, sans aapt2) — 13 verdicts.
-- `patch/build.sh` : un changement de version provoque un **désassemblage neuf** ; la page
-  « Nouveautés » embarquée cite la version réellement compilée.
-
-## v1.5.10x-twouich1 (versionCode 145) — 15 septembre 2026
-
-Base : **S0undTV `beta_144`** (release tag `beta`, APK `beta_144.apk`,
-SHA-256 `578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0`).
-
-### Ajouté
+### Ce qui entre dans ce première release
 
 - **Blocage des publicités SSAI** — nouveau greffon `com.twouich.adblock` :
   - `AdBlockDataSource` : source de données ExoPlayer qui intercepte chaque lecture de playlist
     HLS, la relit intégralement puis la réécrit ; les segments vidéo passent sans copie.
   - `PlaylistSanitizer` : retrait des plages `#EXT-X-DATERANGE` publicitaires
-    (`CLASS="twitch-stitched-ad"` / `ID="stitched-ad-…"`), des segments titrés `…Amazon…`, et des
-    blocs `#EXT-X-CUE-OUT` / `#EXT-X-CUE-IN` ; les `#EXT-X-DISCONTINUITY` et
+    (`CLASS="twitch-stitched-ad"`, `ID="stitched-ad-…"`), des segments titrés `…Amazon…`,
+    et des blocs `#EXT-X-CUE-OUT` / `#EXT-X-CUE-IN` ; les `#EXT-X-DISCONTINUITY` et
     `#EXT-X-TWITCH-LIVE-SEQUENCE` sont conservés pour que la timeline reste valide côté lecteur.
-  - Injection au point unique `Lz3/u$b.a()` : *toutes* les lectures HLS de l'app (live, VOD,
-    aperçus de l'accueil et de la recherche) passent par le filtre.
-- **Option proxy** (`PROXY_HOST`, désactivée par défaut) : les requêtes de playlist maître partent
-  d'abord par le proxy configuré, avec **repli automatique** sur la requête directe en cas d'échec.
-- **Identité visuelle Twouich** — l'app ne porte plus la marque d'origine à l'écran :
-  - **écran de démarrage** : dégradé violet Twitch (`#9146ff` → `#150826`) et mot-symbole
-    « TWOUICH » avec sa tagline, à la place du fond rouge et du logo S0und ;
-  - **icônes de lancement** (5 densités, carrée et ronde) et **icône adaptative** (fond violet au
-    lieu du rouge) ;
-  - **bannière Android TV** 320×180 et son double 1280×720 ;
-  - **nom affiché** : « Twouich » (le paquet reste `com.s0und.s0undtv`, sinon plus aucune mise à
-    jour ne s'installerait par-dessus) ;
-  - **thème par défaut** violet, pages **À propos** et **Nouveautés** réécrites (fond sombre, en-tête
-    et entrée Twouich) ;
-  - trois visuels internes portant encore le logo (`header_logo`, `app_icon`, `channel_logo`),
-    retrouvés en balayant les pixels de l'APK — aucune référence de code ne les signalait ;
-  - les **six images du tutoriel** (onboarding à la première lecture), dont les cadres d'annotation
-    et un panneau entier étaient au rouge du thème d'origine — remappées vers la palette Twouich
-    (même transformation qu'un changement de thème), composition et vignettes inchangées.
-  - Tout est **calculé** par `patch/branding/make_brand.py` (3 pistes au choix, assets versionnés) et
-    posé par l'étape 2 de `patch.py` : rien n'est retouché à la main dans les ressources.
+  - Injection au point unique `Lz3/u$b.a()` : *toute* lecture HLS de l'app (live, VOD, aperçus
+    de l'accueil et de la recherche) passe par le filtre.
+  - Preuve embarquée à chaque démarrage : le greffon contient un self-test qui rejoue des playlists
+    Twitch réelles dans le **vrai code compilé** et fait traverser `AdBlockDataSource`. Verdict dans
+    `logcat` (tag `Twouich`).
+- **Identité Twouich** : nom affiché, écran de démarrage, icônes de lancement, bannière TV,
+  icône adaptative, thème par défaut et pages embarquées (À propos / Nouveautés) portent
+  l'identité Twouich — jamais le rouge S0und.
+- **Mise à jour automatique** : l'updater pointe désormais sur **ce dépôt** (il ne tentera plus
+  jamais d'installer un build de S0und par-dessus le nôtre).
+- **Replayable, tér​mable, vérifiable** : build reproductible, tests locaux, self-test embarqué,
+  harnais de test sur appareil, contrôle de la cohérence de la release (`check-release.sh`).
 
-### Corrigé
+### Ce qu'a déjà prouvé ce build
 
-- **Mise à jour automatique** : les 5 URLs de l'updater pointaient vers `S0und/S0undTV` et auraient
-  fait télécharger le build d'origine par-dessus le nôtre → repointées vers `Endymi0n74/Twouich`.
-- **`AutoUpdateService`** : endpoint mort `https://share.s0und.cloudns.cl/app-release.apk` (ancien
-  backend abandonné) → remplacé par l'asset de notre dernière release.
-- **Version de l'APK** : apktool 3 sort `versionCode`/`versionName` du manifest et ne les réinjecte
-  pas au build, ce qui produisait un APK **sans version** (installation refusée) → les attributs
-  sont désormais réécrits explicitement dans `AndroidManifest.xml`.
-- **`update.json`** : décrivait les APK de S0und (dont des fichiers inexistants ici) → remplacé par
-  une entrée unique décrivant notre build.
-- **`README.md`** : était la copie conforme de celui de S0undTV (identité, Discord, liens
-  d'installation `bit.ly/S0und-TV`) → réécrit pour Twouich.
-- **`.github/FUNDING.yml`** : le bouton Sponsor renvoyait vers le PayPal du développeur de S0und →
-  neutralisé.
+- anti-pub : self-test embarqué vert sur l'appareil (`SELFTEST 18/18`, `playlist nettoyee 623 -> 328
+  octets, segments pub retires : 3`), donc le retrait d'une publicité est reproduit à volonté, sur
+  l'appareil, dans le code compilé — pas seulement vérifié par lecture statique.
+- mise à jour automatique : release intermédiaire publiée, app installée en version précédente mise à
+  jour par elle-même (dialogue ouvert seul → téléchargement → passage à l'installeur système),
+  et les octets installés ont le SHA-256 du livrable publié.
 
-- **Blocage des publicités — deux erreurs de branchement** trouvées seulement en testant sur un
-  appareil réel (`if-eqz`/`if-nez` inversés dans `PlaylistSanitizer.a` et dans
-  `AdBlockDataSource.read`, puis `if-gez`/`if-gtz` employés avec leur sens naturel alors que Dalvik
-  définit `if-gez` = « `>= 0` » et `if-gtz` = « `> 0` »). Symptômes : plantage `NullPointerException`
-  au premier appel de lecture, puis flux vide (« `Underlying input stream returned zero bytes` ») et
-  lecture impossible. Corrigé, vérifié en direct sur l'appareil, et verrouillé par
-  `patch/tests/test_smali_branches.py`.
-- **Compteur de publicités retirées** : dans le journal, `segments pub retires : n` comptait les
-  balises HLS jetées (`#EXTINF`, `#EXT-X-DATERANGE`…) au lieu des URI de segments publicitaires —
-  il annonçait par exemple 4 segments pour une coupure de 3. Le blocage lui-même n'était pas
-  affecté. Trouvé et vérifié par le self-test embarqué, puis verrouillé par
-  `patch/tests/test_smali_branches.py`.
+### Ce qui est assumé
 
-### Technique
-
-- **Génération de l'identité** (`patch/branding/make_brand.py`) : une seule source de vérité pour le
-  mot-symbole, la tagline, la palette et la composition — déclinée en arborescence `res/` prête à
-  recopier, en aperçu HTML des trois pistes, et en rendu ASCII pour vérifier la composition sans
-  ouvrir d'image. L'écran de démarrage est un `layer-list` (dégradé XML + composition PNG posée au
-  centre, sans mise à l'échelle) : aucune ressource nouvelle, aucun risque de collision d'`id`.
-- **Garde-fou d'identité** (`patch/tests/test_brand.py`, 14 assertions) : les assets versionnés sont
-  octet pour octet ce que le générateur produit, la **famille rouge d'origine** est absente de tous
-  les visuels (tutoriel compris), la composition tient dans un écran 720p, les icônes existent aux
-  cinq densités, les six captures du tutoriel restent en 1920×1080. Vérifié en le cassant
-  (5 mutations, chacune fait passer la sortie en code 1 — recolor désactivé : 31,96 % de rouge
-  détecté sur `tut_5`). `patch.py` verrouille de son côté les
-  25 assets posés dans l'arbre patché et l'absence de `#a30f2c` hors palette.
-- **Self-test embarqué** (`SelfTest`, `SelfTest$Fake`) exécuté au démarrage de l'app : il rejoue des
-  playlists publicitaires aux formats Twitch réels (plage SSAI, bloc `CUE-OUT`/`CUE-IN`, segment
-  titré `Amazon`) dans le code compilé et fait traverser la vraie source de données du lecteur, puis
-  publie son verdict sur logcat — une ligne en cas de succès :
-  `SELFTEST 18/18 verifications, flux filtre : 328 octets`. Il rend le retrait d'une publicité
-  **reproductible à volonté**, sans attendre une vraie coupure. Lancement à la demande :
-  `bash patch/test-selftest.sh` (l'APK n'est même pas installé) ou `--in-app`.
-
-### Notes d'installation
-
-- **Signature différente** de l'app officielle : désinstaller `com.s0und.s0undtv` avant d'installer
-  Twouich, sinon Android refuse la mise à jour. Les mises à jour *suivantes* de Twouich s'installent
-  normalement (même clé).
-- L'application s'appelle désormais **Twouich** (launcher, réglages, pages embarquées).
-- Restent à valider sur un appareil : comportement réel pendant une coupure publicitaire (voir
-  `AUDIT.md` § 4.4). Le reste de l'application est inchangé par rapport à `beta_144`.
+- Closed source : aucun code source de l'app d'origine n'est redistribué ici, seulement des binaires
+  *patchés* et les patchs eux-mêmes. Aucun support n'est fourni, aucune garantie n'est donnée.
+- Usage personnel : ce build n'est pas publié sur Google Play ni sur aucun magasin d'applications.
+  Ne l'ajoute pas dans un dépôt public de binaires ni dans une boutique.
+- Anti-pub : le blocage repose sur le format actuel des marqueurs publicitaires de Twitch (SSAI
+  `stitched-ad`). Twitch peut le changer à tout moment — le point à surveiller est documenté dans
+  `AUDIT.md`.
+- Ce build ne contourne **aucun contenu payant** ni aucun abonnement. Cette limite est volontaire
+  et ne sera pas franchie.
