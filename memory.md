@@ -1,0 +1,348 @@
+# Twouich — mémoire projet
+
+> APK Android TV **sans publicité** pour Twitch, construit par patch reproductible sur le build
+> upstream **S0undTV**. Dépôt : `https://github.com/Endymi0n74/Twouich` — atelier local :
+> `D:\Codex\Twouich`.
+
+Dernière mise à jour : **15 septembre 2026**.
+
+---
+
+## 1. Identité
+
+| Élément | Valeur |
+|---|---|
+| Nom du produit | **Twouich** (`update.json` → `v1.5.10x-twouich1`) |
+| Paquet Android | `com.s0und.s0undtv` — **inchangé volontairement** (sinon les mises à jour ne s'installent plus par-dessus) |
+| Identité visuelle | piste **C** « dégradé + monogramme », générée par `patch/branding/make_brand.py` |
+| Palette | violet Twitch `#9146ff` → `#150826` (dégradé 315°), mot-symbole `#ffffff`, tagline `#e6d8ff` |
+| Base upstream | S0undTV `beta_144.apk`, SHA-256 `578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0` |
+| Version produite | `versionCode 145` / `versionName v1.5.10x-twouich1` |
+| Livrable | `dist/Twouich_beta144_ttv1.apk` (signé v1+v2+v3, zipalign vérifié) |
+| Clé de signature | `keys/twouich.keystore`, alias `twouich-dev` — **non versionnée, à sauvegarder hors du dossier** ; mot de passe **hors du dépôt** (`keys/keystore.properties`, ignoré, ou `KEY_PASS`) |
+| Modèle Android minimum | API 23 (Android 6), cible 35 |
+
+`patch/build.sh` contient la **source unique** de ces valeurs (SHA upstream, version, nom d'APK).
+
+## 2. Ce que fait le produit
+
+S0undTV est un lecteur Twitch pour Android TV. Twitch insère les publicités **côté serveur**
+(SSAI) : elles apparaissent dans la playlist HLS sous forme de plages `#EXT-X-DATERANGE` marquées
+`stitched-ad`, avec des segments dont le titre contient `Amazon`. Twouich intercepte la lecture des
+playlists et retire ces plages **avant** qu'ExoPlayer ne les voie.
+
+### Architecture du greffon — `patch/smali/com/twouich/adblock/`
+
+- **`AdBlockDataSource`** — implémentation de l'interface `Lz3/l;` (la `DataSource` d'ExoPlayer de
+  l'app) qui décore la source réelle :
+  - `c(Lz3/p;)` (open) : détecte si l'URL se termine par `.m3u8` → `e` = « c'est une playlist » ;
+    réinitialise le cache ; transmet l'ouverture à la source réelle ;
+  - `read([BII)` : pour une playlist, vide la source réelle **entièrement** dans un tampon, passe le
+    texte au nettoyeur, met le résultat en cache et le sert par tranches ; pour tout le reste
+    (segments `.ts`, clés, VOD binaires), simple passe-plat sans copie ;
+  - la trace logcat `Twouich` est émise à chaque nettoyage (voir §5).
+- **`PlaylistSanitizer`** — fonction pure `a(String) -> String`, règles alignées sur Streamlink
+  (`plugins/twitch.py`) :
+  - retrait des `#EXT-X-DATERANGE` contenant `stitched-ad` ;
+  - retrait des `#EXTINF` contenant `Amazon` **et** de l'URI du segment qui suit ;
+  - retrait des blocs `#EXT-X-CUE-OUT` … `#EXT-X-CUE-IN` ;
+  - **conservation** de `#EXT-X-DISCONTINUITY` et `#EXT-X-TWITCH-LIVE-SEQUENCE` (ils signalent le
+    saut de timeline au lecteur — les retirer casse la lecture) ;
+  - un corps sans `#EXTM3U` est rendu tel quel.
+
+**Injection** : un seul point, `Lz3/u$b.a()` — l'unique fabrique de sources de données de l'app
+(vérifié : `Lz3/u;` n'est instanciée nulle part ailleurs). Conséquence : *toutes* les lectures HLS
+(live, VOD, aperçus de l'accueil et de la recherche) passent par le filtre, sans patcher d'appelant.
+
+- **`SelfTest`** (+ `SelfTest$Fake`) — self-test embarqué, lancé une fois par démarrage depuis
+  `MainApp.onCreate` (deuxième point d'accroche de `patch.py`). Il rejoue des playlists
+  publicitaires réelles dans le code compilé et fait traverser `AdBlockDataSource` ; verdict sur
+  logcat, détail dans §5.
+
+**Option proxy** : `PROXY_HOST` (dans `AdBlockDataSource`) est **vide par défaut**. S'il est
+renseigné, les requêtes `usher.ttvnw.net` partent d'abord par le proxy, avec repli automatique sur
+l'URL d'origine. Désactivé volontairement : aucun proxy public n'expose l'API de relais « chemin
+conservé » utilisée ici.
+
+### Identité visuelle — `patch/branding/make_brand.py`
+
+L'app portait la marque S0und à **six endroits**, tous invisibles depuis le code : l'écran de
+démarrage (vecteur rouge `#a30f2c` avec le mot-symbole), les icônes de lancement et la bannière TV,
+le nom affiché (« S0undTV »), le fond de l'icône adaptative, et deux pages HTML embarquées (À propos,
+Nouveautés) dont la seconde avait un fond rouge. Trois visuels de plus (« `header_logo` », « `app_icon` », « `channel_logo` ») portaient
+le logo **dans l'interface** ; aucun n'était référencé par son nom, seuls les pixels les ont
+signalés (voir §5).
+
+Un seul fichier produit tout le visuel, et rien n'est retouché à la main :
+
+- `make_brand.py` calcule la composition (mot-symbole Bahnschrift, tagline Segoe UI, monogramme),
+  la décline en **arborescence `res/` prête à recopier** (`patch/branding/assets/res/`) et publie sa
+  palette dans `brand.json` (lue par `patch.py` pour `colors.xml`) ;
+- l'écran de démarrage est un **`layer-list`** : dégradé XML (aucune ressource nouvelle, donc aucun
+  risque de collision d'`id` aapt2) et composition PNG transparente posée **au centre, sans mise à
+  l'échelle** (1920×1080 en `nodpi`) — le texte garde donc le dessin validé, et le contenu reste
+  entier même sur un écran 720p qui rogne les bords ;
+- **trois pistes** existent (`A` violet plein, `B` noir Twitch, `C` dégradé + monogramme) ; la piste
+  livrée est la constante `SHIPPING`. Changer d'identité = `python patch/branding/make_brand.py emit
+  --variant B`, puis relancer `patch.py` : aucun autre fichier à toucher.
+- Le **nom** change aussi côté ressources (`app_name`, libellé du manifeste) mais **pas** le paquet
+  Android : c'est lui qui permet de mettre l'app à jour par-dessus l'installée.
+
+### Captures du tutoriel — remappées, pas recapturées
+
+Les six visuels de l'onboarding (`drawable/tut_*.webp`, 1920×1080) sont des captures d'écran réelles
+prises par l'upstream, et ils portaient deux choses de la marque d'avant : les **cadres
+d'annotation** dessinés en rouge (`#a30f2c`), et pour `tut_5` un **panneau au thème rouge**
+(`#4d000f` + `#a30f2c`, un tiers de l'image).
+
+Elles n'ont **pas** été recapturées, et c'est un choix : l'émulateur de test plafonne à 1280×720
+alors que ces images sont en 1920×1080 — les refaire aurait donné des visuels 1,5× plus flous pour
+une mise en page qui n'a pas changé (la refonte ne touche ni la disposition ni les écrans, seulement
+la marque et le thème). `make_brand.py` applique donc **le même remappage qu'un changement de
+thème** : chaque couleur de la famille rouge prend la couleur de même rôle dans la palette Twouich
+(`theme_red_dark`→`theme_purple_dark`, `theme_red`→`theme_purple`, `theme_red_bright`→
+`theme_purple_bright`), avec un fondu qui laisse intact tout ce qui n'est pas franchement rouge.
+
+Résultat mesuré : la famille rouge passe de 2,3–36,7 % à **0,0000 %** sur les six images, et
+l'écart de luminance moyen reste sous 1,9/255 (7,4 sur `tut_5`, dont le grand panneau rouge devient
+violet). Les rouges de **contenu** (vignettes de streams) sont laissés tels quels : ce ne sont pas
+des éléments de marque. Les sources sont versionnées dans `patch/branding/tutorial/`, donc le
+remappage est rejouable et vérifiable sans appareil.
+
+## 3. Chaîne de build (rejouable, idempotente)
+
+```bash
+cd Twouich
+bash patch/build.sh
+```
+
+```
+APK upstream vérifié par SHA-256 → apktool d → patch/patch.py → apktool b → zipalign → signature v1+v2+v3 → dist/
+```
+
+- `patch/patch.py` applique **tous** les patchs en un endroit, en cinq étapes numérotées : greffon
+  anti-pub (1), **identité visuelle (2)**, repointage de l'updater (3), bump de version (4),
+  contrôles (5). Il **échoue bruyamment** si un motif attendu a changé côté upstream — c'est la
+  détection de rupture sur une nouvelle beta.
+- `build.sh` régénère les assets de marque avant de patcher. Si Pillow ou les polices manquent, il
+  utilise les assets **versionnés** et le dit — l'APK ne part jamais avec l'identité d'avant.
+- Outils attendus dans `tools/` (non versionné) : `apktool-3.0.3.jar`, `uber-apk-signer.jar`.
+- `work/` (décodage, builds, captures) et `dist/` sont **non versionnés**.
+- Reproduction **en contenu, pas octet pour octet** : deux builds du même arbre donnent un APK dont
+  les 2172 entrées sont identiques (CRC deux à deux) mais dont le SHA-256 diffère — apktool estampille
+  les entrées ZIP à l'heure du build. Un SHA-256 publié identifie donc le **fichier livré**, pas la
+  recette ; pour vérifier un rebuild, comparer les CRC (`unzip -v`), pas le hash du fichier.
+
+## 4. Ce qui a été corrigé côté obsolescences
+
+- **Updater** : 5 URLs pointaient vers `S0und/S0undTV` → l'app aurait **téléchargé le build
+  d'origine par-dessus le nôtre**. Repointées vers Twouich.
+- **`AutoUpdateService`** : endpoint mort `https://share.s0und.cloudns.cl/app-release.apk` (ancien
+  backend abandonné) → remplacé par l'asset de notre dernière release.
+- **Manifest** : apktool 3 sort `versionCode`/`versionName` et ne les réinjecte pas au build → APK
+  **sans version**, installation refusée. Réécriture explicite ajoutée.
+- **`update.json` / `README.md` / `.github/FUNDING.yml`** : décrivaient S0und (dont des APK
+  inexistants ici, et un bouton Sponsor vers le PayPal du développeur d'origine) → réécrits.
+
+Détail complet : [`AUDIT.md`](AUDIT.md).
+
+## 5. Vérifications
+
+### En local, sans appareil
+
+```bash
+python patch/tests/test_sanitizer.py      # 22 assertions : règles de nettoyage (miroir Python)
+python patch/tests/test_smali_branches.py # 9 assertions : branchements réels du smali (pièges Dalvik)
+python patch/tests/test_brand.py          # 14 assertions : identité visuelle (assets, rouge mort, zone sûre,
+                                          #   captures du tutoriel remappées)
+python patch/tests/test_apk.py            # 9 verdicts sur l'APK livré (et non sur l'arbre de travail)
+bash   patch/tests/test_analyzer.sh       # 8 verdicts, sur des captures synthétiques
+```
+
+### Identité visuelle — la preuve, à trois niveaux
+
+Un asset oublié ne se plaint jamais : il s'installe, démarre, et affiche encore la marque d'avant.
+La refonte est donc vérifiée jusqu'à l'écran :
+
+1. **Générateur** — `test_brand.py` : les assets versionnés sont octet pour octet ce qu'`emit`
+   produit (aucune dérive code/images), aucun pixel du rouge S0und dans les visuels, la composition
+   reste entière en 720p et **centrée**, les icônes existent dans les cinq densités aux bonnes
+   tailles, le mot-symbole est bien encré (pas de génération vide), et `brand.json` décrit la même
+   palette que les XML.
+2. **Arbre patché** — les 40 contrôles de `patch.py` (25 assets + 1 balayage) : chaque asset émis
+   est présent dans l'arbre décodé, `app_name`/libellé du manifeste sont bien « Twouich », et
+   **aucun `#a30f2c` ne subsiste** hors de la palette des thèmes (le rouge y reste un choix
+   d'utilisateur, pas la marque).
+3. **APK livré** — `test_apk.py` : c'est l'artefact qui part chez l'utilisateur, pas l'arbre de
+   travail (aapt2 compile les XML en binaire, ré-encode des PNG, fusionne les ressources : un asset
+   perdu à cette étape ne se plaint jamais). 25/25 visuels présents, identiques octet pour octet aux
+   3 re-encodages près, composition du splash à sa taille de dessin, **zéro « S0undTV »** dans
+   `resources.arsc` comme dans le manifeste, pages embarquées réécrites, signature v1 présente.
+   Contrôle négatif : lancé sur l'APK **d'origine** de S0undTV, il échoue sur les 8 contrôles de
+   marque — c'est ce qui montre qu'il discrimine.
+4. **Appareil** — écran de démarrage capturé pendant un lancement réel sur BlueStacks
+   (`work/branding/shots/splash-device.png`) : dégradé violet, pastille « T », mot-symbole
+   « TWOUICH » et tagline, plus aucune trace de l'écran rouge. Le self-test anti-pub reste **vert**
+   après la refonte (`SELFTEST 18/18`, dex frais **et** app installée).
+
+Le contrôle « famille rouge S0und absente des visuels » couvre **tous** les visuels livrés,
+captures du tutoriel comprises — c'est précisément ce qui manquait quand ces six images portaient
+encore la marque. Vérifié en le cassant : recolor désactivé → `tut_5` remonte à **31,96 %** et la
+sortie passe en code 1 (seuil calibré sur le bruit WebP, qui laisse 3 pixels dans l'angle arrondi
+d'une icône, soit 0,014 %).
+
+Le garde-fou a été **vérifié en le cassant** : piste livrée changée sans réémettre (§ « assets
+versionnés »), mot-symbole repassé en rouge (balayage des pixels : 9,8 % sur la bannière), dégradé
+repassé en rouge (contrôle des XML) et un visuel retiré du générateur (liste attendue : c'est
+précisément la faute qui avait échappé à la relecture) — chaque fois la sortie passe en code 1.
+
+### Self-test embarqué — la preuve qui ne dépend pas d'une coupure publicitaire
+
+`SelfTest` (+ `SelfTest$Fake`) est **dans l'APK** et s'exécute une fois par démarrage (injecté par
+`patch.py` dans `MainApp.onCreate`). Il rejoue quatre playlists aux formats Twitch réels dans le
+**vrai code compilé** (plage SSAI `stitched-ad`, bloc `CUE-OUT`/`CUE-IN`, segment titré `Amazon`,
+daterange non publicitaire) et fait traverser `AdBlockDataSource` (source en mémoire, lecture par
+tranches de 64 octets), puis publie un verdict : une seule ligne si tout va bien.
+
+```bash
+bash patch/test-selftest.sh             # dex frais exécuté via app_process, RIEN n'est installé
+bash patch/test-selftest.sh --in-app    # ou redémarre l'app installée et lit son verdict
+```
+
+**Validé le 15/09/2026** (BlueStacks, API 25 / `emulator-5554`) :
+
+```
+I/Twouich: playlist nettoyee 623 -> 328 octets, segments pub retires : 3
+I/Twouich: SELFTEST 18/18 verifications, flux filtre : 328 octets
+```
+
+À retenir : un smali peut assembler proprement et être rejeté par le vérificateur Dalvik
+(`VerifyError` au chargement de la classe) — une liste d'invoke est limitée à 5 registres, et deux
+paramètres `long` imposent la forme `/range`. C'est la même famille de pièges que §6.
+
+### Sur appareil — `patch/test-device.sh` + `patch/analyze_device_log.sh`
+
+Trace embarquée à chercher dans `logcat` (tag `Twouich`) :
+
+```
+[Twouich] playlist nettoyee <octets avant> -> <après> octets, segments pub retires : <n>
+[Twouich] proxy indisponible : repli sur la requete directe
+```
+
+**Validé le 15/09/2026** sur émulateur BlueStacks (`emulator-5554`, Android 7.1.1 / API 25), compte
+Twitch gratuit connecté, session de 4 minutes sur une chaîne en direct :
+
+- installation OK (`versionName` relu sur l'appareil), app stable, aucun `FATAL EXCEPTION` ;
+- **131 nettoyages** de playlist média (rafraîchissement HLS toutes les 2 s), des milliers de
+  lectures de segments, **0 erreur de lecture**, aucun `Playback error` ;
+- le filtre est donc prouvé **traversé** par toutes les lectures HLS, et — depuis le self-test
+  ci-dessus — **efficace** : le retrait d'une plage publicitaire est reproduit à volonté dans le
+  code compilé (623 → 328 octets, 3 segments retirés). La capture live reste utile pour vérifier la
+tenne pendant un direct, mais elle n'est plus la seule preuve possible.
+
+## 6. Leçons — les cinq bugs de branchement
+
+Quatre cassaient la lecture, le cinquième faussait la preuve. Tous invisibles pour le miroir Python
+(`test_sanitizer.py` passait 17/17) : **seul un appareil pouvait les révéler**. Ils sont documentés
+ici parce qu'ils sont la raison d'être de `test_smali_branches.py` et du self-test embarqué.
+
+1. `PlaylistSanitizer` : `if-eqz v1, :is_playlist` au lieu de `if-nez` → **les vraies playlists
+   repartaient intactes, pubs comprises** (le filtre ne servait à rien sur les flux réels) et les
+   corps non-playlist étaient nettoyés pour rien.
+2. `AdBlockDataSource.read` : `if-nez v0, :fill` au lieu de `if-eqz` → le premier appel de lecture
+   tombait directement sur `array-length(null)` → `NullPointerException`.
+3. et 4. `if-gez v3, :drained` alors que `v3` valait **622** : piège de la sémantique Dalvik (table
+   ci-dessous). La boucle de remplissage sortait avant d'écrire le moindre octet → playlist vide →
+   `Underlying input stream returned zero bytes` → lecture impossible.
+
+5. `PlaylistSanitizer`, compteur (trouvé le 15/09/2026 par le self-test, sur l'appareil) :
+   `if-eqz v5, :drop_nocount` après `startsWith("#")`. Branche à l'envers : le compteur
+   incrémentait les **balises** jetées (`#EXTINF`, `#EXT-X-DATERANGE`…) et ignorait les URI. Le
+   nettoyage était correct, mais la trace annonçait `segments pub retires : 4` pour 3 segments — et
+   c'est cette trace qui sert de preuve dans `TEST-DEVICE.md`. La sonde posée dans la boucle a
+   montré la faute en trois minutes ; aucune analyse du fichier ne l'aurait donnée, puisque la
+   source *se lit* comme correcte (`if-eqz` après un test de forme se lit naturellement comme
+   « si c'est faux, on saute »).
+
+### Table à connaître par cœur : les tests contre zéro en smali
+
+| Opcode | Sens réel | Piège |
+|---|---|---|
+| `if-eqz` | `v == 0` | — |
+| `if-nez` | `v != 0` | — |
+| `if-ltz` | `v < 0` | — |
+| `if-gez` | **`v >= 0`** | se lit comme « moins que zéro » alors que c'est l'inverse |
+| `if-gtz` | **`v > 0`** | 0 ne branche pas |
+| `if-lez` | `v <= 0` | — |
+
+Les formes **à deux registres** (`if-le v4, v3`, `if-ge v2, v3`) sont, elles, littérales.
+
+### Leçon de mesure — compter le rouge sans se tromper de critère
+
+Pour vérifier qu'aucune image ne portait plus la marque d'avant, j'ai d'abord mesuré la **distance
+au rouge** `#a30f2c` avec une tolérance de 45 (somme des écarts par canal). Verdict : 41 à 57 % de
+chaque capture du tutoriel... ce qui était **faux**. Sur des pixels presque noirs, une tolérance de
+45 est énorme : `(10,12,0)` — un vert sombre — passe pour du rouge. La bonne mesure regarde le
+**déséquilibre des canaux** (`R > G + 25` et `R > B + 25`) : le fond réel de ces captures était un
+sombre neutre ou verdâtre venu des vignettes, et le rouge de marque ne pesait que 2 % (et 37 % pour
+`tut_5`, un panneau au thème rouge). Un chiffre qui décide d'un plan de travail se vérifie sur des
+pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
+
+## 7. Pièges d'environnement (payés comptant)
+
+- **Deux `adb` se battent.** BlueStacks embarque `HD-Adb.exe` (1.0.36), scrcpy des platform-tools
+  (1.0.41). Chaque appel tue le serveur de l'autre → `error: closed` **en plein transfert**. Le
+  script choisit un binaire et s'y tient ; il redémarre le serveur une fois en cas de coupure.
+- **Aucun timeout sur `adb install`.** Un `timeout 20` a tué une installation en plein transfert et
+  figé l'`adbd` de l'émulateur. Le script ne met aucun timeout sur l'installation et bascule sur
+  `push` + `pm install` si le flux direct est refusé.
+- **Git Bash réécrit les chemins absolus** passés aux binaires natifs : `/data/local/tmp/x.apk`
+  devient `C:/Program Files/Git/data/local/tmp/x.apk`. D'où `MSYS_NO_PATHCONV=1` et
+  `MSYS2_ARG_CONV_EXCL='*'` dans les scripts.
+- **`adb devices` peut revenir vide** quand le serveur redémarre → relance + parsing explicite.
+- **Deux transports pour le même émulateur** : BlueStacks répond sur `emulator-5554` **et** sur
+  `127.0.0.1:5555`. Le second accepte `push` et `install` mais ne rend aucun verdict `app_process`
+  (« aucun verdict SELFTEST dans la capture ») — panne silencieuse, le script croyait avoir testé.
+  `test-selftest.sh` choisit donc explicitement `emulator-*` quand `--serial` n'est pas donné, et
+  affiche les transports disponibles quand ils sont plusieurs.
+- **`logcat -v time` change le format** : `I/Twouich (23733): …`. Un `grep 'Twouich : '` ne matche
+  alors **rien** — erreur commise, et elle fait croire à une panne qui n'existe pas.
+- **Aucun mode arrière-plan** dans cet environnement : une capture se fait dans une seule commande
+  synchrone (enchaîner ouverture du flux + `logcat`).
+
+## 8. Reste à faire
+
+1. ~~Prouver le retrait effectif d'une pub~~ — **fait le 15/09/2026** : self-test embarqué vert sur
+   l'appareil (`SELFTEST 18/18`, `623 -> 328 octets, segments pub retires : 3`), donc plus besoin
+   d'attendre une coupure. Reste optionnel : une **capture longue** sur une chaîne à pubs, verdict de
+   `analyze_device_log.sh`, pour vérifier la tenue pendant un direct entier.
+2. ~~**Publication de la release** `v1.5.10x-twouich1`~~ — **fait le 15/09/2026** : tag exactement
+   égal au `VersionName`, APK `Twouich_beta144_ttv1.apk` (SHA-256 `a80be686…`) + `changelog.html`
+   joints. Reste : l'updater ne peut être validé qu'en **installant une release sur l'app installée**
+   (parcours réel du bouton « Mettre à jour »), pas depuis ici.
+3. **CI GitHub Actions** : rejouer `patch/build.sh` à chaque push pour détecter une rupture de patch
+   sur une nouvelle beta (URLs d'outils à figer d'abord).
+4. ~~Rebranding~~ — **fait le 15/09/2026** : nom, écran de démarrage, icônes, bannière TV, icône
+   adaptative, thème par défaut et pages embarquées sont passés à l'identité Twouich (voir §2 et
+   §5). Les **images du tutoriel** (`tut_*.webp`) ont été remappées au lieu d'être recapturées (voir
+   §2) : plus aucune marque d'avant ne subsiste dans l'APK, ni en texte ni en pixel.
+
+## 9. Journal
+
+| Date | Événement |
+|---|---|
+| 2026-08/09 | Audit du dépôt et de l'APK ; constat que l'updater renvoyait vers S0und. |
+| 2026-09-15 | Greffon anti-pub écrit, chaîne de build reproductible, `update.json`/README/FUNDING réécrits, audit + procédure de test rédigés. |
+| 2026-09-15 | Premier test sur appareil : **lecture cassée** par 4 erreurs de branchement (voir §6). |
+| 2026-09-15 | Correction + `test_smali_branches.py` (vérifié en réintroduisant les fautes : 4/7 et code de sortie 1). |
+| 2026-09-15 | Session de 4 min sur BlueStacks : lecture OK, 131 nettoyages, 0 erreur, aucune pub servie par la chaîne. |
+| 2026-09-15 | **Self-test embarqué** écrit et branché sur `MainApp.onCreate` ; deux pièges Dalvik payés en route (paire de registres *wide* → `VerifyError`, corrigé en `/range` ; `min()` calculé à l'envers dans la source factice). |
+| 2026-09-15 | Self-test vert sur l'appareil : **18/18**, `playlist nettoyee 623 -> 328 octets, segments pub retires : 3` — le retrait d'une pub est enfin reproductible à volonté. |
+| 2026-09-15 | Mesure de reproductibilité : 2172/2172 entrées identiques au CRC entre deux builds du même arbre, SHA-256 **différents** (horodatage ZIP d'apktool) → le hash publié identifie le fichier, pas la recette. |
+| 2026-09-15 | **Release `v1.5.10x-twouich1` publiée** (tag = `VersionName`) avec l'APK refondu, `changelog.html` et ses notes ; l'APK installé a été relu depuis l'appareil (`pm path` + `pull`) — SHA-256 **identique** à celui publié, self-test **18/18** sur ces octets. |
+| 2026-09-15 | Ce self-test a trouvé un **cinquième bug** (compteur qui comptait les balises) ; corrigé, garde-fou ajouté à `test_smali_branches.py` (9 vérifications) et script `patch/test-selftest.sh` livré. |
+| 2026-09-15 | **Refonte d'identité** : l'app devient visuellement Twouich (écran de démarrage, icônes, bannière, nom, thème violet, pages embarquées). Générateur `patch/branding/make_brand.py` (3 pistes, arborescence `res/` prête à recopier) et étape 2 de `patch.py`. |
+| 2026-09-15 | Le balayage des pixels a trouvé **trois visuels portant le logo S0und dans l'interface** (`header_logo`, `app_icon`, `channel_logo`) qu'aucune référence de code ne signalait — remplacés, et le balayage est devenu un test (`test_brand.py`, 12 assertions, garde-fou vérifié par 4 mutations). |
+| 2026-09-15 | Écran de démarrage Twouich **capturé sur l'appareil** pendant un lancement réel ; self-test anti-pub toujours vert sur l'APK reconstruit (18/18, dex frais et app installée). 40 contrôles dans `patch.py`. |
+| 2026-09-15 | **Captures du tutoriel remappées** (6 images, 1920×1080) : les cadres d'annotation et le panneau du thème rouge passent à la palette Twouich — 2,3–36,7 % de rouge → **0,0000 %**, écart de luminance moyen < 1,9/255. Choix explicite : l'émulateur plafonne à 720p, les recapturer aurait flouté des images 1080p pour une mise en page inchangée. 31 assets, 46 contrôles, `test_brand.py` 14 assertions. |
+| 2026-09-15 | Erreur de mesure corrigée en route : ma première quantification du rouge (distance euclidienne, tolérance 45) comptait les pixels presque noirs comme rouges et annonçait 41–57 % — la bonne mesure est le déséquilibre des canaux. Leçon consignée en §6. |

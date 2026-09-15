@@ -1,0 +1,28 @@
+# ── Atelier local (non versionné) ──
+work/
+dist/
+tools/
+keys/
+
+# ── Fichiers binaires / générés ──
+*.apk
+*.apkm
+*.idsig
+*.dex
+*.log
+*.keystore
+*.jks
+*.p12
+
+# ── Secrets ──
+keystore.properties
+
+# ── Python ──
+__pycache__/
+*.pyc
+
+# NB : patch/branding/assets/ EST versionné — les visuels de marque sont générés
+# par make_brand.py, mais le build doit pouvoir produire le même APK sans les
+# polices Windows (et test_brand.py compare les deux).
+
+# NB : patch/ (scripts + smali) EST versionné — c'est la source de vérité.

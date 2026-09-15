@@ -1,59 +1,183 @@
-# S0undTV for Twitch
+# Twouich — client Twitch pour Android TV, **sans publicité**
 
-An alternative app to watch the Twitch streaming service for Android TV devices
+Twouich est un **build modifié de S0undTV** (client Twitch alternatif pour Android TV, projet
+closed-source de [S0und](https://github.com/S0und/S0undTV)) auquel est greffé un **blocage des
+publicités** fonctionnant sur les flux *server-side stitched* (SSAI) de Twitch.
 
-discord: https://discord.gg/zmNjK2S 
+> Projet indépendant, **sans aucune affiliation avec Twitch Interactive, Inc.** ni avec S0und.
+> Voir [`CREDITS.md`](CREDITS.md).
 
-changelog: https://s0und.github.io/S0undTV-Changelog/
+![](images/image1.jpg)
 
-### **This app has no affiliation with Twitch Interactive, Inc.**
+## Ce qui est ajouté par rapport à S0undTV
 
+- **Identité Twouich** : nom affiché, écran de démarrage, icônes de lancement, bannière TV, icône
+  adaptative, thème par défaut, pages embarquées (À propos / Nouveautés) et images du tutoriel — plus
+  rien de la marque d'origine à l'écran. Tout est **calculé** par `patch/branding/make_brand.py` :
+  changer d'identité se fait en une commande (`emit --variant A|B|C`), jamais à la main dans les
+  ressources. Les six captures du tutoriel sont remappées (rouge d'origine → violet Twouich) plutôt
+  que recapturées : la mise en page n'a pas changé et elles sont en 1920×1080 natif.
+- **Anti-pub réel** : les plages publicitaires sont retirées de la playlist HLS avant que le
+  lecteur ne les voie (`#EXT-X-DATERANGE` / `stitched-ad`, titres `Amazon`, `CUE-OUT`/`CUE-IN`),
+  avec conservation des `#EXT-X-DISCONTINUITY` pour que la timeline reste cohérente.
+- **Option proxy** : la requête de playlist maître peut partir d'abord par un proxy de ton choix
+  (« proxy d'abord »), avec **repli automatique** sur la requête directe si le proxy ne répond pas.
+- **Mises à jour autonomes** : l'updater intégré pointe désormais sur **ce dépôt** (il ne tentera
+  plus jamais d'installer un build de S0und par-dessus le nôtre).
 
-![](images/image1.jpg?raw=true)
+Écran de démarrage, capturé sur l'appareil ([`images/splash-twouich.jpg`](images/splash-twouich.jpg)) :
 
-![](images/image2.jpg?raw=true)
+![](images/splash-twouich.jpg)
 
-![](images/image3.jpg?raw=true)
+L'UI Android TV, le chat, les emotes BTTV/FFZ/7TV, le PiP, la VOD avec chat et les notifications
+viennent de S0undTV et ne sont pas modifiés : ce build change le comportement (anti-pub, mises à
+jour, identité), pas les écrans.
 
-Features:
+## Installation
 
-- UI designed for big screen experience
-- Live streams with chat
-- BTTV, FFZ and 7TV emote support
-- Picture in picture, with customization
-- Live stream preview for easier browsing
-- 'Peekview', easy way to browse for other content while watching a stream
-- Search
-- VOD support with chat
-- Various Chat customization, including filtering options (words, users, bots)
-- Access followed channel, favorite them for quick access
-- Local VOD history with VOD resume
-- Optional World Clock 
-- Remote shortcuts to access frequently used functions
-- Channel profiles
-- Dedicated stream row for streamers who stream with a specific language
-- Option to follow users
-- System wide notification when a followed streamer is online
-- Multiple UI Themes
-- Basic gesture control in the Player
-- Recommendation channels 
-- Historical chat messages (see what happened on the channel before you've joined) powered by https://recent-messages.robotty.de/
-- Receives automatic updates (Standalone version only!)
+⚠️ **La signature est différente de celle de S0undTV** : l'app officielle doit être désinstallée
+avant d'installer Twouich (sinon Android refuse la mise à jour). Tes préférences et ta session
+seront donc à refaire une fois.
 
-Disclaimer: some of these features are only work on powerful Android TV devices, exp.: Nvidia Shield TV, Mi Box.
+```bash
+# 1. Récupérer l'APK (release v1.5.10x-twouich1)
+#    https://github.com/Endymi0n74/Twouich/releases
+# 2. Depuis un PC, avec adb connecté à la box :
+adb uninstall com.s0und.s0undtv || true
+adb install -r Twouich_beta144_ttv1.apk
+```
 
-### How to install
-#### Easy
+Ou plus simple : télécharger l'APK directement sur la TV (Downloader) puis l'installer.
 
-1. Install [Downloader by AFTVnews](https://www.aftvnews.com/downloader/) from [Google Play](https://play.google.com/store/apps/details?id=com.esaba.downloader) or [Amazon app store](https://www.amazon.co.uk/dp/B01N0BP507)
-2. Use this URL inside the Downloader app: **https://bit.ly/S0und-TV** and download the apk
-3. Install the app, launch it, and it will prompt you to update S0undTV itself so you have the latest version. 
+**Mises à jour suivantes** : l'app se met à jour elle-même depuis `update.json` de ce dépôt
+(écran « Mise à jour »). Chaque nouvelle version publiée ici est signée avec la **même clé**, donc
+les mises à jour s'installent normalement — à condition de ne pas désinstaller entre-temps.
 
-#### "Difficult" 
-- download and sideload the latest apk to your device
+## Vérifier que le blocage fonctionne
 
+L'app **trace elle-même** chaque playlist nettoyée :
 
-### Is there a difference between the 'Standalone' and the 'Google Play' versions?
-- Yes, the Standalone version (hosted here on Github) has its own updating system. So once you install the app, you will receive automatic updates just like you would using the app installed from Google Play.
-- Updates are faster because I don't have to wait for Google to approve an update.
-- Beta versions are only published through the 'Standalone' version.
+```
+I/Twouich: playlist nettoyee 8412 -> 7103 octets, segments pub retires : 3
+```
+
+Donc un test exhaustif tient en deux commandes (installation + capture filtrée + verdict) :
+
+```bash
+bash patch/test-device.sh --list           # qui est branché (et quel adb est utilisé)
+bash patch/test-device.sh --fresh          # installe et capture le logcat
+bash patch/analyze_device_log.sh work/device-test/logcat-<date>.txt   # verdict
+```
+
+Et une preuve **déterministe**, sans attendre une coupure publicitaire : le greffon contient un
+self-test qui rejoue des playlists publicitaires Twitch dans le **vrai code compilé** et fait
+traverser la vraie source de données du lecteur.
+
+```bash
+bash patch/test-selftest.sh            # verdict en quelques secondes (l'APK n'est pas installé)
+bash patch/test-selftest.sh --in-app   # ou au démarrage de l'app installée
+```
+
+```
+I/Twouich: SELFTEST 18/18 verifications, flux filtre : 328 octets
+```
+
+Sans appareil sous la main, la logique se vérifie entièrement en local :
+
+```bash
+bash patch/tests/test_analyzer.sh          # 8 verdicts, sur des captures synthétiques
+python patch/tests/test_sanitizer.py       # 22 assertions : règles de nettoyage (miroir Python du smali)
+python patch/tests/test_smali_branches.py  # 9 assertions : branchements réels du smali (pièges Dalvik)
+```
+
+Procédure complète, checklist à cocher pendant la coupure publicitaire et grille de lecture des
+résultats : **[`TEST-DEVICE.md`](TEST-DEVICE.md)**.
+
+## Activer le mode proxy
+
+Le proxy est **désactivé par défaut** : aucun service public n'expose aujourd'hui l'API de relais
+« chemin conservé » utilisée ici, et brancher un hôte mort serait pire que de ne rien faire.
+Pour l'activer, une seule ligne :
+
+```smali
+# patch/smali/com/twouich/adblock/AdBlockDataSource.smali
+.field private static final PROXY_HOST:Ljava/lang/String; = "mon-proxy.exemple.net"
+```
+
+puis relancer le build. Tant que le proxy répond, il est utilisé ; dès qu'il échoue, l'app repart
+sur l'URL d'origine et le stripping local prend le relais.
+
+## Construire l'APK soi-même
+
+```bash
+cd Twouich
+curl -sSL -o tools/apktool-3.0.3.jar        https://github.com/iBotPeaches/Apktool/releases/…   # apktool 3.x requis
+curl -sSL -o tools/uber-apk-signer.jar      https://github.com/patrickfav/uber-apk-signer/releases/…
+bash patch/build.sh
+```
+
+La clé de signature vit dans `keys/` (jamais versionnée, à sauvegarder ailleurs). Son **mot de passe
+n'est pas dans le dépôt** — celui-ci est public, et une clé dont le mot de passe circule permet à
+n'importe qui de signer un APK qu'Android acceptera comme une mise à jour de Twouich.
+`patch/build.sh` le lit dans `keys/keystore.properties` (ignoré par git) :
+
+```properties
+keyAlias=twouich-dev
+storePassword=<le mot de passe de la clé>
+```
+
+Sans ce fichier (ni `KEY_PASS` dans l'environnement), le script s'arrête **avant** de construire.
+
+La chaîne est **rejouable et idempotente** :
+
+```
+APK upstream vérifié par SHA-256 → apktool d → patch/patch.py → apktool b → zipalign → signature v1+v2+v3 → dist/
+````patch.py` **échoue bruyamment** si un motif attendu a changé : c'est ce qui permet de constater immédiatement qu'une nouvelle beta upstream demande d'adapter les patchs.
+
+Les règles de nettoyage des playlists et l'identité visuelle sont couvertes par des tests
+exécutables sans appareil :
+
+```bash
+python patch/tests/test_sanitizer.py      # 22 assertions (miroir Python du smali)
+python patch/tests/test_smali_branches.py # 9 assertions (branchements reels du smali)
+python patch/tests/test_brand.py          # 14 assertions (assets de marque, rouge mort, zone sure,
+                                          #   captures du tutoriel remappees)
+python patch/tests/test_apk.py            # 9 verdicts sur l'APK livre (a lancer apres build.sh)
+```
+
+### Changer l'identité visuelle
+
+```bash
+python patch/branding/make_brand.py preview          # les 3 pistes, rendues avec leurs vrais assets
+python patch/branding/make_brand.py emit --variant B # B = noir Twitch, C = degrade + monogramme
+bash patch/build.sh                                  # les assets de marque sont reposés dans l'APK
+```
+
+Tout le visuel de marque vient de ce seul fichier (mot-symbole, tagline, palette, composition) :
+aucune image n'est retouchée à la main. `patch/branding/assets/` est versionné, donc le build
+produit le même APK même sans les polices Windows.
+
+| Élément | Rôle |
+|---|---|
+| `patch/patch.py` | greffon anti-pub, identité visuelle, repointage de l'updater, bump de version (tous les patchs, en un endroit) |
+| `patch/branding/make_brand.py` | identité visuelle : les 3 pistes, les assets Android (`patch/branding/assets/`), l'aperçu HTML |
+| `patch/smali/com/twouich/adblock/` | `AdBlockDataSource` (source de données ExoPlayer) + `PlaylistSanitizer` (nettoyage m3u8) + `SelfTest` (self-test embarqué) |
+| `patch/test-selftest.sh` | self-test anti-pub de bout en bout sur l'appareil, verdict en une commande |
+| `patch/build.sh` | chaîne complète, de l'APK upstream à l'APK signé |
+| `keys/twouich.keystore` | **clé de signature — jamais versionnée, à sauvegarder** (sans elle, plus aucune mise à jour possible) |
+| `AUDIT.md` | audit complet du dépôt et de l'APK, registre des obsolescences |
+
+## Passer à une nouvelle version upstream
+
+1. Mettre à jour `UPSTREAM_URL` **et** le `SHA-256` attendus dans `patch/build.sh` ;
+2. supprimer `work/decoded` pour forcer un désassemblage neuf ;
+3. `bash patch/build.sh` — si `patch.py` signale un motif introuvable, adapter le patch concerne ;
+4. incrémenter `VERSION_CODE` / `VERSION_NAME` dans `patch/build.sh`, publier la release **avec le
+   même tag que `VERSION_NAME`**, puis mettre `update.json` à jour (le nom d'APK doit correspondre
+   exactement à l'asset téléversé).
+
+## Licence et attribution
+
+L'app modifiée est distribuée **telle quelle, sans garantie**, pour un **usage personnel** : le
+code d'origine est closed-source, ce dépôt ne contient donc que des patchs et des binaires signés
+par nous. Détails et crédits : [`CREDITS.md`](CREDITS.md).

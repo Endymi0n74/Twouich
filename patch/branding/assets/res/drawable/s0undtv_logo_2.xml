@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par patch/branding/make_brand.py — identité Twouich -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="315"
+                android:type="linear"
+                android:startColor="#9146ff"
+                android:endColor="#150826" />
+        </shape>
+    </item>
+    <item>
+        <bitmap android:gravity="center" android:src="@drawable/twouich_wordmark" />
+    </item>
+</layer-list>
