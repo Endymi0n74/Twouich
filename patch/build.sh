@@ -44,8 +44,8 @@ if [ -z "$KEY_PASS" ]; then
     exit 1
 fi
 
-VERSION_CODE=145
-VERSION_NAME="v1.5.10x-twouich1"
+VERSION_CODE=146
+VERSION_NAME="v1.5.10x-twouich2"
 APK_NAME="Twouich_beta144_ttv1.apk"
 
 echo "═══════════════════════════════════════════════"
@@ -69,6 +69,17 @@ echo "$UPSTREAM_SHA256  $UPSTREAM_APK" | sha256sum -c - >/dev/null \
 echo "✅ APK upstream conforme (SHA-256)"
 
 # ── 2. Désassemblage ──
+# L'arbre est réutilisé d'un build à l'autre (le désassemblage coûte cher), mais un
+# bump de version le rend incohérent : les artefacts qu'il contient déjà portent la
+# version précédente — le journal embarqué en tête, que patch.py refuse alors de
+# réécrire (et il a raison : mieux vaut échouer que livrer un APK dont la page
+# « Nouveautés » cite une autre version). On redésassemble dès que la version du
+# script n'est plus celle de l'arbre, pour que « bump puis rebuild » marche seul.
+DECODED_VERSION="$(sed -n 's/^ *versionName: //p' "$DECODED/apktool.yml" 2>/dev/null | head -1)"
+if [ -f "$DECODED/apktool.yml" ] && [ "$DECODED_VERSION" != "$VERSION_NAME" ]; then
+    echo "♻️  Arbre en $DECODED_VERSION ≠ $VERSION_NAME → désassemblage neuf"
+    rm -rf "$DECODED"
+fi
 if [ ! -f "$DECODED/apktool.yml" ]; then
     echo "📦 apktool d…"
     java -jar "$APKTOOL" d -f -o "$DECODED" "$UPSTREAM_APK" >/dev/null

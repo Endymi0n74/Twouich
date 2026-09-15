@@ -18,17 +18,28 @@ Ce fichier vérifie donc l'artefact :
   * aucune chaîne d'affichage « S0undTV » ne subsiste dans les ressources ni dans
     le manifeste — c'est ce que voit l'utilisateur, quelle que soit l'encodage ;
   * les pages embarquées sont réécrites ;
-  * l'APK est signé (v1+v2+v3) et zipaligné (l'empreinte du livrable est affichée).
+  * l'APK est signé (v1+v2+v3) et zipaligné (l'empreinte du livrable est affichée) ;
+  * **le livrable est celui que l'app ira chercher** : son versionCode / versionName
+    et son nom de fichier sont confrontés à `update.json`, qui est la seule source
+    dont dispose l'updater. Un décalage entre les deux ne casse rien visiblement —
+    l'app annonce une version, télécharge une URL qui n'existe pas, et reste sur
+    place.
 
     python patch/tests/test_apk.py                       # dist/Twouich_beta144_ttv1.apk
     python patch/tests/test_apk.py --apk dist/autre.apk
+
+Contrôle négatif (l'artefact d'origine doit être refusé) :
+
+    python patch/tests/test_apk.py --apk work/upstream/beta_144.apk
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import io
+import json
 import pathlib
+import struct
 import sys
 import zipfile
 
@@ -59,6 +70,83 @@ def check(name: str, condition: bool, detail: str = "") -> bool:
 def holds(blob: bytes, text: str) -> bool:
     """Le texte est-il présent, quel que soit l'encodage du pool de chaînes ?"""
     return text.encode("utf-8") in blob or text.encode("utf-16-le") in blob
+
+
+def _axml_strings(buf: bytes, base: int) -> list[str]:
+    """Pool de chaînes d'un chunk AXML (les longueurs UTF-8 sont en deux temps)."""
+    _type, hsz, _size, count, _styles, flags, str_start, _style_start = struct.unpack_from(
+        "<HHIIIIII", buf, base
+    )
+    offsets = struct.unpack_from(f"<{count}I", buf, base + hsz)
+    utf8 = bool(flags & 0x100)
+    out: list[str] = []
+    for off in offsets:
+        pos = base + str_start + off
+        if utf8:
+            n = buf[pos]
+            pos += 1
+            if n & 0x80:
+                n = ((n & 0x7F) << 8) | buf[pos]
+                pos += 1
+            # seconde longueur : taille en octets de la chaîne encodée
+            size = buf[pos]
+            pos += 1
+            if size & 0x80:
+                size = ((size & 0x7F) << 8) | buf[pos]
+                pos += 1
+            out.append(buf[pos:pos + size].decode("utf-8", "replace"))
+        else:
+            n = struct.unpack_from("<H", buf, pos)[0]
+            pos += 2
+            if n & 0x8000:
+                n = ((n & 0x7FFF) << 16) | struct.unpack_from("<H", buf, pos)[0]
+                pos += 2
+            out.append(buf[pos:pos + 2 * n].decode("utf-16-le", "replace"))
+    return out
+
+
+def manifest_version(axml: bytes) -> tuple[int | None, str | None]:
+    """versionCode / versionName lus dans l'AndroidManifest **binaire** de l'APK.
+
+    Pourquoi à la main : le versionCode n'existe nulle part ailleurs que dans ce
+    binaire (il n'est pas dans le pool de chaînes), et une machine qui vérifie le
+    livrable n'a ni aapt2 ni apktool sous la main. Le format AXML est simple : un
+    pool de chaînes, puis des chunks d'éléments dont les attributs portent une
+    valeur typée.
+    """
+    strings: list[str] = []
+    pos = 8  # en-tête du fichier (type, headerSize, size)
+    while pos + 8 <= len(axml):
+        ctype, _hsz, csize = struct.unpack_from("<HHI", axml, pos)
+        if csize <= 0:
+            break
+        if ctype == 0x0001:  # RES_STRING_POOL_TYPE
+            strings = _axml_strings(axml, pos)
+        elif ctype == 0x0102 and strings:  # RES_XML_START_ELEMENT_TYPE
+            # en-tête de nœud (16 o) puis ResXMLTree_attrExt
+            name_idx = struct.unpack_from("<I", axml, pos + 20)[0]
+            if name_idx < len(strings) and strings[name_idx] == "manifest":
+                attr_start, attr_size, attr_count = struct.unpack_from("<HHH", axml, pos + 24)
+                found: dict[str, object] = {}
+                for i in range(attr_count):
+                    off = pos + 16 + attr_start + i * attr_size
+                    # off pointe sur l'attribut (ns, name, rawValue, size, res0, type, data)
+                    a_name, a_raw, _sz, _res, a_type, a_data = struct.unpack_from(
+                        "<IIHBBI", axml, off + 4
+                    )
+                    if a_name >= len(strings):
+                        continue
+                    key = strings[a_name]
+                    if key == "versionCode":
+                        found["code"] = a_data
+                    elif key == "versionName":
+                        if a_type == 0x03 and a_raw < len(strings):
+                            found["name"] = strings[a_raw]
+                        elif a_data < len(strings):
+                            found["name"] = strings[a_data]
+                return found.get("code"), found.get("name")  # type: ignore[return-value]
+        pos += csize
+    return None, None
 
 
 def main() -> int:
@@ -133,6 +221,30 @@ def main() -> int:
         #    blocs v1/v2/v3 (les .SF/.RSA du schéma v1, l'APK Signing Block sinon).
         v1 = any(n.startswith("META-INF/") and n.endswith((".SF", ".RSA", ".DSA")) for n in names)
         ok &= check("signature v1 (JAR) présente", v1)
+
+        # 6. L'identité de version du livrable, telle que l'app la lira.
+        code, name = manifest_version(manifest)
+        ok &= check("versionCode / versionName lisibles dans le manifeste",
+                    isinstance(code, int) and bool(name), f"lu : {code} / {name}")
+        print(f"   → versionCode {code}, versionName {name}")
+
+    # 7. Cohérence avec `update.json`, mais seulement pour le livrable : c'est lui
+    #    que l'app interroge avant de télécharger, et l'URL qu'elle construit est
+    #    `releases/download/<VersionName>/<APK>`. Un artefact quelconque (l'APK
+    #    upstream, une version précédente) n'a pas à y figurer.
+    if apk.name == DEFAULT_APK.name and isinstance(code, int) and name:
+        update = json.loads((ROOT / "update.json").read_text(encoding="utf-8"))
+        stable = [e for e in update if e.get("ReleaseType") == 0]
+        ok &= check("update.json : une seule entrée stable", len(stable) == 1,
+                    f"{len(stable)} entrées de type stable")
+        if len(stable) == 1:
+            entry = stable[0]
+            ok &= check("update.json décrit ce livrable",
+                        entry.get("VersionCode") == code and entry.get("VersionName") == name,
+                        f"update.json={entry.get('VersionCode')}/{entry.get('VersionName')} "
+                        f"≠ livrable {code}/{name}")
+            ok &= check("update.json annonce ce fichier-ci", entry.get("APK") == apk.name,
+                        f"update.json={entry.get('APK')} ≠ {apk.name}")
 
     sha = hashlib.sha256(apk.read_bytes()).hexdigest()
     print(f"\nempreinte : {sha}")

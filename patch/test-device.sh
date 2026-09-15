@@ -36,8 +36,17 @@ SELF_DIR="$(dirname "${BASH_SOURCE[0]}")"
 cd "$ROOT"
 
 PKG="com.s0und.s0undtv"
-EXPECTED_VERSION="v1.5.10x-twouich1"
-APK="dist/Twouich_beta144_ttv1.apk"
+# Les valeurs figées (version, nom du livrable) vivent dans patch/build.sh et nulle
+# part ailleurs : on les y lit, sinon chaque bump de version ferait échouer ce
+# harnais pour une mauvaise raison.
+VERSION_NAME="$(sed -n 's/^VERSION_NAME="\(.*\)"$/\1/p' patch/build.sh | head -1)"
+APK_NAME="$(sed -n 's/^APK_NAME="\(.*\)"$/\1/p' patch/build.sh | head -1)"
+if [ -z "$VERSION_NAME" ] || [ -z "$APK_NAME" ]; then
+    echo "❌ VERSION_NAME / APK_NAME illisibles dans patch/build.sh"
+    exit 1
+fi
+EXPECTED_VERSION="$VERSION_NAME"
+APK="dist/$APK_NAME"
 LOG_DIR="work/device-test"
 FILTER="Twouich:V ExoPlayerImpl:W ExoPlayerImplInternal:W HlsMediaSource:W Loader:W MediaCodec:W MediaDrm:W AndroidRuntime:E *:S"
 

@@ -47,7 +47,7 @@ echo ""
 echo "═══════════════════════════════════════════════════════════════════════"
 if [ "$CLEANED" -eq 0 ]; then
     echo "  ❓ AUCUNE playlist nettoyée : le lecteur n'est pas passé par le filtre."
-    echo "     → vérifie que la version installée est bien la nôtre (versionName v1.5.10x-twouich1)"
+    echo "     → vérifie que la version installée est bien celle du dépôt (patch/build.sh, VERSION_NAME)"
     echo "     → relance une capture : adb logcat -v time -s Twouich:V *:S"
 elif [ "$CUTS" -eq 0 ]; then
     echo "  ⚠️  Le filtre tourne mais n'a rien retiré."

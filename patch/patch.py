@@ -7,11 +7,12 @@ casse rien) et *échoue bruyamment* si un motif attendu a disparu, pour qu'un
 changement en amont (nouvelle beta) ne passe jamais inaperçu.
 
 Usage:
-    python patch.py --decoded work/decoded [--version-code 145 --version-name v1.5.10x-twouich1]
+    python patch.py --decoded work/decoded [--version-code 146 --version-name v1.5.10x-twouich2]
 """
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import pathlib
 import re
@@ -118,8 +119,10 @@ ABOUT_NEW = """<body>
 
 CHANGELOG_OLD = """    <hr>
     <h1>beta_144 (2025.12.28)</h1>"""
+# Le titre porte la version réellement construite (passée par build.sh) : la page
+# « Nouveautés » de l'app cite donc la release d'où vient le build, pas celle d'avant.
 CHANGELOG_NEW = """    <hr>
-    <h1>Twouich v1.5.10x-twouich1 (2026.09.15)</h1>
+    <h1>Twouich {version} ({date})</h1>
     <p class="spacing">build du dépôt https://github.com/Endymi0n74/Twouich</p>
 
     <h3>Identité</h3>
@@ -243,7 +246,7 @@ def replace_in_style(path: pathlib.Path, style: str, old: str, new: str, what: s
     return True
 
 
-def install_branding(decoded: pathlib.Path, here: pathlib.Path) -> dict[str, str]:
+def install_branding(decoded: pathlib.Path, here: pathlib.Path, version_name: str) -> dict[str, str]:
     print("[2/5] Identité Twouich (écran de démarrage, icônes, bannière, nom)")
     res = here / BRAND_RES
     if not (here / BRAND_JSON).is_file() or not res.is_dir():
@@ -309,7 +312,12 @@ def install_branding(decoded: pathlib.Path, here: pathlib.Path) -> dict[str, str
     replace_once(about, "background-color: #a30f2d00;", "background-color: #0e0e10;",
                  "page À propos : fond")
     changelog = decoded / "assets" / "S0undTV_changelog.html"
-    replace_once(changelog, CHANGELOG_OLD, CHANGELOG_NEW, "page Nouveautés : entrée Twouich")
+    replace_once(
+        changelog,
+        CHANGELOG_OLD,
+        CHANGELOG_NEW.format(version=version_name, date=datetime.date.today().strftime("%Y.%m.%d")),
+        "page Nouveautés : entrée Twouich",
+    )
     replace_once(changelog, "background-color: #a30f2d;", "background-color: #0e0e10;",
                  "page Nouveautés : fond rouge → sombre")
     return brand
@@ -428,8 +436,8 @@ def main() -> int:
     here = pathlib.Path(__file__).resolve().parent
     parser = argparse.ArgumentParser()
     parser.add_argument("--decoded", required=True, type=pathlib.Path)
-    parser.add_argument("--version-code", type=int, default=145)
-    parser.add_argument("--version-name", default="v1.5.10x-twouich1")
+    parser.add_argument("--version-code", type=int, default=146)
+    parser.add_argument("--version-name", default="v1.5.10x-twouich2")
     parser.add_argument("--apk-name", default=DEFAULT_APK_NAME)
     args = parser.parse_args()
 
@@ -438,7 +446,7 @@ def main() -> int:
         fail(f"arbre apktool invalide : {decoded}")
 
     install_graft(decoded, here)
-    brand = install_branding(decoded, here)
+    brand = install_branding(decoded, here, args.version_name)
     install_selftest(decoded)
     repoint_updater(decoded, args.apk_name)
     bump_version(decoded, args.version_code, args.version_name)
