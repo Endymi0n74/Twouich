@@ -1,5 +1,32 @@
 # Journal des modifications — Twouich
 
+## v1.5.10x-twouich2 (versionCode 146) — 15 septembre 2026
+
+Même application que `v1.5.10x-twouich1`, **version incrémentée** pour une seule raison : valider le
+parcours de mise à jour automatique sur un appareil réel. Un updater ne s'exécute jamais tant qu'il
+n'y a rien de plus récent à installer.
+
+### Vérifié
+
+- **Mise à jour automatique, de bout en bout** : une app installée en 145 a ouvert seule son écran
+  de mise à jour, téléchargé `releases/download/v1.5.10x-twouich2/Twouich_beta144_ttv1.apk`, passé
+  l'APK au système, et l'appareil est passé en 146. Les **octets installés** ont le SHA-256 du
+  livrable publié (`7f3125d4…`) — ce n'est pas « une » mise à jour, c'est *notre* fichier.
+- **Deux défauts d'origine de l'updater**, découverts par ce test : le **canal Beta** n'accepte que
+  les entrées `ReleaseType: 1` (donc une entrée stable n'y produit aucun dialogue — la plupart des
+  installations héritées sont en Beta), et la comparaison de version se fait contre un **plancher
+  figé (144)** au lieu de la version installée (l'app propose d'installer la version qu'elle
+exécute). Détail : `memory.md` § 5.
+
+### Outillage
+
+- `patch/check-release.sh` : la cohérence publication ↔ livrable (`update.json` → tag → assets →
+  **octets servis**) devient une commande, avec contrôle négatif.
+- `patch/tests/test_apk.py` : le livrable est désormais confronté à `update.json` (versionCode et
+  versionName lus dans le manifeste binaire, sans aapt2) — 13 verdicts.
+- `patch/build.sh` : un changement de version provoque un **désassemblage neuf** ; la page
+  « Nouveautés » embarquée cite la version réellement compilée.
+
 ## v1.5.10x-twouich1 (versionCode 145) — 15 septembre 2026
 
 Base : **S0undTV `beta_144`** (release tag `beta`, APK `beta_144.apk`,

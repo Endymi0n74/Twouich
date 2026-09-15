@@ -152,13 +152,40 @@ Ce qui empêche désormais une régression : le générateur d'identité (`patch
 les 31 visuels sont **calculés** — dont les six captures remappées —, jamais retouchés à la main), le
 contrôle de `patch.py` (46 vérifications : assets posés + aucun `#a30f2c` hors palette des thèmes),
 `patch/tests/test_brand.py` (14 assertions, dont « famille rouge S0und absente des visuels »,
-vérifiées par mutation) et `patch/tests/test_apk.py` (9 verdicts sur l'APK livré, avec contrôle
+vérifiées par mutation) et `patch/tests/test_apk.py` (13 verdicts sur l'APK livré, avec contrôle
 négatif sur l'APK d'origine).
+
+### 4.6 Mise à jour automatique — ce que le test sur appareil a révélé
+
+Le parcours complet (dialogue → téléchargement → passage à l'installeur système) a été exécuté le
+15/09/2026 sur `emulator-5554` avec une **release intermédiaire** : app en 145, release 146 publiée,
+l'app s'est mise à jour elle-même, et les octets installés ont le SHA-256 du livrable. Procédure et
+traces : `TEST-DEVICE.md` § 0.2.
+
+Deux défauts **d'origine** (ils précèdent Twouich) que ni la lecture du smali ni les tests locaux
+n'avaient signalés, et que ce test a rendus visibles :
+
+| Défaut | Effet réel | Mesure |
+|---|---|---|
+| `helpers/a.b()` filtre par **canal** avant la version : en canal **Beta**, seule une entrée `ReleaseType: 1` est acceptée | une `update.json` qui ne publie qu'une entrée **stable** ne produit **aucun dialogue** sur ces appareils — et la plupart des installations héritées de S0undTV sont en Beta (même paquet Android, préférence conservée) | deux lancements muets en Beta, dialogue immédiat après passage en Stable |
+| la comparaison de version se fait contre un **plancher figé (144)**, jamais contre la version installée | l'app propose d'installer la version qu'elle exécute déjà, à chaque démarrage | en 146, relance → « New update available! Version code: 146 » |
+
+Conséquence pour la distribution : publier **aussi** une entrée `ReleaseType: 1`, sinon une partie
+de l'audience ne verra jamais les releases. Le détail est en `memory.md` § 5 et § 8.
+
+Un troisième écart, de nature différente, a été constaté au passage : l'**apparence par défaut** de
+l'app est encore rouge. Réglages d'usine : thème « Dark grey (default) » + accent **« Red
+(default) »** (`prefs_accent_color = 0`), et l'accent ne s'applique qu'aux thèmes « Dark grey » et
+« Night mode » — donc à celui par défaut. Mesuré sur l'appareil : commutateur de réglages en
+`#a00f2b` ≈ `theme_red` `#a30f2c`. La refonte a couvert les **assets** (splash, icônes, bannière,
+tutoriel) et les **textes**, pas cette couleur d'interface.
 
 ## 5. Reste à faire (hors périmètre de cette passe)
 
 * **CI GitHub Actions** : rejouer `patch/build.sh` à chaque push (téléchargement de l'APK upstream + apktool + signature éphémère) pour détecter immédiatement une rupture de patch sur une nouvelle beta. Non livrée ici : les URLs des archives d'outils (`apktool`, `uber-apk-signer`) doivent être figées une fois, et je n'ai pas pu valider le workflow sur GitHub depuis cet environnement.
-* ~~**Publication de la release**~~ — **fait le 15/09/2026** : `v1.5.10x-twouich1` (tag identique au `VersionName`) avec `Twouich_beta144_ttv1.apk` (SHA-256 `a80be686…`) + `changelog.html`. Reste : valider le parcours réel de l'updater sur une app installée.
+* ~~**Publication de la release**~~ — **fait le 15/09/2026** : `v1.5.10x-twouich1` (tag identique au `VersionName`) avec `Twouich_beta144_ttv1.apk` (SHA-256 `a80be686…`) + `changelog.html`.
+* ~~**Parcours réel de l'updater**~~ — **fait le 15/09/2026** : release intermédiaire `v1.5.10x-twouich2` (146), app installée en 145 mise à jour par elle-même, octets installés au SHA-256 du livrable (`TEST-DEVICE.md` § 0.2, `memory.md` § 5). Trois suites à ce travail : publier une entrée `ReleaseType: 1` pour les appareils en canal Beta, remplacer le plancher de version figé (144) par la version installée, et traiter l'**accent rouge par défaut** (§ 4.6).
+* **Accent rouge d'usine** : `prefs_accent_color = 0` (« Red (default) ») sur le thème « Dark grey (default) ». Une installation neuve le corrige en passant le défaut à `2` (« A familiar looking shade of purple ») ; les installations **existantes** gardent la valeur enregistrée, donc les repeindre demande de recolorer `theme_red*` — un choix produit, à arbitrer avec le rebranding des captures du README.
 * **Reproductibilité octet pour octet** : deux builds du même arbre produisent un APK dont les **2172 entrées sont identiques au CRC** mais dont le SHA-256 diffère, apktool estampillant les entrées ZIP à l'heure du build. Le hash publié identifie donc le fichier livré, pas la recette ; normaliser l'horodatage ZIP rendrait le build reproductible au sens strict.
 * **Emotes/badges/highlighter** : non concernés par cette passe.
 * ~~**Rebranding**~~ — **fait le 15/09/2026** (voir § 4.5) : nom, écran de démarrage, icônes, bannière TV, icône adaptative, thème par défaut, pages embarquées et **images du tutoriel** portent l'identité Twouich ; plus aucune trace de la marque d'avant, ni en texte, ni en pixel. Reste optionnel : rafraîchir les captures du README (`images/image*.jpg`, prises avant la refonte).
@@ -170,8 +197,10 @@ APK upstream   : beta_144.apk (tag "beta"), 10398408 o
                  SHA-256 578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0
 Patch          : patch/patch.py (idempotent) + patch/smali/com/twouich/adblock/
 Injection      : smali/z3.1/u$b.smali → a() renvoie AdBlockDataSource
-Version produite : versionCode 145 / versionName v1.5.10x-twouich1
+Version produite : versionCode 146 / versionName v1.5.10x-twouich2
 Livrable       : dist/Twouich_beta144_ttv1.apk (signé v1+v2+v3, zipalign vérifié)
-                 11165459 o, SHA-256 a80be68618fb41730db4eef28f3da0c028e89152c000031d50fc63de52c12aa6
-Release publiée : tag v1.5.10x-twouich1 (APK + changelog.html), update.json sur master
+                 11165459 o, SHA-256 7f3125d4c425876b99317f5b202b875672ba0e3572eef51401cd398f0fec6efb
+Releases        : v1.5.10x-twouich1 (145, a80be686…), v1.5.10x-twouich2 (146, 7f3125d4…)
+                  les deux avec APK + changelog.html ; update.json sur master → 146
+Mise à jour     : prouvée sur appareil (TEST-DEVICE.md § 0.2), octets installés = SHA du livrable
 ```

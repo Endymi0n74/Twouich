@@ -40,7 +40,7 @@ avant d'installer Twouich (sinon Android refuse la mise à jour). Tes préféren
 seront donc à refaire une fois.
 
 ```bash
-# 1. Récupérer l'APK (release v1.5.10x-twouich1)
+# 1. Récupérer l'APK (release v1.5.10x-twouich2)
 #    https://github.com/Endymi0n74/Twouich/releases
 # 2. Depuis un PC, avec adb connecté à la box :
 adb uninstall com.s0und.s0undtv || true
@@ -52,6 +52,13 @@ Ou plus simple : télécharger l'APK directement sur la TV (Downloader) puis l'i
 **Mises à jour suivantes** : l'app se met à jour elle-même depuis `update.json` de ce dépôt
 (écran « Mise à jour »). Chaque nouvelle version publiée ici est signée avec la **même clé**, donc
 les mises à jour s'installent normalement — à condition de ne pas désinstaller entre-temps.
+Le parcours complet (dialogue → téléchargement → installeur système → version installée et son
+SHA-256) a été exécuté sur un appareil réel : voir `TEST-DEVICE.md` § 0.2.
+
+⚠️ **Si l'app ne vous propose jamais rien** : vérifiez le **canal de mise à jour**
+(Réglages → General settings → *Update channel*). Sur le canal **Beta**, l'updater n'accepte que les
+entrées marquées `ReleaseType: 1` — une release stable n'y produit aucun dialogue, sans erreur non
+plus. Les installations héritées de S0undTV sont souvent en Beta.
 
 ## Vérifier que le blocage fonctionne
 
@@ -142,7 +149,9 @@ python patch/tests/test_sanitizer.py      # 22 assertions (miroir Python du smal
 python patch/tests/test_smali_branches.py # 9 assertions (branchements reels du smali)
 python patch/tests/test_brand.py          # 14 assertions (assets de marque, rouge mort, zone sure,
                                           #   captures du tutoriel remappees)
-python patch/tests/test_apk.py            # 9 verdicts sur l'APK livre (a lancer apres build.sh)
+python patch/tests/test_apk.py            # 13 verdicts sur l'APK livre (a lancer apres build.sh),
+                                          #   dont l'accord avec update.json
+bash   patch/check-release.sh             # update.json -> tag -> assets -> octets servis
 ```
 
 ### Changer l'identité visuelle
@@ -163,6 +172,7 @@ produit le même APK même sans les polices Windows.
 | `patch/branding/make_brand.py` | identité visuelle : les 3 pistes, les assets Android (`patch/branding/assets/`), l'aperçu HTML |
 | `patch/smali/com/twouich/adblock/` | `AdBlockDataSource` (source de données ExoPlayer) + `PlaylistSanitizer` (nettoyage m3u8) + `SelfTest` (self-test embarqué) |
 | `patch/test-selftest.sh` | self-test anti-pub de bout en bout sur l'appareil, verdict en une commande |
+| `patch/check-release.sh` | la release publiée est-elle bien celle que l'app ira télécharger (tag, assets, octets servis) |
 | `patch/build.sh` | chaîne complète, de l'APK upstream à l'APK signé |
 | `keys/twouich.keystore` | **clé de signature — jamais versionnée, à sauvegarder** (sans elle, plus aucune mise à jour possible) |
 | `AUDIT.md` | audit complet du dépôt et de l'APK, registre des obsolescences |
@@ -170,7 +180,8 @@ produit le même APK même sans les polices Windows.
 ## Passer à une nouvelle version upstream
 
 1. Mettre à jour `UPSTREAM_URL` **et** le `SHA-256` attendus dans `patch/build.sh` ;
-2. supprimer `work/decoded` pour forcer un désassemblage neuf ;
+2. `work/decoded` se désassemble à neuf tout seul dès que la version change ; pour forcer malgré
+   tout, le supprimer ;
 3. `bash patch/build.sh` — si `patch.py` signale un motif introuvable, adapter le patch concerne ;
 4. incrémenter `VERSION_CODE` / `VERSION_NAME` dans `patch/build.sh`, publier la release **avec le
    même tag que `VERSION_NAME`**, puis mettre `update.json` à jour (le nom d'APK doit correspondre

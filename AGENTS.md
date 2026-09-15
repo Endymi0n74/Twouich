@@ -105,9 +105,11 @@ bash patch/build.sh          # APK upstream → apktool d → patch.py → apkto
 python patch/tests/test_sanitizer.py       # 22 assertions : règles de nettoyage (miroir Python)
 python patch/tests/test_smali_branches.py  # 9 assertions : branchements réels du smali
 python patch/tests/test_brand.py           # 14 assertions : identité visuelle (voir plus bas)
-python patch/tests/test_apk.py             # 9 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail)
+python patch/tests/test_apk.py             # 13 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),
+                                           #   dont l'accord avec update.json
 bash   patch/tests/test_analyzer.sh        # 8 verdicts sur captures synthétiques
 bash   patch/test-selftest.sh              # self-test embarqué, sur appareil (voir plus bas)
+bash   patch/check-release.sh              # chaîne update.json → tag → asset → octets servis
 ```
 
 Le self-test embarqué (`patch/smali/com/twouich/adblock/SelfTest.smali`, exécuté par
@@ -167,7 +169,7 @@ Les documents sont **en français**, comme le reste du projet.
 ## 7. Définition de « terminé »
 
 - [ ] `bash patch/build.sh` passe jusqu'à `signature verified [v1, v2, v3]` ;
-- [ ] les 3 tests locaux passent ;
+- [ ] les tests locaux passent (4 suites + `bash patch/check-release.sh` s'il y a une publication) ;
 - [ ] le self-test embarqué passe sur appareil (`bash patch/test-selftest.sh` → `SELFTEST n/n`) ;
 - [ ] si le chemin de lecture est touché : lecture réelle vérifiée sur appareil (flux qui tourne,
       `0 erreur de lecture`), pas seulement « l'app se lance » ;
@@ -187,7 +189,38 @@ Les documents sont **en français**, comme le reste du projet.
 6. annoncer le **SHA-256** de l'APK, et « ce hash identifie le fichier publié, pas la recette » :
    reconstruire le même arbre donne un APK dont les 2172 entrées sont **identiques au CRC** mais dont
    le hash diffère (apktool estampille les entrées ZIP à l'heure du build) ;
-7. vérifier après publication, depuis le dépôt :
-   `curl -sI <asset de la release>` → 302, et `raw.githubusercontent.com/<repo>/master/update.json`
-   → le couple `VersionCode`/`VersionName` publié ;
+7. vérifier la chaîne entière d'une commande — `bash patch/check-release.sh` couvre `update.json`,
+   le tag, les deux assets et les **octets réellement servis** (comparés au livrable local). Il fait
+   aussi contrôle négatif : lancé sur une version inexistante, il doit sortir en 1 ;
 8. rappeler à l'utilisateur de sauvegarder `keys/twouich.keystore` hors du dossier.
+
+### ⚠️ Valider le parcours de mise à jour : la release intermédiaire
+
+L'updater ne s'exécute **jamais** tant qu'il n'y a rien de plus récent à installer. Une release qui
+n'est que la première publication laisse donc tout le chemin (dialogue → téléchargement → passage à
+l'installeur) non prouvé. Pour le fermer :
+
+1. publier une version N (releases ci-dessus) et **installer cet APK sur un appareil** ;
+2. incrémenter à N+1 (`build.sh` — le désassemblage se refait seul quand la version change) et
+   publier N+1 ;
+3. **pousser `update.json` après la release**, jamais avant : l'URL est construite avec le
+   `VersionName` publié, donc un `update.json` en avance fait annoncer une mise à jour pour un
+   asset qui n'existe pas ;
+4. lancer l'app : elle doit ouvrir **son** écran de mise à jour sans qu'on lui demande. Le vérifier
+   par l'activité, pas à l'œil — `dumpsys activity activities | grep mResumedActivity` doit dire
+   `com.s0und.s0undtv/.activities.UpdateActivity` ;
+5. « Install update » → l'app télécharge puis passe l'APK au système :
+   `logcat -s S0undTV_AutoUpdateSrv` montre l'URL exacte, et l'ActivityManager l'intent
+   `content://com.s0und.s0undtv.provider/cache_files/update.apk` vers `PackageInstallerActivity`.
+   Seul geste humain : le « INSTALLER » du système, qu'Android impose ;
+6. comparer les octets **installés** au livrable, pas seulement le numéro de version :
+   `adb shell pm path com.s0und.s0undtv` puis `adb pull` de `base.apk` → `sha256sum` doit égaler
+   celui de `dist/` (et celui de `check-release.sh`). C'est la seule preuve que c'est bien notre
+   fichier qui a atterri sur l'appareil.
+
+**Piège du canal** : `helpers/a.b()` filtre d'abord par canal (`pref_update_channel`). En canal
+**Beta**, seule une entrée `ReleaseType: 1` est acceptée — une `update.json` qui ne publie qu'une
+entrée **stable** n'y produit aucun dialogue, sans erreur nulle part. Les installations héritées de
+S0undTV sont souvent en Beta (même paquet Android, préférence conservée) : si l'app ne dit rien sur
+un appareil, **vérifier le canal** (Réglages → General settings → « Update channel ») avant de
+soupçonner la publication.

@@ -12,12 +12,12 @@ Dernière mise à jour : **15 septembre 2026**.
 
 | Élément | Valeur |
 |---|---|
-| Nom du produit | **Twouich** (`update.json` → `v1.5.10x-twouich1`) |
+| Nom du produit | **Twouich** (`update.json` → `v1.5.10x-twouich2`) |
 | Paquet Android | `com.s0und.s0undtv` — **inchangé volontairement** (sinon les mises à jour ne s'installent plus par-dessus) |
 | Identité visuelle | piste **C** « dégradé + monogramme », générée par `patch/branding/make_brand.py` |
 | Palette | violet Twitch `#9146ff` → `#150826` (dégradé 315°), mot-symbole `#ffffff`, tagline `#e6d8ff` |
 | Base upstream | S0undTV `beta_144.apk`, SHA-256 `578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0` |
-| Version produite | `versionCode 145` / `versionName v1.5.10x-twouich1` |
+| Version produite | `versionCode 146` / `versionName v1.5.10x-twouich2` |
 | Livrable | `dist/Twouich_beta144_ttv1.apk` (signé v1+v2+v3, zipalign vérifié) |
 | Clé de signature | `keys/twouich.keystore`, alias `twouich-dev` — **non versionnée, à sauvegarder hors du dossier** ; mot de passe **hors du dépôt** (`keys/keystore.properties`, ignoré, ou `KEY_PASS`) |
 | Modèle Android minimum | API 23 (Android 6), cible 35 |
@@ -155,8 +155,10 @@ python patch/tests/test_sanitizer.py      # 22 assertions : règles de nettoyage
 python patch/tests/test_smali_branches.py # 9 assertions : branchements réels du smali (pièges Dalvik)
 python patch/tests/test_brand.py          # 14 assertions : identité visuelle (assets, rouge mort, zone sûre,
                                           #   captures du tutoriel remappées)
-python patch/tests/test_apk.py            # 9 verdicts sur l'APK livré (et non sur l'arbre de travail)
+python patch/tests/test_apk.py            # 13 verdicts sur l'APK livré (et non sur l'arbre de travail),
+                                          #   dont l'accord avec update.json
 bash   patch/tests/test_analyzer.sh       # 8 verdicts, sur des captures synthétiques
+bash   patch/check-release.sh             # chaîne update.json → tag → asset → octets servis
 ```
 
 ### Identité visuelle — la preuve, à trois niveaux
@@ -219,6 +221,51 @@ I/Twouich: SELFTEST 18/18 verifications, flux filtre : 328 octets
 À retenir : un smali peut assembler proprement et être rejeté par le vérificateur Dalvik
 (`VerifyError` au chargement de la classe) — une liste d'invoke est limitée à 5 registres, et deux
 paramètres `long` imposent la forme `/range`. C'est la même famille de pièges que §6.
+
+### Mise à jour automatique — la preuve, sur un appareil
+
+L'updater était la dernière chose « vraie sur le papier » : il lit `update.json` sur `master`, en
+tire un tag, télécharge l'asset. Mais rien de ce chemin ne s'exécute tant qu'une version **plus
+récente** n'existe pas en ligne — d'où l'étape « release intermédiaire » du §8 d'`AGENTS.md`.
+
+Rejoué de bout en bout le 15/09/2026 (`emulator-5554`, API 25), app installée en **145** :
+
+| Étape | Preuve relevée |
+|---|---|
+| point de départ | `dumpsys package …` → `versionName=v1.5.10x-twouich1` |
+| release `v1.5.10x-twouich2` (146) publiée + `update.json` à jour | `bash patch/check-release.sh` → chaîne cohérente |
+| l'app ouvre **son** écran de mise à jour, seule, au lancement | `mResumedActivity: com.s0und.s0undtv/.activities.UpdateActivity` ; écran « New update available! Version: v1.5.10x-twouich2 / Version code: 146 » |
+| « Install update » | `S0undTV_AutoUpdateSrv: onStartCommand: …/releases/download/v1.5.10x-twouich2/Twouich_beta144_ttv1.apk` |
+| l'app passe son APK au système | `START … dat=content://com.s0und.s0undtv.provider/cache_files/update.apk typ=application/vnd.android.package-archive … from uid 10066` |
+| installation | `versionCode=146 versionName=v1.5.10x-twouich2`, « Application installée. » |
+| **octets installés** | `pm path` + `pull` → SHA-256 `7f3125d4…` = livrable local = octets servis par la release |
+| l'app tourne sur ces octets | `bash patch/test-selftest.sh --in-app` → `SELFTEST 18/18` |
+
+Le seul geste humain du parcours est le « INSTALLER » du système (Android l'impose) : le
+téléchargement, le choix de l'URL et le lancement de l'installeur sont faits par l'app.
+
+#### Deux comportements que la lecture de code n'a pas montrés
+
+1. **Le canal pèse plus que la version.** `helpers/a.b()` filtre d'abord par **canal**
+   (`pref_update_channel`, « Stable » par défaut). Sur le canal **Beta**, seule une entrée
+   `ReleaseType: 1` est acceptée : une `update.json` qui ne publie qu'une entrée **stable** n'y
+   produit **aucun** dialogue. Cet appareil était sur **Beta** — et c'est le cas attendu de toute
+   installation héritée de S0undTV, puisque le paquet Android est le même et que la préférence
+   survit. Mesuré : deux lancements sans dialogue en Beta, dialogue immédiat après bascule en
+   Stable. **Conséquence produit** : publier aussi une entrée `ReleaseType: 1`, sinon les appareils
+   en Beta ne verront jamais nos releases.
+2. **La comparaison de version est fausse.** `b()` compare la version publiée à un **plancher figé
+   (144)**, jamais à la version installée : l'app propose donc d'installer la version qu'elle
+   exécute déjà. Mesuré : en 146, relance → « New update available! Version code: 146 » de nouveau.
+
+Les deux viennent de l'upstream (ils précèdent Twouich) : consignés ici, pas corrigés en silence.
+
+#### Un piège que ce parcours a révélé
+
+L'updater lit `update.json` sur `master` et construit son URL avec le `VersionName` publié. Si
+`update.json` est poussé **avant** que la release existe, l'app annonce une mise à jour et
+n'installe rien (404 silencieux). L'ordre correct est : construire → publier la release → pousser
+`update.json`. `patch/check-release.sh` vérifie les quatre étages après coup.
 
 ### Sur appareil — `patch/test-device.sh` + `patch/analyze_device_log.sh`
 
@@ -318,14 +365,28 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
    `analyze_device_log.sh`, pour vérifier la tenue pendant un direct entier.
 2. ~~**Publication de la release** `v1.5.10x-twouich1`~~ — **fait le 15/09/2026** : tag exactement
    égal au `VersionName`, APK `Twouich_beta144_ttv1.apk` (SHA-256 `a80be686…`) + `changelog.html`
-   joints. Reste : l'updater ne peut être validé qu'en **installant une release sur l'app installée**
-   (parcours réel du bouton « Mettre à jour »), pas depuis ici.
-3. **CI GitHub Actions** : rejouer `patch/build.sh` à chaque push pour détecter une rupture de patch
+   joints.
+3. ~~**Parcours réel de l'updater**~~ — **fait le 15/09/2026** : release intermédiaire
+   `v1.5.10x-twouich2` (versionCode 146) publiée, app installée en 145 mise à jour **par elle-même**
+   (dialogue ouvert seule, téléchargement, passage à l'installeur système), octets installés
+   identiques au livrable au SHA-256 près (voir §5). Reste, côté produit :
+   - **canal Beta** — publier une entrée `ReleaseType: 1` dans `update.json`, sinon les appareils
+     hérités de S0undTV (canal Beta, comme celui du test) ne voient aucune de nos releases ;
+   - **comparaison de version** — remplacer le plancher figé (144) par la version installée, sans
+     quoi l'app propose sans fin la version qu'elle exécute ;
+   - **accent rouge par défaut** — l'accent d'usine est « Red (default) » : l'app, réglages
+     d'origine, s'affiche encore rouge (constaté sur l'appareil, §5). Une installation neuve
+     corrigerait ça en passant le défaut de `prefs_accent_color` de `0` à `2` (« A familiar looking
+     shade of purple », l'index qui existe déjà) ; pour les installations **déjà** là, il faut
+     recolorer `theme_red*` — c'est un choix, pas une évidence.
+4. **CI GitHub Actions** : rejouer `patch/build.sh` à chaque push pour détecter une rupture de patch
    sur une nouvelle beta (URLs d'outils à figer d'abord).
-4. ~~Rebranding~~ — **fait le 15/09/2026** : nom, écran de démarrage, icônes, bannière TV, icône
+5. ~~Rebranding~~ — **fait le 15/09/2026** : nom, écran de démarrage, icônes, bannière TV, icône
    adaptative, thème par défaut et pages embarquées sont passés à l'identité Twouich (voir §2 et
    §5). Les **images du tutoriel** (`tut_*.webp`) ont été remappées au lieu d'être recapturées (voir
    §2) : plus aucune marque d'avant ne subsiste dans l'APK, ni en texte ni en pixel.
+   **Réserve** : c'est vrai des **images et des textes**, pas encore de l'**apparence par défaut** —
+   l'accent d'usine reste « Red (default) » (voir §8 point 3 et §5).
 
 ## 9. Journal
 
@@ -346,3 +407,8 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
 | 2026-09-15 | Écran de démarrage Twouich **capturé sur l'appareil** pendant un lancement réel ; self-test anti-pub toujours vert sur l'APK reconstruit (18/18, dex frais et app installée). 40 contrôles dans `patch.py`. |
 | 2026-09-15 | **Captures du tutoriel remappées** (6 images, 1920×1080) : les cadres d'annotation et le panneau du thème rouge passent à la palette Twouich — 2,3–36,7 % de rouge → **0,0000 %**, écart de luminance moyen < 1,9/255. Choix explicite : l'émulateur plafonne à 720p, les recapturer aurait flouté des images 1080p pour une mise en page inchangée. 31 assets, 46 contrôles, `test_brand.py` 14 assertions. |
 | 2026-09-15 | Erreur de mesure corrigée en route : ma première quantification du rouge (distance euclidienne, tolérance 45) comptait les pixels presque noirs comme rouges et annonçait 41–57 % — la bonne mesure est le déséquilibre des canaux. Leçon consignée en §6. |
+| 2026-09-15 | **Parcours de mise à jour prouvé sur l'appareil** : release intermédiaire `v1.5.10x-twouich2` (146) publiée, app en 145 mise à jour par elle-même (dialogue ouvert seule → téléchargement de l'URL construite depuis `update.json` → installeur système), octets installés au **SHA-256 du livrable**, self-test 18/18 après coup. Release intermédiaire = la seule façon de valider un updater, désormais étape du §8 d'`AGENTS.md`. |
+| 2026-09-15 | **Deux défauts de l'updater trouvés par ce test**, invisibles en lecture de code : le **canal Beta** n'accepte que les entrées `ReleaseType: 1` (donc notre entrée stable ne produisait aucun dialogue — la plupart des installations héritées sont en Beta), et la comparaison se fait contre un **plancher figé à 144** au lieu de la version installée (l'app propose d'installer la version qu'elle exécute). Consignés, non corrigés en silence. |
+| 2026-09-15 | `test_apk.py` ne confrontait pas le livrable à `update.json` : il lit maintenant le `versionCode`/`versionName` dans le manifeste **binaire** (ni aapt2 ni apktool requis pour vérifier) et exige l'accord avec `update.json` — le trou par lequel un décalage de version passait sans bruit. 13 verdicts. |
+| 2026-09-15 | `patch/check-release.sh` : la vérification de publication (encore manuelle) devient une commande — `update.json` → tag → assets → **octets réellement servis** comparés au livrable local. Contrôle négatif joué (version inexistante → 404 + sortie 1). |
+| 2026-09-15 | Constaté sur l'appareil en passant par ses réglages : thème « Dark grey (default) » + accent **« Red (default) »** → l'app, réglages d'origine, **s'affiche encore rouge** (mesuré `#a00f2b` sur le commutateur). La refonte a couvert les assets et les textes, pas l'accent par défaut. Consigné en §8 (deux correctifs possibles, dont un choix). |

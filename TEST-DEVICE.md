@@ -10,6 +10,7 @@ Trois scripts font tout le travail :
 | `patch/test-selftest.sh` | **verdict déterministe** : rejoue des playlists publicitaires Dans le code compilé, sur l'appareil, sans attendre une coupure (§ 0.1) |
 | `patch/test-device.sh` | trouve `adb`, choisit l'appareil, installe l'APK, lance la capture `logcat` filtrée, puis analyse |
 | `patch/analyze_device_log.sh` | verdict d'une capture existante (utilisable seul) |
+| `patch/check-release.sh` | la release publiée correspond-elle au livrable et à `update.json` (§ 0.2) |
 
 ---
 
@@ -76,6 +77,53 @@ volonté.
 
 Le self-test s'exécute aussi **une fois par démarrage** de l'app (injecté dans `MainApp.onCreate`) :
 une seule ligne si tout va bien, le détail des échecs sinon. Il ne dépend d'aucun réseau.
+
+---
+
+## 0.2 Mise à jour automatique — le parcours réel
+
+Un updater ne se prouve qu'avec quelque chose de plus récent à installer : il faut **publier une
+version N+1** et regarder une app installée en N se mettre à jour elle-même. C'est la seule preuve
+possible : ni les tests locaux, ni la lecture du smali ne l'apportent. La recette complète est au
+§ 8 d'`AGENTS.md` ; voici ce qui a été observé, et à quoi ça doit ressembler.
+
+**Validé le 15/09/2026** (`emulator-5554`, API 25). App installée en **145**
+(`v1.5.10x-twouich1`), release intermédiaire **`v1.5.10x-twouich2`** (146) publiée + `update.json`
+poussé après elle.
+
+| Ce qu'on regarde | Trace attendue |
+|---|---|
+| l'app ouvre **seule** son écran de mise à jour | `dumpsys activity activities` → `mResumedActivity: …/.activities.UpdateActivity` ; à l'écran « New update available! » + `Version: … / Version code: …` |
+| elle télécharge la bonne URL | `adb logcat -s S0undTV_AutoUpdateSrv` → `onStartCommand: https://github.com/<repo>/releases/download/<VersionName>/<APK>` |
+| elle passe son APK au système | ActivityManager → `START … dat=content://com.s0und.s0undtv.provider/cache_files/update.apk typ=application/vnd.android.package-archive … cmp=com.android.packageinstaller/.PackageInstallerActivity from uid <uid de l'app>` |
+| l'installation aboutit | écran système « Voulez-vous installer une mise à jour pour cette application ? Vos données ne seront pas perdues. » puis « Application installée. » |
+| la version installée a changé | `dumpsys package com.s0und.s0undtv` → `versionCode=146 versionName=v1.5.10x-twouich2` |
+| **ce sont nos octets** | `pm path` + `pull` de `base.apk` → SHA-256 égal à `dist/` **et** à celui servi par la release |
+| l'app fonctionne encore | `bash patch/test-selftest.sh --in-app` → `SELFTEST 18/18` |
+
+Le seul geste humain est le « INSTALLER » du système — Android l'impose, l'app ne peut pas
+l'éviter. Choisir l'URL, télécharger, et lancer l'installeur : tout est fait par l'app.
+
+### Deux pièges qui font échouer ce test sans rien casser
+
+1. **Le canal de mise à jour.** `helpers/a.b()` filtre par canal *avant* de regarder la version
+   (`pref_update_channel`). Sur le canal **Beta**, seule une entrée `ReleaseType: 1` est acceptée :
+   une `update.json` qui ne publie qu'une entrée **stable** n'y produit **aucun dialogue**, sans
+   aucune erreur. L'appareil du test était en Beta (cas normal d'une installation héritée de
+   S0undTV : même paquet, donc même préférences) — deux lancements muets, puis dialogue immédiat
+   après passage en Stable (Réglages → General settings → *Update channel*). **Avant de suspecter la
+   publication, lire ce canal.**
+2. **La comparaison de version est fausse en amont.** `b()` compare la version publiée à un plancher
+   figé (144), jamais à la version installée : l'app propose d'installer… la version qu'elle exécute
+   déjà. Une fois en 146, elle redemande 146 au démarrage suivant. C'est un défaut d'origine ; il
+   n'empêche pas le parcours ci-dessus, mais il rend le résultat bruyant.
+
+### Le piège d'ordre, à ne pas inverser
+
+`update.json` doit être poussé **après** la création de la release : l'URL est construite avec le
+`VersionName` publié, donc un `update.json` en avance annonce une mise à jour pour un asset qui
+n'existe pas (404 silencieux côté app). `bash patch/check-release.sh` vérifie l'ensemble après coup,
+y compris les **octets réellement servis** comparés au livrable local.
 
 ---
 
