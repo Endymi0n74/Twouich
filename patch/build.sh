@@ -31,12 +31,13 @@ SIGNER="tools/uber-apk-signer.jar"
 SKIP_SIGNING="${SKIP_SIGNING:-0}"
 
 KEYSTORE="keys/twouich.keystore"
-KEY_ALIAS="twouich-dev"
+KEY_ALIAS="${KEY_ALIAS:-twouich-dev}"
 # Le mot de passe du keystore n'est PAS écrit ici : ce dépôt est public, et une
 # clé de signature dont le mot de passe est public permet à n'importe qui de
-# signer un APK qu'Android acceptera comme une mise à jour de Twouich. Il vient de
-# l'environnement (`KEY_PASS=…`) ou de `keys/keystore.properties` (ignoré par git).
-KEY_PASS=""
+# signer un APK qu'Android acceptera comme une mise à jour de Twouich. Il vient
+# de l'environnement (`KEY_PASS=…` — mode CI), sinon de `keys/keystore.properties`
+# (ignoré par git, machine du mainteneur).
+KEY_PASS="${KEY_PASS:-}"
 KEY_PROPS="keys/keystore.properties"
 if [ -z "$KEY_PASS" ] && [ -f "$KEY_PROPS" ]; then
     _alias="$(sed -n 's/^keyAlias=//p' "$KEY_PROPS" | head -1)"
