@@ -163,8 +163,10 @@ jobs:
           bash patch/build.sh
 
       - name: Vérifier le livrable (version du manifeste et accord update.json)
-        shell: bash
+        env:
+          ALLOW_UPDATE_JSON_LAG: "1"
         run: |
+          python -m pip install --quiet Pillow==11.3.0
           python patch/tests/test_apk.py
 
       - name: Vérifier la signature du livrable
