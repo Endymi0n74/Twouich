@@ -12,13 +12,13 @@ Dernière mise à jour : **15 septembre 2026**.
 
 | Élément | Valeur |
 |---|---|
-| Nom du produit | **Twouich** (`update.json` → `v1.5.10x-twouich2`) |
+| Nom du produit | **Twouich** (`update.json` → `v1.0.0`) |
 | Paquet Android | `com.s0und.s0undtv` — **inchangé volontairement** (sinon les mises à jour ne s'installent plus par-dessus) |
 | Identité visuelle | piste **C** « dégradé + monogramme », générée par `patch/branding/make_brand.py` |
-| Palette | violet Twitch `#9146ff` → `#150826` (dégradé 315°), mot-symbole `#ffffff`, tagline `#e6d8ff` |
+| Palette | violet profond `#7c22e8` → `#210849` (dégradé 315°), mot-symbole puffy `#ffffff`, tagline `#e6d8ff` |
 | Base upstream | S0undTV `beta_144.apk`, SHA-256 `578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0` |
-| Version produite | `versionCode 146` / `versionName v1.5.10x-twouich2` |
-| Livrable | `dist/Twouich_beta144_ttv1.apk` (signé v1+v2+v3, zipalign vérifié) |
+| Version produite | `versionCode 147` / `versionName v1.0.0` |
+| Livrable | `dist/Twouich_v1.0.0.apk` (signé v1+v2+v3, zipalign vérifié) |
 | Clé de signature | `keys/twouich.keystore`, alias `twouich-dev` — **non versionnée, à sauvegarder hors du dossier** ; mot de passe **hors du dépôt** (`keys/keystore.properties`, ignoré, ou `KEY_PASS`) |
 | Modèle Android minimum | API 23 (Android 6), cible 35 |
 
@@ -259,6 +259,8 @@ téléchargement, le choix de l'URL et le lancement de l'installeur sont faits p
    exécute déjà. Mesuré : en 146, relance → « New update available! Version code: 146 » de nouveau.
 
 Les deux viennent de l'upstream (ils précèdent Twouich) : consignés ici, pas corrigés en silence.
+La **comparaison de version a été corrigée depuis** (v1.0.0 : lecture de la version installée via
+`PackageManager.getPackageInfo()`) ; le canal Beta reste à couvrir côté publication.
 
 #### Un piège que ce parcours a révélé
 
@@ -372,8 +374,10 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
    identiques au livrable au SHA-256 près (voir §5). Reste, côté produit :
    - **canal Beta** — publier une entrée `ReleaseType: 1` dans `update.json`, sinon les appareils
      hérités de S0undTV (canal Beta, comme celui du test) ne voient aucune de nos releases ;
-   - **comparaison de version** — remplacer le plancher figé (144) par la version installée, sans
-     quoi l'app propose sans fin la version qu'elle exécute ;
+   - ~~**comparaison de version** — remplacer le plancher figé (144) par la version installée~~ —
+     **fait le 15/09/2026** : la comparaison lit désormais `PackageManager.getPackageInfo()` et ne
+     propose une mise à jour que si la release est plus récente que la version installée
+     (`test_smali_branches.py` le vérifie sur le code compilé) ;
    - **accent rouge par défaut** — l'accent d'usine est « Red (default) » : l'app, réglages
      d'origine, s'affiche encore rouge (constaté sur l'appareil, §5). Une installation neuve
      corrigerait ça en passant le défaut de `prefs_accent_color` de `0` à `2` (« A familiar looking
@@ -407,7 +411,7 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
 | 2026-09-15 | Écran de démarrage Twouich **capturé sur l'appareil** pendant un lancement réel ; self-test anti-pub toujours vert sur l'APK reconstruit (18/18, dex frais et app installée). 40 contrôles dans `patch.py`. |
 | 2026-09-15 | **Captures du tutoriel remappées** (6 images, 1920×1080) : les cadres d'annotation et le panneau du thème rouge passent à la palette Twouich — 2,3–36,7 % de rouge → **0,0000 %**, écart de luminance moyen < 1,9/255. Choix explicite : l'émulateur plafonne à 720p, les recapturer aurait flouté des images 1080p pour une mise en page inchangée. 31 assets, 46 contrôles, `test_brand.py` 14 assertions. |
 | 2026-09-15 | Erreur de mesure corrigée en route : ma première quantification du rouge (distance euclidienne, tolérance 45) comptait les pixels presque noirs comme rouges et annonçait 41–57 % — la bonne mesure est le déséquilibre des canaux. Leçon consignée en §6. |
-| 2026-09-15 | **Parcours de mise à jour prouvé sur l'appareil** : release intermédiaire `v1.5.10x-twouich2` (146) publiée, app en 145 mise à jour par elle-même (dialogue ouvert seule → téléchargement de l'URL construite depuis `update.json` → installeur système), octets installés au **SHA-256 du livrable**, self-test 18/18 après coup. Release intermédiaire = la seule façon de valider un updater, désormais étape du §8 d'`AGENTS.md`. |
+| 2026-09-15 | **Updater durci** : la comparaison ne repose plus sur le plancher figé 144 ; le code compilé lit désormais `PackageManager.getPackageInfo()` et ne propose une mise à jour que si la release est plus récente que la version installée. |\n| 2026-09-15 | **v1.0.0** : changelog neuf limité aux nouveautés Twouich, lien vers le projet source et crédits ; identité puffy 3D violette générée et livrable `dist/Twouich_v1.0.0.apk` vérifié. |
 | 2026-09-15 | **Deux défauts de l'updater trouvés par ce test**, invisibles en lecture de code : le **canal Beta** n'accepte que les entrées `ReleaseType: 1` (donc notre entrée stable ne produisait aucun dialogue — la plupart des installations héritées sont en Beta), et la comparaison se fait contre un **plancher figé à 144** au lieu de la version installée (l'app propose d'installer la version qu'elle exécute). Consignés, non corrigés en silence. |
 | 2026-09-15 | `test_apk.py` ne confrontait pas le livrable à `update.json` : il lit maintenant le `versionCode`/`versionName` dans le manifeste **binaire** (ni aapt2 ni apktool requis pour vérifier) et exige l'accord avec `update.json` — le trou par lequel un décalage de version passait sans bruit. 13 verdicts. |
 | 2026-09-15 | `patch/check-release.sh` : la vérification de publication (encore manuelle) devient une commande — `update.json` → tag → assets → **octets réellement servis** comparés au livrable local. Contrôle négatif joué (version inexistante → 404 + sortie 1). |

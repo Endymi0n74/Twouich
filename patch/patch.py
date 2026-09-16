@@ -7,7 +7,7 @@ casse rien) et *échoue bruyamment* si un motif attendu a disparu, pour qu'un
 changement en amont (nouvelle beta) ne passe jamais inaperçu.
 
 Usage:
-    python patch.py --decoded work/decoded [--version-code 146 --version-name v1.5.10x-twouich2]
+    python patch.py --decoded work/decoded [--version-code 147 --version-name v1.0.0]
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 REPO = "Endymi0n74/Twouich"
 UPSTREAM = "S0und/S0undTV"
-DEFAULT_APK_NAME = "Twouich_beta144_ttv1.apk"
+DEFAULT_APK_NAME = "Twouich_v1.0.0.apk"
 
 # ── Étape 1 : greffon anti-pub ────────────────────────────────────────────
 GRAFT_DIR = "com/twouich/adblock"
@@ -72,6 +72,37 @@ URL_FILES = [
 ]
 DEAD_UPDATE_URL = "https://share.s0und.cloudns.cl/app-release.apk"
 
+# The upstream updater compared releases to a hard-coded 144, so it repeatedly
+# offered the already-installed build. Read the installed package version instead.
+UPDATE_VERSION_CALL = "    invoke-direct {p0}, Lcom/s0und/s0undtv/helpers/a;->i()I\n\n    move-result v1"
+UPDATE_VERSION_METHOD = """.method private i()I
+    .locals 3
+
+    :try_start_0
+    iget-object v0, p0, Lcom/s0und/s0undtv/helpers/UpdateHelper;->a:Ljava/lang/ref/WeakReference;
+    invoke-virtual {v0}, Ljava/lang/ref/Reference;->get()Ljava/lang/Object;
+    move-result-object v0
+    check-cast v0, Landroid/content/Context;
+    invoke-virtual {v0}, Landroid/content/Context;->getPackageManager()Landroid/content/pm/PackageManager;
+    move-result-object v1
+    invoke-virtual {v0}, Landroid/content/Context;->getPackageName()Ljava/lang/String;
+    move-result-object v2
+    const/4 v0, 0x0
+    invoke-virtual {v1, v2, v0}, Landroid/content/pm/PackageManager;->getPackageInfo(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;
+    move-result-object v0
+    iget v0, v0, Landroid/content/pm/PackageInfo;->versionCode:I
+    return v0
+    :try_end_0
+    .catch Ljava/lang/Exception; {:try_start_0 .. :try_end_0} :catch_0
+
+    :catch_0
+    move-exception v0
+    const/4 v0, -0x1
+    return v0
+.end method
+
+"""
+
 
 # ── Étape 2 : identité visuelle ───────────────────────────────────────────
 # L'arbre `patch/branding/assets/res/` est produit par make_brand.py et recopié
@@ -110,8 +141,10 @@ ABOUT_OLD = """<body>
 ABOUT_NEW = """<body>
     <h1>Twouich</h1>
     <p class="spacing">
-    <b>client: </b>an Android TV client for Twitch — unofficial build, based on S0undTV<br>
-    <b>sources: </b>https://github.com/Endymi0n74/Twouich <br>
+    <b>client: </b>an Android TV client for Twitch<br>
+    <b>sources: </b><a href="https://github.com/Endymi0n74/Twouich">Twouich project</a><br>
+    <b>based on: </b><a href="https://github.com/S0und/S0undTV">the original project</a><br>
+    <b>credits: </b>thanks to the original authors and contributors. This build redistributes only patched binaries and the patches themselves.<br>
     </p>
 
     <hr>
@@ -123,24 +156,20 @@ CHANGELOG_OLD = """    <hr>
 # « Nouveautés » de l'app cite donc la release d'où vient le build, pas celle d'avant.
 CHANGELOG_NEW = """    <hr>
     <h1>Twouich {version} ({date})</h1>
-    <p class="spacing">build du dépôt https://github.com/Endymi0n74/Twouich</p>
+    <p class="spacing">Première release de <a href="https://github.com/Endymi0n74/Twouich">Twouich</a>.</p>
 
-    <h3>Identité</h3>
+    <h3>Ce qui change</h3>
     <ul>
-        <li>écran de démarrage, icônes de lancement et bannière TV aux couleurs Twouich</li>
-        <li>nom affiché : <b>Twouich</b> — le paquet reste <code>com.s0und.s0undtv</code>, ce qui permet de mettre l'app à jour sans la réinstaller</li>
-        <li>thème par défaut violet Twitch au lieu du rouge S0und</li>
+        <li>Blocage des publicités SSAI dans les playlists Twitch avant lecture.</li>
+        <li>Nouvelle identité Twouich : splash, icônes, bannière TV, thème violet et interface revue.</li>
+        <li>Mise à jour automatique depuis les releases Twouich.</li>
     </ul>
 
-    <h3>Anti-publicité</h3>
+    <h3>Source et remerciements</h3>
     <ul>
-        <li>les plages publicitaires Twitch (SSAI : <code>stitched-ad</code>, blocs <code>CUE-OUT</code>/<code>CUE-IN</code>) sont retirées de la playlist avant le lecteur</li>
-        <li>un self-test rejoue des playlists publicitaires réelles à chaque démarrage et publie son verdict dans logcat (tag <code>Twouich</code>)</li>
-    </ul>
-
-    <h3>Mise à jour</h3>
-    <ul>
-        <li>l'updater pointe vers les releases de ce dépôt, plus vers celui de S0und</li>
+        <li>Projet d'origine : <a href="https://github.com/S0und/S0undTV">S0undTV</a>.</li>
+        <li>Merci à ses auteurs et contributeurs pour le travail initial.</li>
+        <li>Ce projet redistribue uniquement des binaires patchés et les patchs associés.</li>
     </ul>
 
     <hr>
@@ -311,16 +340,58 @@ def install_branding(decoded: pathlib.Path, here: pathlib.Path, version_name: st
     replace_once(about, ABOUT_OLD, ABOUT_NEW, "page À propos : en-tête Twouich")
     replace_once(about, "background-color: #a30f2d00;", "background-color: #0e0e10;",
                  "page À propos : fond")
+    # L'ancien contact block contenait le Discord et le test beta. Les crédits
+    # ci-dessus remplacent cette section : ne laissez pas une page de compatibilité
+    # technique devenir une surface de marque ou de support historique.
+    about_text = about.read_text(encoding="utf-8")
+    about_text = re.sub(r"(?m)^\s*<b>discord:.*?\n", "", about_text)
+    about_text = re.sub(r"(?m)^\s*<b>beta:.*?\n", "", about_text)
+    about.write_text(about_text, encoding="utf-8")
+
     changelog = decoded / "assets" / "S0undTV_changelog.html"
-    replace_once(
-        changelog,
-        CHANGELOG_OLD,
-        CHANGELOG_NEW.format(version=version_name, date=datetime.date.today().strftime("%Y.%m.%d")),
-        "page Nouveautés : entrée Twouich",
+    changelog_new = CHANGELOG_NEW.format(
+        version=version_name, date=datetime.date.today().strftime("%Y.%m.%d")
     )
+    if f"<h1>Twouich {version_name}" in changelog.read_text(encoding="utf-8"):
+        log("déjà appliqué : page Nouveautés : entrée Twouich")
+    else:
+        replace_once(
+            changelog,
+            CHANGELOG_OLD,
+            changelog_new,
+            "page Nouveautés : entrée Twouich",
+        )
     replace_once(changelog, "background-color: #a30f2d;", "background-color: #0e0e10;",
                  "page Nouveautés : fond rouge → sombre")
+    # Repartir de zéro signifie réellement supprimer l'historique HTML hérité :
+    # le changelog ne garde que v1.0.0 et le lien de crédits vers le projet source.
+    changelog_text = changelog.read_text(encoding="utf-8")
+    historical = re.search(r"\n\s*<h1>beta_144\b", changelog_text)
+    if historical:
+        changelog_text = changelog_text[:historical.start()] + "\n</body>\n</html>\n"
+    # No inherited support channel or historical invitation survives in the new
+    # page; credits point only to the source project above.
+    changelog_text = re.sub(r"(?im)^.*(?:discord|discord channel|zmNjK2S).*$\n?", "", changelog_text)
+    changelog.write_text(changelog_text, encoding="utf-8")
     return brand
+
+
+def patch_update_version_comparison(decoded: pathlib.Path) -> None:
+    path = decoded / "smali_classes2/com/s0und/s0undtv/helpers/a.smali"
+    text = path.read_text(encoding="utf-8")
+    old = "    const/16 v1, 0x90"
+    if UPDATE_VERSION_CALL in text:
+        log("déjà appliqué : comparaison avec la version installée")
+        return
+    if old not in text:
+        fail("comparaison de version figée introuvable dans helpers/a.smali")
+    text = text.replace(old, UPDATE_VERSION_CALL, 1)
+    marker = ".method b()V\n"
+    if marker not in text:
+        fail("point d'insertion de la méthode de version introuvable")
+    text = text.replace(marker, UPDATE_VERSION_METHOD + marker, 1)
+    path.write_text(text, encoding="utf-8")
+    log("corrigé : l'updater compare désormais la version installée")
 
 
 def repoint_updater(decoded: pathlib.Path, apk_name: str) -> None:
@@ -336,6 +407,8 @@ def repoint_updater(decoded: pathlib.Path, apk_name: str) -> None:
             REPO,
             f"{path.name} : URLs de release",
         )
+
+    patch_update_version_comparison(decoded)
 
     service = decoded / "smali_classes2/com/s0und/s0undtv/service/AutoUpdateService.smali"
     if service.is_file():
@@ -436,8 +509,8 @@ def main() -> int:
     here = pathlib.Path(__file__).resolve().parent
     parser = argparse.ArgumentParser()
     parser.add_argument("--decoded", required=True, type=pathlib.Path)
-    parser.add_argument("--version-code", type=int, default=146)
-    parser.add_argument("--version-name", default="v1.5.10x-twouich2")
+    parser.add_argument("--version-code", type=int, default=147)
+    parser.add_argument("--version-name", default="v1.0.0")
     parser.add_argument("--apk-name", default=DEFAULT_APK_NAME)
     args = parser.parse_args()
 
@@ -462,6 +535,7 @@ def main() -> int:
         (SELFTEST_PATH, "SelfTest;->run()V"),
         ("smali_classes2/com/s0und/s0undtv/helpers/UpdateHelper.smali", f"raw.githubusercontent.com/{REPO}"),
         ("smali_classes2/com/s0und/s0undtv/helpers/a.smali", f"github.com/{REPO}/releases/download/"),
+        ("smali_classes2/com/s0und/s0undtv/helpers/a.smali", "PackageManager;->getPackageInfo"),
         ("res/values/strings.xml", APP_NAME_NEW),
         ("AndroidManifest.xml", APP_LABEL_NEW),
         ("res/drawable/s0undtv_logo_with_text_2.xml", "@drawable/twouich_splash"),

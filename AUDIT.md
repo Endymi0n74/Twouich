@@ -50,7 +50,7 @@
 |---|---|---|---|
 | 1 | Mise à jour automatique pointant vers `S0und/S0undTV` | **bloquant** : l'app installée proposerait (et tenterait d'installer) le build de S0und, écrasant le nôtre | ✅ corrigé — 5 URLs repointées vers `Endymi0n74/Twouich` (`patch/patch.py`) |
 | 2 | `AutoUpdateService` → `share.s0und.cloudns.cl` | **mort** (ancien backend, domaine abandonné) | ✅ corrigé — repointé sur `…/Twouich/releases/latest/download/<apk>` |
-| 3 | `update.json` décrivant les APK de S0und | obsolète/incohérent dans notre dépôt | ✅ réécrit — une seule entrée, la nôtre (versionCode 145, tag `v1.5.10x-twouich1`) |
+| 3 | `update.json` décrivant les APK de S0und | obsolète/incohérent dans notre dépôt | ✅ réécrit — une seule entrée, la nôtre (versionCode 147, tag `v1.0.0`) |
 | 4 | `README.md` copié de l'upstream (identité, liens, installation `bit.ly/S0und-TV`) | mensonger / trompeur | ✅ réécrit (`README.md` Twouich) |
 | 5 | `FUNDING.yml` → PayPal de S0und | détournement de dons | ✅ neutralisé |
 | 6 | Aucune release, aucune CI, aucune licence/attribution | dépôt inutilisable en l'état | ✅ release documentée + `CREDITS.md` ; CI laissée en suspens (voir §5) |
@@ -170,6 +170,10 @@ n'avaient signalés, et que ce test a rendus visibles :
 | `helpers/a.b()` filtre par **canal** avant la version : en canal **Beta**, seule une entrée `ReleaseType: 1` est acceptée | une `update.json` qui ne publie qu'une entrée **stable** ne produit **aucun dialogue** sur ces appareils — et la plupart des installations héritées de S0undTV sont en Beta (même paquet Android, préférence conservée) | deux lancements muets en Beta, dialogue immédiat après passage en Stable |
 | la comparaison de version se fait contre un **plancher figé (144)**, jamais contre la version installée | l'app propose d'installer la version qu'elle exécute déjà, à chaque démarrage | en 146, relance → « New update available! Version code: 146 » |
 
+Premier défaut : **corrigé depuis** — la v1.0.0 compare la release à la version réellement
+installée (`PackageManager.getPackageInfo()`), vérifié par `test_smali_branches.py` sur le code
+compilé. Le canal Beta reste à couvrir côté publication (voir § 5).
+
 Conséquence pour la distribution : publier **aussi** une entrée `ReleaseType: 1`, sinon une partie
 de l'audience ne verra jamais les releases. Le détail est en `memory.md` § 5 et § 8.
 
@@ -184,7 +188,7 @@ tutoriel) et les **textes**, pas cette couleur d'interface.
 
 * **CI GitHub Actions** : rejouer `patch/build.sh` à chaque push (téléchargement de l'APK upstream + apktool + signature éphémère) pour détecter immédiatement une rupture de patch sur une nouvelle beta. Non livrée ici : les URLs des archives d'outils (`apktool`, `uber-apk-signer`) doivent être figées une fois, et je n'ai pas pu valider le workflow sur GitHub depuis cet environnement.
 * ~~**Publication de la release**~~ — **fait le 15/09/2026** : `v1.5.10x-twouich1` (tag identique au `VersionName`) avec `Twouich_beta144_ttv1.apk` (SHA-256 `a80be686…`) + `changelog.html`.
-* ~~**Parcours réel de l'updater**~~ — **fait le 15/09/2026** : release intermédiaire `v1.5.10x-twouich2` (146), app installée en 145 mise à jour par elle-même, octets installés au SHA-256 du livrable (`TEST-DEVICE.md` § 0.2, `memory.md` § 5). Trois suites à ce travail : publier une entrée `ReleaseType: 1` pour les appareils en canal Beta, remplacer le plancher de version figé (144) par la version installée, et traiter l'**accent rouge par défaut** (§ 4.6).
+* ~~**Parcours réel de l'updater**~~ — **fait le 15/09/2026** : release intermédiaire `v1.5.10x-twouich2` (146), app installée en 145 mise à jour par elle-même, octets installés au SHA-256 du livrable (`TEST-DEVICE.md` § 0.2, `memory.md` § 5). Trois suites à ce travail : publier une entrée `ReleaseType: 1` pour les appareils en canal Beta, ~~remplacer le plancher de version figé (144) par la version installée~~ (**fait le 15/09/2026**, v1.0.0 : comparaison via `PackageManager.getPackageInfo()`), et traiter l'**accent rouge par défaut** (§ 4.6).
 * **Accent rouge d'usine** : `prefs_accent_color = 0` (« Red (default) ») sur le thème « Dark grey (default) ». Une installation neuve le corrige en passant le défaut à `2` (« A familiar looking shade of purple ») ; les installations **existantes** gardent la valeur enregistrée, donc les repeindre demande de recolorer `theme_red*` — un choix produit, à arbitrer avec le rebranding des captures du README.
 * **Reproductibilité octet pour octet** : deux builds du même arbre produisent un APK dont les **2172 entrées sont identiques au CRC** mais dont le SHA-256 diffère, apktool estampillant les entrées ZIP à l'heure du build. Le hash publié identifie donc le fichier livré, pas la recette ; normaliser l'horodatage ZIP rendrait le build reproductible au sens strict.
 * **Emotes/badges/highlighter** : non concernés par cette passe.
@@ -197,10 +201,10 @@ APK upstream   : beta_144.apk (tag "beta"), 10398408 o
                  SHA-256 578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0
 Patch          : patch/patch.py (idempotent) + patch/smali/com/twouich/adblock/
 Injection      : smali/z3.1/u$b.smali → a() renvoie AdBlockDataSource
-Version produite : versionCode 146 / versionName v1.5.10x-twouich2
-Livrable       : dist/Twouich_beta144_ttv1.apk (signé v1+v2+v3, zipalign vérifié)
-                 11165459 o, SHA-256 7f3125d4c425876b99317f5b202b875672ba0e3572eef51401cd398f0fec6efb
+Version produite : versionCode 147 / versionName v1.0.0
+Livrable       : dist/Twouich_v1.0.0.apk (signé v1+v2+v3, zipalign vérifié)
+                 11235091 o, SHA-256 8a4874f84a2df1269ab5cf14ab26948613bbe20bb5492af3137e0cf10c4fd656
 Releases        : v1.5.10x-twouich1 (145, a80be686…), v1.5.10x-twouich2 (146, 7f3125d4…)
-                  les deux avec APK + changelog.html ; update.json sur master → 146
+                  les deux avec APK + changelog.html ; update.json sur master → 147 (v1.0.0, non encore publiée)
 Mise à jour     : prouvée sur appareil (TEST-DEVICE.md § 0.2), octets installés = SHA du livrable
 ```

@@ -42,7 +42,7 @@ VERSIONED = ROOT / "patch" / "branding" / "assets"
 
 DEAD_RED = (0xA3, 0x0F, 0x2C)  # #a30f2c, le rouge de S0und
 TOLERANCE = 24                 # somme des écarts par canal
-SAFE = (1280, 720)             # écran le plus petit visé : ce qui est rogné hors de là
+SAFE = (1280, 1080)            # largeur 720p, hauteur native 16:9 du splash puffy
 ICON_SIZES = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 
 spec = importlib.util.spec_from_file_location("make_brand", GENERATOR)
@@ -151,7 +151,7 @@ def main() -> int:
         splash = Image.open(emitted["drawable-nodpi/twouich_splash.png"]).convert("RGBA")
         box = splash.getbbox()
         inside = box[2] - box[0] <= SAFE[0] and box[3] - box[1] <= SAFE[1]
-        ok &= check("splash entier en 720p", inside,
+        ok &= check("splash puffy entier dans le cadre 16:9", inside,
                     f"contenu {box[2] - box[0]}×{box[3] - box[1]} pour {SAFE[0]}×{SAFE[1]}")
         # La composition est centrée sur la largeur (le dessin des lettres est
         # calé sur les chasses, l'encre peut donc être à quelques pixels près).

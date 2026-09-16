@@ -42,7 +42,7 @@ import pathlib
 import sys
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
@@ -51,8 +51,8 @@ for _stream in (sys.stdout, sys.stderr):
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 FONT_DIR = pathlib.Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
 
-WORD_FONT = ("bahnschrift.ttf", "Bold SemiCondensed")
-MONO_FONT = ("bahnschrift.ttf", "Bold")
+WORD_FONT = ("ARLRDBD.TTF", None)  # Arial Rounded MT Bold, matching the supplied puffy reference
+MONO_FONT = ("ARLRDBD.TTF", None)
 TAG_FONT = ("seguisb.ttf", None)
 
 BRAND = "#9146ff"  # violet Twitch
@@ -86,7 +86,7 @@ VARIANTS = {
         "label": "Dégradé + monogramme",
         "idea": "Dégradé violet → noir, monogramme « T » en pastille puis le nom dessous. "
                 "Le plus « produit » : la pastille sert aussi d'icône.",
-        "bg": (BRAND, "#150826"),
+        "bg": ("#7c22e8", "#210849"),
         "word": "#ffffff",
         "tag": "#e6d8ff",
         "tag_alpha": 0.92,
@@ -173,6 +173,20 @@ def fit_size(text: str, spec: tuple[str, str | None], target_width: float,
     return max(8, int(round(reference * target_width / measured)))
 
 
+def puffy_text(draw: ImageDraw.ImageDraw, text: str, f, center_x: float, baseline_y: float,
+               fill, depth: int = 18, tracking: float = 0.0) -> None:
+    """Rendu volumétrique lisible sur TV : ombre, extrusion violette et face claire."""
+    # L'extrusion descend légèrement vers la droite, comme le modèle fourni.
+    for step in range(depth, 0, -1):
+        tracked(draw, text, f, tracking, center_x + step * 0.35,
+                baseline_y + step, (30, 7, 65, 180))
+    # Une bordure douce donne aux glyphes leur volume sans les transformer en contour noir.
+    tracked(draw, text, f, tracking, center_x, baseline_y,
+            fill,)
+    tracked(draw, text, f, tracking, center_x - 1.0, baseline_y - 1.5,
+            (255, 255, 255, 255))
+
+
 def compose_wordmark(variant: str, img: Image.Image, width: int, height: int,
                      tagline: bool = True, blend_tag: bool = True) -> Image.Image:
     """Pose la composition de marque (monogramme, nom, tagline) sur `img`.
@@ -194,18 +208,30 @@ def compose_wordmark(variant: str, img: Image.Image, width: int, height: int,
     if cfg["monogram"]:
         side = height * 0.155
         x0 = width / 2 - side / 2
-        y0 = height * 0.185
+        y0 = height * 0.105
+        # Soft shadow under the raised badge.
+        shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        shadow_draw = ImageDraw.Draw(shadow)
+        shadow_draw.rounded_rectangle([x0 + 10, y0 + 18, x0 + side + 10, y0 + side + 18],
+                                      radius=side * 0.28, fill=(20, 2, 44, 150))
+        img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(max(4, int(side * .04)))))
+        draw = ImageDraw.Draw(img)
         draw.rounded_rectangle([x0, y0, x0 + side, y0 + side], radius=side * 0.28,
                                fill=(255, 255, 255, 255))
         glyph = load(MONO_FONT, int(side * 0.74))
-        draw.text((width / 2, y0 + side * 0.60), "T", font=glyph, fill=base, anchor="mm")
+        # Purple extrusion/highlight on the badge glyph.
+        draw.text((width / 2 + 3, y0 + side * 0.60 + 5), "T", font=glyph,
+                  fill=(55, 13, 112, 210), anchor="mm")
+        draw.text((width / 2 - 1, y0 + side * 0.60 - 1), "T", font=glyph,
+                  fill="#7c22e8", anchor="mm")
         word_base = height * 0.665
-        tag_base = height * 0.815
+        tag_base = height * 0.875
     else:
         word_base = height * 0.575
         tag_base = height * 0.795
 
-    tracked(draw, "TWOUICH", word, word_size * 0.02, width / 2, word_base, cfg["word"])
+    puffy_text(draw, "TWOUICH", word, width / 2, word_base, cfg["word"],
+               depth=max(10, int(height * .018)), tracking=word_size * 0.02)
     if tagline:
         fill = blend(hex_rgb(cfg["tag"]), base, cfg["tag_alpha"]) if blend_tag else cfg["tag"]
         tracked(draw, TAGLINE, tag, tag_size * 0.05, width / 2, tag_base, fill)
@@ -214,7 +240,7 @@ def compose_wordmark(variant: str, img: Image.Image, width: int, height: int,
 
 def render_splash(variant: str, width: int = 1920, height: int = 1080) -> Image.Image:
     """Écran de démarrage : fond de marque + composition complète."""
-    return compose_wordmark(variant, background(width, height, *VARIANTS[variant]["bg"]),
+    return compose_wordmark(variant, background(width, height, *VARIANTS[variant]["bg"]).convert("RGBA"),
                             width, height)
 
 

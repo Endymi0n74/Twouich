@@ -37,7 +37,7 @@ export MSYS2_ARG_CONV_EXCL='*'
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-APK="dist/Twouich_beta144_ttv1.apk"
+APK="dist/Twouich_v1.0.0.apk"
 PKG="com.s0und.s0undtv"
 ACTIVITY="$PKG/com.s0und.s0undtv.activities.FireTVMainActivity"
 REMOTE="/data/local/tmp/twouich-selftest.apk"

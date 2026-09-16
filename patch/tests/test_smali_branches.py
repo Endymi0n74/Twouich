@@ -32,6 +32,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SMALI = HERE.parent / "smali" / "com" / "twouich" / "adblock"
+PATCHER = HERE.parent / "patch.py"
 
 # Opcodes ambigus : leur nom se lit naturellement a l'envers de la semantique
 # Dalvik. On impose l'emploi des formes non ambigues (eqz/nez/ltz/lez).
@@ -146,7 +147,17 @@ def main():
         "SelfTest$Fake.smali doit implementer l'interface DataSource de l'app",
     )
 
-    # --- 8. Le nettoyage doit bien etre atteignable (pas de return avant) -------
+    # --- 8. L'updater doit lire la version installée, pas un plancher figé -----
+    patcher = PATCHER.read_text(encoding="utf-8")
+    check(
+        "Updater : comparaison avec PackageManager",
+        "PackageManager;->getPackageInfo" in patcher
+        and "UPDATE_VERSION_CALL" in patcher
+        and "UPDATE_VERSION_METHOD" in patcher,
+        "le patch doit remplacer le plancher upstream par la version installée",
+    )
+
+    # --- 9. Le nettoyage doit bien etre atteignable (pas de return avant) -------
     body_ok = sanitizer.find(":body_ok")
     is_playlist = sanitizer.find(":is_playlist")
     check(

@@ -19,7 +19,7 @@ Trois scripts font tout le travail :
 Vérifié sur un appareil réel (émulateur BlueStacks, `emulator-5554`, Android 7.1.1 / API 25), avec
 un compte Twitch connecté — session de 4 minutes sur une chaîne en direct :
 
-- installation réussie → `versionName=v1.5.10x-twouich1` lu sur l'appareil ;
+- installation réussie → `versionName=v1.0.0` lu sur l'appareil (versionCode 147) ;
 - **la lecture fonctionne** : 131 nettoyages de playlist média (une toutes les 2 s, c'est le
   rafraîchissement HLS normal), des milliers de lectures de segments, **0 erreur de lecture**,
   aucun `Playback error`, aucun `FATAL EXCEPTION` ;
@@ -116,7 +116,8 @@ l'éviter. Choisir l'URL, télécharger, et lancer l'installeur : tout est fait 
 2. **La comparaison de version est fausse en amont.** `b()` compare la version publiée à un plancher
    figé (144), jamais à la version installée : l'app propose d'installer… la version qu'elle exécute
    déjà. Une fois en 146, elle redemande 146 au démarrage suivant. C'est un défaut d'origine ; il
-   n'empêche pas le parcours ci-dessus, mais il rend le résultat bruyant.
+   n'empêche pas le parcours ci-dessus, mais il rend le résultat bruyant. (**Corrigé depuis la
+   v1.0.0** : la comparaison lit la version installée via `PackageManager.getPackageInfo()`.)
 
 ### Le piège d'ordre, à ne pas inverser
 
@@ -195,8 +196,8 @@ bash patch/test-device.sh --no-install --duration 420   # capture seule, 7 min, 
 | `--analyze <fichier>` | analyse une capture déjà faite |
 | `--apk <chemin>` | tester un autre APK |
 
-Le script : installe `dist/Twouich_beta144_ttv1.apk`, vérifie que la version installée est bien
-`v1.5.10x-twouich1` (et **avertit si ce n'est pas notre build**), vide le tampon `logcat`, puis
+Le script : installe `dist/Twouich_v1.0.0.apk`, vérifie que la version installée est bien
+`v1.0.0` (et **avertit si ce n'est pas notre build**), vide le tampon `logcat`, puis
 capture avec le filtre :
 
 ```

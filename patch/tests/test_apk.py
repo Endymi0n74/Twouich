@@ -25,7 +25,7 @@ Ce fichier vérifie donc l'artefact :
     l'app annonce une version, télécharge une URL qui n'existe pas, et reste sur
     place.
 
-    python patch/tests/test_apk.py                       # dist/Twouich_beta144_ttv1.apk
+    python patch/tests/test_apk.py                       # dist/Twouich_v1.0.0.apk
     python patch/tests/test_apk.py --apk dist/autre.apk
 
 Contrôle négatif (l'artefact d'origine doit être refusé) :
@@ -47,7 +47,7 @@ from PIL import Image
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 GENERATED = ROOT / "patch" / "branding" / "assets" / "res"
-DEFAULT_APK = ROOT / "dist" / "Twouich_beta144_ttv1.apk"
+DEFAULT_APK = ROOT / "dist" / "Twouich_v1.0.0.apk"
 
 # Chaînes d'affichage : ce que l'utilisateur lit à l'écran. Le paquet Android
 # (`com.s0und.s0undtv`) et les URL du journal des modifications gardent
