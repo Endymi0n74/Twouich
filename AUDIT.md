@@ -202,7 +202,7 @@ ces deux rouges, voir § 5.)
   `resources.arsc`.
 * **Reproductibilité octet pour octet** : deux builds du même arbre produisent un APK dont les **2172 entrées sont identiques au CRC** mais dont le SHA-256 diffère, apktool estampillant les entrées ZIP à l'heure du build. Le hash publié identifie donc le fichier livré, pas la recette ; normaliser l'horodatage ZIP rendrait le build reproductible au sens strict.
 * **Emotes/badges/highlighter** : non concernés par cette passe.
-* ~~**Rebranding**~~ — **fait le 15/09/2026** (voir § 4.5) : nom, écran de démarrage, icônes, bannière TV, icône adaptative, thème par défaut, pages embarquées et **images du tutoriel** portent l'identité Twouich ; plus aucune trace de la marque d'avant, ni en texte, ni en pixel. Reste optionnel : rafraîchir les captures du README (`images/image*.jpg`, prises avant la refonte).
+* ~~**Rebranding**~~ — **fait le 15/09/2026** (voir § 4.5) : nom, écran de démarrage, icônes, bannière TV, icône adaptative, thème par défaut, pages embarquées et **images du tutoriel** portent l'identité Twouich ; plus aucune trace de la marque d'avant, ni en texte, ni en pixel. ~~Reste optionnel : rafraîchir les captures du README~~ — **fait le 16/09/2026** : `images/image*.jpg` (prises avant la refonte, plus référencées) retirées ; remplacées par des captures de l'UI v1.0.1 au violet de marque (`accueil-twouich.jpg`, `reglage-accent-twouich.jpg`).
 
 ## 6. Annexe — repères
 
