@@ -37,6 +37,17 @@ un compte Twitch connecté — session de 4 minutes sur une chaîne en direct :
   `S0undTV_AutoUpdateSrv` ne loggue rien (147 = version publiée, rien de plus récent à proposer) ;
   le seul « update » du logcat est la télémétrie Firebase (`update_required:false`, sans rapport).
 
+### Réglage d'accent vérifié en conditions réelles (16/09/2026, v1.0.1)
+
+Pilotage `uiautomator` sur `emulator-5554` : Réglages → General settings → Accent color —
+
+- le réglage affiche **« Twouich »** (l'ancien « Red (default) » n'existe plus, ni en libellé ni
+  dans le dialogue de choix, où « Twouich » est passé en première position) ;
+- choisir **« Blue »** est accepté et persiste (relançant l'app, comme annoncé par le dialogue) :
+  les zones de focus passent au bleu `#004db3` (mesuré au pixel), plus aucun violet ni rouge ;
+- revenir à **« Twouich »** fonctionne de même et persiste après redémarrage complet de l'app —
+  l'appareil est laissé dans cet état.
+
 **Ce que cette session a coûté — et pourquoi elle valait la peine.** Le premier passage sur
 appareil a cassé la lecture : deux erreurs de branchement dans le smali (`if-eqz`/`if-nez` inversés
 et la sémantique Dalvik de `if-gez`/`if-gtz`, qui se lit *à l'envers* de son nom : `if-gez` teste

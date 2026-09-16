@@ -6,10 +6,14 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 
 ![Splash Twouich](images/splash-twouich.jpg)
 
+![Accueil Twouich](images/accueil-twouich.jpg)
+
 ## v1.0.1
 
 - accent par défaut recoloré aux couleurs Twouich : plus de rouge d'origine dans l'interface ;
-- l'accent par défaut s'appelle « Twouich » dans les réglages.
+- l'accent par défaut s'appelle « Twouich » dans les réglages :
+
+![Réglage d'accent](images/reglage-accent-twouich.jpg)
 
 ## v1.0.0
 
