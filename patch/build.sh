@@ -22,6 +22,14 @@ BUILD_DIR="work/build"
 APKTOOL="tools/apktool-3.0.3.jar"
 SIGNER="tools/uber-apk-signer.jar"
 
+# Mode CI : SKIP_SIGNING=1 rejoue la chaîne jusqu'à l'APK NON signé.
+# L'objectif est la détection de rupture (patch.py échoue bruitamment si un motif
+# upstream a changé, apktool b si le smali ne compile plus), pas la production
+# d'un livrable : aucune clé de signature n'est nécessaire, et la CI ne doit
+# JAMAIS en obtenir une — c'est ce qui garantit que seul le mainteneur produit
+# des mises à jour installables par-dessus Twouich.
+SKIP_SIGNING="${SKIP_SIGNING:-0}"
+
 KEYSTORE="keys/twouich.keystore"
 KEY_ALIAS="twouich-dev"
 # Le mot de passe du keystore n'est PAS écrit ici : ce dépôt est public, et une
@@ -35,7 +43,7 @@ if [ -z "$KEY_PASS" ] && [ -f "$KEY_PROPS" ]; then
     [ -n "$_alias" ] && KEY_ALIAS="$_alias"
     KEY_PASS="$(sed -n 's/^storePassword=//p' "$KEY_PROPS" | head -1)"
 fi
-if [ -z "$KEY_PASS" ]; then
+if [ "$SKIP_SIGNING" != "1" ] && [ -z "$KEY_PASS" ]; then
     echo "❌ mot de passe du keystore introuvable."
     echo "   Ce script n'en contient aucun (dépôt public). Créer $KEY_PROPS :"
     echo "     keyAlias=$KEY_ALIAS"
@@ -43,14 +51,6 @@ if [ -z "$KEY_PASS" ]; then
     echo "   ou lancer : KEY_PASS=… bash patch/build.sh"
     exit 1
 fi
-
-# Mode CI : SKIP_SIGNING=1 rejoue la chaîne jusqu'à l'APK NON signé.
-# L'objectif est la détection de rupture (patch.py échoue bruitamment si un motif
-# upstream a changé, apktool b si le smali ne compile plus), pas la production
-# d'un livrable : aucune clé de signature n'est nécessaire, et la CI ne doit
-# JAMAIS en obtenir une — c'est ce qui garantit que seul le mainteneur produit
-# des mises à jour installables par-dessus Twouich.
-SKIP_SIGNING="${SKIP_SIGNING:-0}"
 
 VERSION_CODE=150
 VERSION_NAME="v1.0.3"
