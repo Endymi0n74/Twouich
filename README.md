@@ -8,6 +8,10 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 
 ![Accueil Twouich](images/accueil-twouich.jpg)
 
+## v1.0.2
+
+- les nouvelles installations démarrent sur le canal de mise à jour **Stable** : le socle d'origine (build beta) forçait le canal Beta au premier lancement, ce qui rendait la mise à jour automatique muette tant qu'aucune entrée beta n'était publiée ;
+
 ## v1.0.1
 
 - accent par défaut recoloré aux couleurs Twouich : plus de rouge d'origine dans l'interface ;
@@ -26,10 +30,10 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 
 ## Installation
 
-Télécharger [`Twouich_v1.0.1.apk`](https://github.com/Endymi0n74/Twouich/releases) depuis la release publiée.
+Télécharger [`Twouich_v1.0.2.apk`](https://github.com/Endymi0n74/Twouich/releases) depuis la release publiée.
 
 ```bash
-adb install -r Twouich_v1.0.1.apk
+adb install -r Twouich_v1.0.2.apk
 ```
 
 Le paquet Android technique est conservé pour permettre les mises à jour par-dessus une installation Twouich existante. La signature doit rester la même pour les versions suivantes ; la clé de signature n'est jamais versionnée.
