@@ -218,6 +218,25 @@ def replace_once(path: pathlib.Path, old: str, new: str, what: str) -> bool:
     return True
 
 
+def find_factory(decoded: pathlib.Path) -> pathlib.Path:
+    """Localise la fabrique de sources de données (Lz3/u$b) dans l'arbre décodé.
+
+    apktool place les classes du dex secondaire sous `smali_classes2/`, et le
+    nommage `z3.1`/`z3` varie selon la plateforme/le nombre de dex : le chemin
+    n'est pas supposé, il est localisé — et l'absence reste une erreur bruyante
+    (c'est la détection de rupture, pas une tolérance).
+    """
+    candidates = [
+        decoded / "smali" / "z3.1" / "u$b.smali",  # décoder Windows
+        decoded / "smali" / "z3" / "u$b.smali",    # décodages Linux/CI
+        decoded / "smali_classes2" / "z3" / "u$b.smali",
+    ]
+    for c in candidates:
+        if c.is_file():
+            return c
+    fail("factory ExoPlayer introuvable (z3/u$b.smali) — socle upstream changé ?")
+
+
 def install_graft(decoded: pathlib.Path, here: pathlib.Path) -> None:
     print("[1/5] Greffon anti-pub (AdBlockDataSource + PlaylistSanitizer + self-test)")
     src = here / "smali" / GRAFT_DIR
@@ -229,9 +248,7 @@ def install_graft(decoded: pathlib.Path, here: pathlib.Path) -> None:
         shutil.copy2(f, dst / f.name)
         log(f"copié : {f.name}")
 
-    factory = decoded / "smali" / "z3.1" / "u$b.smali"
-    if not factory.is_file():
-        fail(f"factory ExoPlayer introuvable : {factory}")
+    factory = find_factory(decoded)
     text = factory.read_text(encoding="utf-8")
     if "AdBlockDataSource" in text:
         log("injection déjà présente dans z3/u$b.a()")
@@ -604,8 +621,8 @@ def main() -> int:
 
     print("[5/5] Contrôles")
     checks = 0
-    for rel, needle in [
-        ("smali/z3.1/u$b.smali", "AdBlockDataSource"),
+    for rel_or_marker, needle in [
+        (None, "AdBlockDataSource"),  # fabrique : chemin variable (voir find_factory)
         ("smali_classes2/com/twouich/adblock/AdBlockDataSource.smali", "PROXY_HOST"),
         ("smali_classes2/com/twouich/adblock/PlaylistSanitizer.smali", "stitched-ad"),
         ("smali_classes2/com/twouich/adblock/SelfTest.smali", "SELFTEST"),
@@ -624,9 +641,12 @@ def main() -> int:
         ("assets/S0undTV_about.html", "Twouich"),
         ("assets/S0undTV_changelog.html", "Twouich"),
     ]:
-        path = decoded / rel
+        if rel_or_marker is None:
+            path = find_factory(decoded)
+        else:
+            path = decoded / rel_or_marker
         if not path.is_file() or needle not in path.read_text(encoding="utf-8"):
-            fail(f"contrôle échoué : {needle!r} absent de {rel}")
+            fail(f"contrôle échoué : {needle!r} absent de {path.relative_to(decoded)}")
         checks += 1
     assets = check_brand_assets(decoded, here)
     checks += assets
