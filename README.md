@@ -10,6 +10,10 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 
 ![Accueil Twouich](images/accueil-twouich.jpg)
 
+## v1.0.3
+
+- version de maintenance, publiée pour valider le parcours de mise à jour automatique : aucun changement fonctionnel par rapport à la v1.0.2 ;
+
 ## v1.0.2
 
 - les nouvelles installations démarrent sur le canal de mise à jour **Stable** : le socle d'origine (build beta) forçait le canal Beta au premier lancement, ce qui rendait la mise à jour automatique muette tant qu'aucune entrée beta n'était publiée ;
