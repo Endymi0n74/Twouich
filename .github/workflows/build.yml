@@ -4,17 +4,29 @@ name: build
 # que patch.py attend, ou si le smali ne passe plus le vérificateur Dalvik,
 # ce job passe au rouge AVANT qu'une release ne parte avec le greffon cassé.
 #
-# La chaîne est rejouée SANS clé de signature (SKIP_SIGNING=1) : la CI n'en
-# obtient jamais une, et son verdict porte sur tout ce qui précède la signature
-# (patchs, marque, smali, recompilation). Un job vert ne prouve donc pas la
-# signature — il prouve que la recette s'applique encore sur le socle upstream.
+# Sur un push de branche : chaîne SANS signature (SKIP_SIGNING=1), aucun secret.
+# Sur un tag v* : le job `release` reconstruit, SIGNÉ avec le keystore des
+# secrets chiffrés, publie l'APK + changelog.html sur la release du tag et
+# vérifie sa propre publication (octets servis). `update.json` n'est jamais
+# touché par la CI : son push manuel reste le verrou du moment de l'annonce.
+#
+# Frontière (assumée) : test_brand.py exige les polices Windows du mot-symbole
+# (non redistribuables) et test_apk.py exige un APK signé — tous deux restent
+# des contrôles du mainteneur ; la CI prouve la recette et, sur tag, la
+# reproductibilité signée du livrable.
 
 on:
   push:
     branches: [master]
+    tags: ['v*']
   pull_request:
     branches: [master]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Simuler la release (build signé sans publication)'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -22,6 +34,7 @@ permissions:
 jobs:
   build:
     name: apktool d → patch.py → apktool b (sans signature)
+    if: github.event_name != 'workflow_dispatch' || inputs.dry_run
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -59,8 +72,8 @@ jobs:
           python patch/tests/test_smali_branches.py
           # test_brand.py exige les polices Windows du mot-symbole (ARLRDBD.TTF,
           # non redistribuables) et test_apk.py exige un APK SIGNÉ : tous deux
-          # restent des contrôles de la machine du mainteneur. La CI prouve la
-          # recette (patchs + recompilation), pas les visuels ni la signature.
+          # restent des contrôles du mainteneur. La CI prouve la recette, pas
+          # les visuels ni la signature.
 
       - name: Build CI (sans signature — détection de rupture)
         env:
@@ -84,3 +97,120 @@ jobs:
           path: work/build/twouich_unsigned.apk
           if-no-files-found: ignore
           retention-days: 7
+
+  release:
+    name: build signé + publication (tags v* uniquement)
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17 (apktool + signature)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Outils provisionnés et vérifiés (apktool, uber-apk-signer)
+        shell: bash
+        env:
+          APKTOOL_SHA256: dbf930b076c6b9be08d57c449cacefc3bdd6b71ebd59b3066fc0e1f5b14f9423
+          SIGNER_SHA256: e1299fd6fcf4da527dd53735b56127e8ea922a321128123b9c32d619bba1d835
+        run: |
+          mkdir -p tools
+          curl -sSL --max-time 300 --retry 3 \
+            -o tools/apktool-3.0.3.jar \
+            "https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar"
+          echo "$APKTOOL_SHA256  tools/apktool-3.0.3.jar" | sha256sum -c -
+          curl -sSL --max-time 300 --retry 3 \
+            -o tools/uber-apk-signer.jar \
+            "https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar"
+          echo "$SIGNER_SHA256  tools/uber-apk-signer.jar" | sha256sum -c -
+
+      - name: Patch tests (miroir Python + branchements smali)
+        shell: bash
+        run: |
+          python patch/tests/test_sanitizer.py
+          python patch/tests/test_smali_branches.py
+
+      - name: Restaurer le keystore depuis les secrets chiffrés
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_SHA256: ${{ secrets.KEYSTORE_SHA256 }}
+          KEY_PASS: ${{ secrets.KEYSTORE_PASS }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          mkdir -p keys
+          base64 -d "$KEYSTORE_B64" > keys/twouich.keystore
+          echo "$KEYSTORE_SHA256  keys/twouich.keystore" | sha256sum -c -
+
+      - name: Build signé v1+v2+v3
+        env:
+          KEY_PASS: ${{ secrets.KEYSTORE_PASS }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        shell: bash
+        run: |
+          bash patch/build.sh
+
+      - name: Vérifier le livrable (version du manifeste et accord update.json)
+        shell: bash
+        run: |
+          python patch/tests/test_apk.py
+
+      - name: Vérifier la signature du livrable
+        shell: bash
+        run: |
+          APK_NAME="$(sed -n 's/^APK_NAME=//p' patch/build.sh | head -1 | tr -d '"')"
+          java -jar tools/uber-apk-signer.jar --verify --apks "dist/$APK_NAME"
+
+      - name: Empreinte du livrable
+        shell: bash
+        run: |
+          sha256sum dist/*.apk
+
+      - name: Publier sur la release du tag (APK + changelog.html)
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          VERSION_NAME="$(sed -n 's/^VERSION_NAME=//p' patch/build.sh | head -1 | tr -d '"')"
+          APK_NAME="$(sed -n 's/^APK_NAME=//p' patch/build.sh | head -1 | tr -d '"')"
+          # La release peut ne pas exister encore (tag poussé avant la release) :
+          # la CI la crée avec des notes générées (éditables après coup).
+          if ! gh release view "$VERSION_NAME" --json name --jq .name >/dev/null 2>&1; then
+            gh release create "$VERSION_NAME" --title "Twouich $VERSION_NAME" --generate-notes
+          fi
+          # L'asset prend le nom du fichier local : le changelog doit donc être
+          # copié sous son nom d'asset exact (changelog.html).
+          cp work/decoded/assets/S0undTV_changelog.html /tmp/changelog.html
+          gh release upload "$VERSION_NAME" "dist/$APK_NAME" "/tmp/changelog.html" --clobber
+          gh release view "$VERSION_NAME" --json assets --jq '.assets[].name'
+
+      - name: Vérifier les octets servis (la CI contrôle sa propre publication)
+        if: github.event_name != 'workflow_dispatch'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION_NAME="$(sed -n 's/^VERSION_NAME=//p' patch/build.sh | head -1 | tr -d '"')"
+          APK_NAME="$(sed -n 's/^APK_NAME=//p' patch/build.sh | head -1 | tr -d '"')"
+          curl -sSL --max-time 120 -o /tmp/served.apk \
+            "https://github.com/Endymi0n74/Twouich/releases/download/$VERSION_NAME/$APK_NAME"
+          LOCAL="$(sha256sum dist/$APK_NAME | awk '{print $1}')"
+          SERVED="$(sha256sum /tmp/served.apk | awk '{print $1}')"
+          echo "local  : $LOCAL"
+          echo "servi  : $SERVED"
+          [ "$LOCAL" = "$SERVED" ] || { echo "❌ octets servis ≠ livrable"; exit 1; }
+          echo "✅ octets servis = livrable"

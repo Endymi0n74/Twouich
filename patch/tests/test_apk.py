@@ -38,6 +38,7 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import pathlib
 import struct
 import sys
@@ -243,11 +244,18 @@ def main() -> int:
                     f"{len(stable)} entrées de type stable")
         if len(stable) == 1:
             entry = stable[0]
+            # En CI, sur un tag, update.json ne décrit PAS encore ce livrable :
+            # l'annonce est poussée après la release (sinon 404 silencieux).
+            # ALLOW_UPDATE_JSON_LAG=1 tolère ce décalage voulu, et seulement lui.
+            lag_ok = os.environ.get("ALLOW_UPDATE_JSON_LAG") == "1"
+            if lag_ok:
+                print("   (update.json en retard toléré : ALLOW_UPDATE_JSON_LAG=1)")
             ok &= check("update.json décrit ce livrable",
-                        entry.get("VersionCode") == code and entry.get("VersionName") == name,
+                        lag_ok or (entry.get("VersionCode") == code and entry.get("VersionName") == name),
                         f"update.json={entry.get('VersionCode')}/{entry.get('VersionName')} "
                         f"≠ livrable {code}/{name}")
-            ok &= check("update.json annonce ce fichier-ci", entry.get("APK") == apk.name,
+            ok &= check("update.json annonce ce fichier-ci",
+                        lag_ok or entry.get("APK") == apk.name,
                         f"update.json={entry.get('APK')} ≠ {apk.name}")
 
     sha = hashlib.sha256(apk.read_bytes()).hexdigest()
