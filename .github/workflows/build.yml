@@ -188,6 +188,12 @@ jobs:
         run: |
           VERSION_NAME="$(sed -n 's/^VERSION_NAME=//p' patch/build.sh | head -1 | tr -d '"')"
           APK_NAME="$(sed -n 's/^APK_NAME=//p' patch/build.sh | head -1 | tr -d '"')"
+          # Garde-fou : le tag poussé doit concorder avec la version du build.sh,
+          # sinon on publierait des octets décalés sous un mauvais tag.
+          if [ "${GITHUB_REF_NAME}" != "$VERSION_NAME" ]; then
+            echo "❌ le tag poussé (${GITHUB_REF_NAME}) ne correspond pas au VERSION_NAME de build.sh ($VERSION_NAME)"
+            exit 1
+          fi
           # La release peut ne pas exister encore (tag poussé avant la release) :
           # la CI la crée avec des notes générées (éditables après coup).
           if ! gh release view "$VERSION_NAME" --json name --jq .name >/dev/null 2>&1; then
