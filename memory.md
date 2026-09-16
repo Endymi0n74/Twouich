@@ -404,8 +404,17 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
      sur l'appareil : plus aucun pixel des anciens accents (`#a30f2c`/`#db002c`), le violet
      `#7c22e8` occupe les zones de focus ; le rouge restant à l'écran est du **contenu** des
      chaînes (miniatures, pochettes), pas de l'interface.
-4. **CI GitHub Actions** : rejouer `patch/build.sh` à chaque push pour détecter une rupture de patch
-   sur une nouvelle beta (URLs d'outils à figer d'abord).
+4. ~~**CI GitHub Actions** : rejouer `patch/build.sh` à chaque push~~ — **fait le 16/09/2026** :
+   `.github/workflows/build.yml` (run vert) rejoue la chaîne **sans signature** (`SKIP_SIGNING=1`
+   sur `build.sh`) : tests sanitizer + branches, `apktool d` → `patch.py` → `apktool b`, contrôle
+   des pages embarquées, APK non signé en artefact de diagnostic. Empreinte du jar apktool figée
+   (vérifiée égale au jar local). Limites assumées : `test_brand.py` (polices Windows non
+   redistribuables) et `test_apk.py` (APK signé requis) restent des contrôles du mainteneur.
+   La CI a d'emblée prouvé sa valeur : 4 divergences local/CI trouvées et corrigées (numpy/Pillow
+   manquants, garde-mot-de-passe avant la définition de SKIP_SIGNING, sonde de version tuée par
+   `pipefail` sans arbre décodé, et surtout **chemin de fabrique `z3.1` vs `z3` selon la
+   plateforme** — `find_factory()` localise désormais au lieu de supposer). Livrable v1.0.3
+   régénéré après refactor : 2 173 entrées identiques au CRC, `dist/` restauré aux octets publiés.
 5. ~~Rebranding~~ — **fait le 15/09/2026** : nom, écran de démarrage, icônes, bannière TV, icône
    adaptative, thème par défaut et pages embarquées sont passés à l'identité Twouich (voir §2 et
    §5). Les **images du tutoriel** (`tut_*.webp`) ont été remappées au lieu d'être recapturées (voir
@@ -444,3 +453,4 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
 | 2026-09-16 | **v1.0.2 installée sur la Freebox Pop du foyer (192.168.1.24, Android 10)** : l'ADB réseau n'était pas appairé (dialogue d'autorisation validé à la télécommande) ; la S0undTV officielle beta_144 qui y était a été désinstallée (signature différente) puis Twouich installée — session Twitch à reconnecter une fois. Self-test **18/18** dès le premier lancement, aucune erreur, updater silencieux (149 = dernière). |
 | 2026-09-16 | **Release `v1.0.2` publiée** (tag = VersionName, APK + `changelog.html`), `update.json` poussé après la release, README mis à jour ; `check-release.sh` vert de bout en bout (assets servis 200, SHA-256 servi = livrable). **Décision produit : aucune entrée beta** — releases de test `v1.5.10x-twouich1/2` supprimées et **tous les tags hérités de S0und supprimés** (`beta`, `v1.4`…`v1.5.10x`) : le dépôt GitHub ne montre plus que `v1.0.0/1/2`, aucun vieux numéro de version nulle part. Les installations 147/148 restées en Beta doivent basculer en Stable dans les réglages pour recevoir les mises à jour. |
 | 2026-09-16 | **Release `v1.0.3` (150) publiée** — version de maintenance sans changement fonctionnel, destinée à valider le self-update de l'app 149 installée sur la Freebox. Piège d'asset évité de justesse : le `changelog.html` uploadé d'abord était la copie v1.0.2 d'avant build (remplacé via `gh release upload --clobber`, et un second asset créé à tort par le suffixe `#label` supprimé) ; le `curl` peut ensuite servir un cache CDN périmé — l'API des assets (taille + `updated_at`) fait foi, et `check-release.sh` (« octets servis ») est vert. Observation du self-update **en attente** : la Freebox est repassée `unauthorized` (dialogue ADB à ré-accepter sur l'écran) et la session Twitch y est absente depuis l'installation fraîche — l'updater ne s'exécute qu'après connexion. |
+| 2026-09-16 | **CI GitHub Actions verte** (`.github/workflows/build.yml` + mode `SKIP_SIGNING=1` de `build.sh`) : la chaîne est rejouée sans clé à chaque push. Quatre divergences local/CI corrigées en route — dépendances numpy/Pillow du test de marque, ordre garde-mot-de-passe/définition SKIP_SIGNING, sensibilité `pipefail` de la sonde de version sans arbre décodé, et le chemin de fabrique `z3.1`/`z3` propre au décodage Windows (`find_factory()` localise, échoue bruyamment si absent). Le livrable v1.0.3 reconstruit après refactor reste **identique au CRC** (2 173 entrées) aux octets publiés — la recette est redevenue portable sans changer un seul octet du produit. |
