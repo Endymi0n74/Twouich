@@ -27,6 +27,16 @@ un compte Twitch connecté — session de 4 minutes sur une chaîne en direct :
 - les 4 verdicts de `analyze_device_log.sh` sont testés (pubs retirées / rien retiré / erreurs de
   lecture / aucune playlist).
 
+### Validation fraîche v1.0.0 (16/09/2026, même émulateur)
+
+- désinstallation complète puis installation de `dist/Twouich_v1.0.0.apk` → `versionCode=147
+  versionName=v1.0.0` ;
+- `SELFTEST 18/18` dès le premier lancement (`bash patch/test-selftest.sh --in-app`) ;
+- **updater sans boucle** : 4 lancements consécutifs — l'activité au premier plan reste
+  `FireTVMainActivity` à chaque fois, `UpdateActivity` n'apparaît jamais et
+  `S0undTV_AutoUpdateSrv` ne loggue rien (147 = version publiée, rien de plus récent à proposer) ;
+  le seul « update » du logcat est la télémétrie Firebase (`update_required:false`, sans rapport).
+
 **Ce que cette session a coûté — et pourquoi elle valait la peine.** Le premier passage sur
 appareil a cassé la lecture : deux erreurs de branchement dans le smali (`if-eqz`/`if-nez` inversés
 et la sémantique Dalvik de `if-gez`/`if-gtz`, qui se lit *à l'envers* de son nom : `if-gez` teste

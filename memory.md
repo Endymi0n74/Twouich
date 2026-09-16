@@ -378,19 +378,21 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
      **fait le 15/09/2026** : la comparaison lit désormais `PackageManager.getPackageInfo()` et ne
      propose une mise à jour que si la release est plus récente que la version installée
      (`test_smali_branches.py` le vérifie sur le code compilé) ;
-   - **accent rouge par défaut** — l'accent d'usine est « Red (default) » : l'app, réglages
-     d'origine, s'affiche encore rouge (constaté sur l'appareil, §5). Une installation neuve
-     corrigerait ça en passant le défaut de `prefs_accent_color` de `0` à `2` (« A familiar looking
-     shade of purple », l'index qui existe déjà) ; pour les installations **déjà** là, il faut
-     recolorer `theme_red*` — c'est un choix, pas une évidence.
+   - ~~**accent rouge par défaut**~~ — **fait le 16/09/2026** : la famille `theme_red*` est
+     **repeinte aux couleurs de marque** (`patch.py` étape 4b) plutôt que de déplacer l'index par
+     défaut — l'accent 0 reste celui des installations existantes (préférence sauvegardée), il
+     affiche désormais le violet Twouich, et son libellé de réglages devient « Twouich ». Mesuré
+     sur l'appareil : plus aucun pixel des anciens accents (`#a30f2c`/`#db002c`), le violet
+     `#7c22e8` occupe les zones de focus ; le rouge restant à l'écran est du **contenu** des
+     chaînes (miniatures, pochettes), pas de l'interface.
 4. **CI GitHub Actions** : rejouer `patch/build.sh` à chaque push pour détecter une rupture de patch
    sur une nouvelle beta (URLs d'outils à figer d'abord).
 5. ~~Rebranding~~ — **fait le 15/09/2026** : nom, écran de démarrage, icônes, bannière TV, icône
    adaptative, thème par défaut et pages embarquées sont passés à l'identité Twouich (voir §2 et
    §5). Les **images du tutoriel** (`tut_*.webp`) ont été remappées au lieu d'être recapturées (voir
    §2) : plus aucune marque d'avant ne subsiste dans l'APK, ni en texte ni en pixel.
-   **Réserve** : c'est vrai des **images et des textes**, pas encore de l'**apparence par défaut** —
-   l'accent d'usine reste « Red (default) » (voir §8 point 3 et §5).
+   **Réserve levée le 16/09/2026** : l'**apparence par défaut** est couverte — la famille
+   `theme_red*` (l'accent d'usine) est repeinte aux couleurs de marque (voir §8 point 3).
 
 ## 9. Journal
 
@@ -411,8 +413,11 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
 | 2026-09-15 | Écran de démarrage Twouich **capturé sur l'appareil** pendant un lancement réel ; self-test anti-pub toujours vert sur l'APK reconstruit (18/18, dex frais et app installée). 40 contrôles dans `patch.py`. |
 | 2026-09-15 | **Captures du tutoriel remappées** (6 images, 1920×1080) : les cadres d'annotation et le panneau du thème rouge passent à la palette Twouich — 2,3–36,7 % de rouge → **0,0000 %**, écart de luminance moyen < 1,9/255. Choix explicite : l'émulateur plafonne à 720p, les recapturer aurait flouté des images 1080p pour une mise en page inchangée. 31 assets, 46 contrôles, `test_brand.py` 14 assertions. |
 | 2026-09-15 | Erreur de mesure corrigée en route : ma première quantification du rouge (distance euclidienne, tolérance 45) comptait les pixels presque noirs comme rouges et annonçait 41–57 % — la bonne mesure est le déséquilibre des canaux. Leçon consignée en §6. |
-| 2026-09-15 | **Updater durci** : la comparaison ne repose plus sur le plancher figé 144 ; le code compilé lit désormais `PackageManager.getPackageInfo()` et ne propose une mise à jour que si la release est plus récente que la version installée. |\n| 2026-09-15 | **v1.0.0** : changelog neuf limité aux nouveautés Twouich, lien vers le projet source et crédits ; identité puffy 3D violette générée et livrable `dist/Twouich_v1.0.0.apk` vérifié. |
+| 2026-09-15 | **Updater durci** : la comparaison ne repose plus sur le plancher figé 144 ; le code compilé lit désormais `PackageManager.getPackageInfo()` et ne propose une mise à jour que si la release est plus récente que la version installée. |
+| 2026-09-15 | **v1.0.0** : changelog neuf limité aux nouveautés Twouich, lien vers le projet source et crédits ; identité puffy 3D violette générée et livrable `dist/Twouich_v1.0.0.apk` vérifié. |
 | 2026-09-15 | **Deux défauts de l'updater trouvés par ce test**, invisibles en lecture de code : le **canal Beta** n'accepte que les entrées `ReleaseType: 1` (donc notre entrée stable ne produisait aucun dialogue — la plupart des installations héritées sont en Beta), et la comparaison se fait contre un **plancher figé à 144** au lieu de la version installée (l'app propose d'installer la version qu'elle exécute). Consignés, non corrigés en silence. |
+| 2026-09-16 | **Release `v1.0.0` publiée** (tag = VersionName, APK + `changelog.html`) ; `check-release.sh` vert : `update.json` → tag → assets → octets servis identiques au livrable. Installation **fraîche** sur l'émulateur : 147/v1.0.0, self-test **18/18** d'emblée, et 4 relances **sans aucun dialogue de mise à jour** — l'updater ne propose plus la version qu'il exécute (procédure : `TEST-DEVICE.md` § 0). |
 | 2026-09-15 | `test_apk.py` ne confrontait pas le livrable à `update.json` : il lit maintenant le `versionCode`/`versionName` dans le manifeste **binaire** (ni aapt2 ni apktool requis pour vérifier) et exige l'accord avec `update.json` — le trou par lequel un décalage de version passait sans bruit. 13 verdicts. |
 | 2026-09-15 | `patch/check-release.sh` : la vérification de publication (encore manuelle) devient une commande — `update.json` → tag → assets → **octets réellement servis** comparés au livrable local. Contrôle négatif joué (version inexistante → 404 + sortie 1). |
 | 2026-09-15 | Constaté sur l'appareil en passant par ses réglages : thème « Dark grey (default) » + accent **« Red (default) »** → l'app, réglages d'origine, **s'affiche encore rouge** (mesuré `#a00f2b` sur le commutateur). La refonte a couvert les assets et les textes, pas l'accent par défaut. Consigné en §8 (deux correctifs possibles, dont un choix). |
+| 2026-09-16 | **Accent d'usine repeint** : la famille `theme_red*` passe aux couleurs de marque et le libellé « Red (default) » devient « Twouich » (`patch.py` étape 4b, contrôle `test_apk.py` sur `resources.arsc`). Mesuré sur l'appareil après mise à jour (`install -r`) : **0 pixel** des anciens accents UI, violet de marque `#7c22e8` sur les zones de focus, self-test toujours **18/18** — le rouge restant à l'écran appartient aux miniatures des chaînes (contenu), pas à l'interface. |

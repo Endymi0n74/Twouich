@@ -182,7 +182,7 @@ Les documents sont **en français**, comme le reste du projet.
 2. reconstruire, puis `update.json` doit décrire **exactement** le livrable
    (`APK`, `ReleaseDate`, `ReleaseType`, `VersionCode`, `VersionName`, `hasChangeLog`) ;
 3. le **tag Git doit être identique au `VersionName`** — l'updater de l'app s'appuie dessus ;
-4. joindre l'APK `dist/Twouich_v1.0.0.apk` à la release ;
+4. joindre l'APK `dist/Twouich_v1.0.1.apk` à la release ;
 5. joindre **aussi** `changelog.html` — copie de `work/decoded/assets/S0undTV_changelog.html` :
    l'updater pointe le bouton « changelog » sur cet asset **au tag**, donc sans ce fichier la page
    « Nouveautés » de l'app est vide pour tout utilisateur à jour ;

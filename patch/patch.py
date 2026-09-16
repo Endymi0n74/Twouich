@@ -7,7 +7,7 @@ casse rien) et *échoue bruyamment* si un motif attendu a disparu, pour qu'un
 changement en amont (nouvelle beta) ne passe jamais inaperçu.
 
 Usage:
-    python patch.py --decoded work/decoded [--version-code 147 --version-name v1.0.0]
+    python patch.py --decoded work/decoded [--version-code 148 --version-name v1.0.1]
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 REPO = "Endymi0n74/Twouich"
 UPSTREAM = "S0und/S0undTV"
-DEFAULT_APK_NAME = "Twouich_v1.0.0.apk"
+DEFAULT_APK_NAME = "Twouich_v1.0.1.apk"
 
 # ── Étape 1 : greffon anti-pub ────────────────────────────────────────────
 GRAFT_DIR = "com/twouich/adblock"
@@ -156,12 +156,13 @@ CHANGELOG_OLD = """    <hr>
 # « Nouveautés » de l'app cite donc la release d'où vient le build, pas celle d'avant.
 CHANGELOG_NEW = """    <hr>
     <h1>Twouich {version} ({date})</h1>
-    <p class="spacing">Première release de <a href="https://github.com/Endymi0n74/Twouich">Twouich</a>.</p>
+    <p class="spacing"><a href="https://github.com/Endymi0n74/Twouich">Twouich</a> — un client Android TV pour Twitch.</p>
 
     <h3>Ce qui change</h3>
     <ul>
         <li>Blocage des publicités SSAI dans les playlists Twitch avant lecture.</li>
         <li>Nouvelle identité Twouich : splash, icônes, bannière TV, thème violet et interface revue.</li>
+        <li>Accent par défaut recoloré aux couleurs Twouich : plus de rouge d'origine dans l'interface.</li>
         <li>Mise à jour automatique depuis les releases Twouich.</li>
     </ul>
 
@@ -334,6 +335,45 @@ def install_branding(decoded: pathlib.Path, here: pathlib.Path, version_name: st
                  '<color name="theme_purple_bright">#a970ff</color>',
                  "thème violet : accent clair")
 
+    # 4b. L'accent d'usine est l'index 0 (« Red (default) », prefs_accent_color =
+    #     "0") : c'est lui que les installations — neuves comme existantes —
+    #     affichent, et c'est le rouge visible sur les cartes focalisées. Plutôt
+    #     que de déplacer l'index par défaut (fragile côté smali, et muet pour
+    #     les installations existantes qui gardent la valeur sauvegardée), on
+    #     recolore la famille theme_red* avec la palette de marque : l'accent
+    #     « par défaut » est visuellement Twouich, et le rouge de S0und sort des
+    #     couleurs sélectionnables.
+    replace_once(
+        colors,
+        '<color name="theme_red">#a30f2c</color>',
+        f'<color name="theme_red">{brand["brand"]}</color>',
+        "accent par défaut : theme_red → couleur de marque",
+    )
+    replace_once(
+        colors,
+        '<color name="theme_red_bright">#db002c</color>',
+        '<color name="theme_red_bright">#a970ff</color>',
+        "accent par défaut : theme_red_bright → accent clair",
+    )
+    replace_once(
+        colors,
+        '<color name="theme_red_dark">#4d000f</color>',
+        f'<color name="theme_red_dark">{brand["brand_dark"]}</color>',
+        "accent par défaut : theme_red_dark → fond sombre de marque",
+    )
+    replace_once(
+        colors,
+        '<color name="theme_red_main_background">#1f0006</color>',
+        '<color name="theme_red_main_background">#130c1f</color>',
+        "accent par défaut : theme_red_main_background → fond principal de marque",
+    )
+    replace_once(
+        decoded / "res" / "values" / "arrays.xml",
+        "<item>Red (default)</item>",
+        "<item>Twouich</item>",
+        "réglages : libellé de l'accent par défaut",
+    )
+
     # 5. Pages embarquées (À propos / Nouveautés) : fond rouge → fond sombre, et
     #    l'en-tête dit ce qu'est ce build.
     about = decoded / "assets" / "S0undTV_about.html"
@@ -364,7 +404,8 @@ def install_branding(decoded: pathlib.Path, here: pathlib.Path, version_name: st
     replace_once(changelog, "background-color: #a30f2d;", "background-color: #0e0e10;",
                  "page Nouveautés : fond rouge → sombre")
     # Repartir de zéro signifie réellement supprimer l'historique HTML hérité :
-    # le changelog ne garde que v1.0.0 et le lien de crédits vers le projet source.
+    # le changelog ne garde que l'entrée Twouich courante et le lien de crédits
+    # vers le projet source.
     changelog_text = changelog.read_text(encoding="utf-8")
     historical = re.search(r"\n\s*<h1>beta_144\b", changelog_text)
     if historical:
@@ -441,8 +482,9 @@ def check_brand_assets(decoded: pathlib.Path, here: pathlib.Path) -> int:
 def scan_dead_red(decoded: pathlib.Path) -> list[str]:
     """Fichiers d'identité portant encore le rouge de S0und (#a30f2c).
 
-    La palette (`values/colors.xml`, `values/public.xml`) est exclue : le rouge y
-    reste un thème que l'utilisateur peut choisir, ce n'est pas la marque.
+    La palette (`values/colors.xml`, `values/public.xml`) est exclue : la famille
+    `theme_red*` y est recolorée par ailleurs (elle porte l'accent par défaut),
+    et les identifiants de ressources ne sont pas des chaînes affichées.
     """
     found: list[str] = []
     for root in (decoded / "res", decoded / "assets"):
@@ -509,8 +551,8 @@ def main() -> int:
     here = pathlib.Path(__file__).resolve().parent
     parser = argparse.ArgumentParser()
     parser.add_argument("--decoded", required=True, type=pathlib.Path)
-    parser.add_argument("--version-code", type=int, default=147)
-    parser.add_argument("--version-name", default="v1.0.0")
+    parser.add_argument("--version-code", type=int, default=148)
+    parser.add_argument("--version-name", default="v1.0.1")
     parser.add_argument("--apk-name", default=DEFAULT_APK_NAME)
     args = parser.parse_args()
 
@@ -540,6 +582,8 @@ def main() -> int:
         ("AndroidManifest.xml", APP_LABEL_NEW),
         ("res/drawable/s0undtv_logo_with_text_2.xml", "@drawable/twouich_splash"),
         ("res/values/colors.xml", f'<color name="ic_launcher_background">{brand["brand"]}</color>'),
+        ("res/values/colors.xml", f'<color name="theme_red">{brand["brand"]}</color>'),
+        ("res/values/arrays.xml", "<item>Twouich</item>"),
         ("assets/S0undTV_about.html", "Twouich"),
         ("assets/S0undTV_changelog.html", "Twouich"),
     ]:

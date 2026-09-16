@@ -1,5 +1,11 @@
 # Journal des modifications — Twouich
 
+## v1.0.1 — 16 septembre 2026
+
+- Accent par défaut recoloré aux couleurs Twouich : plus de rouge d'origine dans l'interface (cartes focalisées, bouton de recherche, commutateurs).
+- Dans les réglages, l'accent par défaut s'appelle désormais « Twouich ».
+- Corrections de documentation et gardes-fous supplémentaires sur le livrable.
+
 ## v1.0.0 — 15 septembre 2026
 
 Première release publique de [Twouich](https://github.com/Endymi0n74/Twouich), un client Android TV pour Twitch.

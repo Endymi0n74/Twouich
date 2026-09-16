@@ -6,6 +6,11 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 
 ![Splash Twouich](images/splash-twouich.jpg)
 
+## v1.0.1
+
+- accent par défaut recoloré aux couleurs Twouich : plus de rouge d'origine dans l'interface ;
+- l'accent par défaut s'appelle « Twouich » dans les réglages.
+
 ## v1.0.0
 
 - identité visuelle Twouich violette avec monogramme `T`, mot-symbole volumétrique et tagline TV ;
@@ -17,10 +22,10 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 
 ## Installation
 
-Télécharger [`Twouich_v1.0.0.apk`](https://github.com/Endymi0n74/Twouich/releases) depuis la release publiée.
+Télécharger [`Twouich_v1.0.1.apk`](https://github.com/Endymi0n74/Twouich/releases) depuis la release publiée.
 
 ```bash
-adb install -r Twouich_v1.0.0.apk
+adb install -r Twouich_v1.0.1.apk
 ```
 
 Le paquet Android technique est conservé pour permettre les mises à jour par-dessus une installation Twouich existante. La signature doit rester la même pour les versions suivantes ; la clé de signature n'est jamais versionnée.
@@ -89,7 +94,7 @@ Ce dépôt redistribue uniquement des binaires patchés et les patchs associés 
 | `patch/branding/make_brand.py` | génération du splash, des icônes et de la bannière |
 | `patch/smali/com/twouich/adblock/` | filtre HLS et self-test embarqué |
 | `update.json` | release annoncée à l'application |
-| `CHANGELOG-twouich.md` | journal public v1.0.0 |
+| `CHANGELOG-twouich.md` | journal public |
 | `TEST-DEVICE.md` | procédure de validation appareil |
 | `AUDIT.md` | audit technique et limites connues |
 

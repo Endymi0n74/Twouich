@@ -182,14 +182,24 @@ l'app est encore rouge. Réglages d'usine : thème « Dark grey (default) » + a
 (default) »** (`prefs_accent_color = 0`), et l'accent ne s'applique qu'aux thèmes « Dark grey » et
 « Night mode » — donc à celui par défaut. Mesuré sur l'appareil : commutateur de réglages en
 `#a00f2b` ≈ `theme_red` `#a30f2c`. La refonte a couvert les **assets** (splash, icônes, bannière,
-tutoriel) et les **textes**, pas cette couleur d'interface.
+tutoriel) et les **textes**, pas cette couleur d'interface. (**Corrigé depuis** : la famille
+`theme_red*` — c'est-à-dire l'accent 0, conservé par les installations existantes — est repeinte
+aux couleurs de marque par `patch.py` ; mesuré sur l'appareil le 16/09/2026, plus aucun pixel de
+ces deux rouges, voir § 5.)
 
 ## 5. Reste à faire (hors périmètre de cette passe)
 
 * **CI GitHub Actions** : rejouer `patch/build.sh` à chaque push (téléchargement de l'APK upstream + apktool + signature éphémère) pour détecter immédiatement une rupture de patch sur une nouvelle beta. Non livrée ici : les URLs des archives d'outils (`apktool`, `uber-apk-signer`) doivent être figées une fois, et je n'ai pas pu valider le workflow sur GitHub depuis cet environnement.
 * ~~**Publication de la release**~~ — **fait le 15/09/2026** : `v1.5.10x-twouich1` (tag identique au `VersionName`) avec `Twouich_beta144_ttv1.apk` (SHA-256 `a80be686…`) + `changelog.html`.
 * ~~**Parcours réel de l'updater**~~ — **fait le 15/09/2026** : release intermédiaire `v1.5.10x-twouich2` (146), app installée en 145 mise à jour par elle-même, octets installés au SHA-256 du livrable (`TEST-DEVICE.md` § 0.2, `memory.md` § 5). Trois suites à ce travail : publier une entrée `ReleaseType: 1` pour les appareils en canal Beta, ~~remplacer le plancher de version figé (144) par la version installée~~ (**fait le 15/09/2026**, v1.0.0 : comparaison via `PackageManager.getPackageInfo()`), et traiter l'**accent rouge par défaut** (§ 4.6).
-* **Accent rouge d'usine** : `prefs_accent_color = 0` (« Red (default) ») sur le thème « Dark grey (default) ». Une installation neuve le corrige en passant le défaut à `2` (« A familiar looking shade of purple ») ; les installations **existantes** gardent la valeur enregistrée, donc les repeindre demande de recolorer `theme_red*` — un choix produit, à arbitrer avec le rebranding des captures du README.
+* ~~**Accent rouge d'usine**~~ — **fait le 16/09/2026** : plutôt que de déplacer le défaut
+  `prefs_accent_color = 0` (fragile côté smali, et muet pour les installations existantes qui
+  gardent la valeur sauvegardée), la famille `theme_red*` est **repeinte aux couleurs de marque**
+  (`patch.py` étape 4b) et le libellé « Red (default) » devient « Twouich ». Vérifié sur
+  l'appareil : 0 pixel des anciens accents (`#a30f2c`/`#db002c`), violet `#7c22e8` sur les zones
+  de focus (bouton recherche, cartes) ; le rouge restant à l'écran appartient aux miniatures des
+  chaînes, pas à l'interface. Garde-fou : `test_apk.py` exige « Red (default) » absent de
+  `resources.arsc`.
 * **Reproductibilité octet pour octet** : deux builds du même arbre produisent un APK dont les **2172 entrées sont identiques au CRC** mais dont le SHA-256 diffère, apktool estampillant les entrées ZIP à l'heure du build. Le hash publié identifie donc le fichier livré, pas la recette ; normaliser l'horodatage ZIP rendrait le build reproductible au sens strict.
 * **Emotes/badges/highlighter** : non concernés par cette passe.
 * ~~**Rebranding**~~ — **fait le 15/09/2026** (voir § 4.5) : nom, écran de démarrage, icônes, bannière TV, icône adaptative, thème par défaut, pages embarquées et **images du tutoriel** portent l'identité Twouich ; plus aucune trace de la marque d'avant, ni en texte, ni en pixel. Reste optionnel : rafraîchir les captures du README (`images/image*.jpg`, prises avant la refonte).

@@ -5,7 +5,7 @@
 # Usage :  cd /d/Codex/Twouich && bash patch/build.sh
 #
 # Chaîne : APK upstream → apktool d → patch.py → apktool b → signature
-#          v1+v2+v3 → vérification → dist/Twouich_v1.0.0.apk
+#          v1+v2+v3 → vérification → dist/Twouich_v1.0.1.apk
 # Tout est rejouable : les patchs sont dans patch/, l'APK upstream est
 # retéléchargé si besoin, la clé vit dans keys/ (jamais versionnée).
 # ═══════════════════════════════════════════════════════════════════════
@@ -44,9 +44,9 @@ if [ -z "$KEY_PASS" ]; then
     exit 1
 fi
 
-VERSION_CODE=147
-VERSION_NAME="v1.0.0"
-APK_NAME="Twouich_v1.0.0.apk"
+VERSION_CODE=148
+VERSION_NAME="v1.0.1"
+APK_NAME="Twouich_v1.0.1.apk"
 
 echo "═══════════════════════════════════════════════"
 echo "  Twouich — build $VERSION_NAME ($VERSION_CODE)"

@@ -25,7 +25,7 @@ Ce fichier vérifie donc l'artefact :
     l'app annonce une version, télécharge une URL qui n'existe pas, et reste sur
     place.
 
-    python patch/tests/test_apk.py                       # dist/Twouich_v1.0.0.apk
+    python patch/tests/test_apk.py                       # dist/Twouich_v1.0.1.apk
     python patch/tests/test_apk.py --apk dist/autre.apk
 
 Contrôle négatif (l'artefact d'origine doit être refusé) :
@@ -47,7 +47,7 @@ from PIL import Image
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 GENERATED = ROOT / "patch" / "branding" / "assets" / "res"
-DEFAULT_APK = ROOT / "dist" / "Twouich_v1.0.0.apk"
+DEFAULT_APK = ROOT / "dist" / "Twouich_v1.0.1.apk"
 
 # Chaînes d'affichage : ce que l'utilisateur lit à l'écran. Le paquet Android
 # (`com.s0und.s0undtv`) et les URL du journal des modifications gardent
@@ -202,6 +202,10 @@ def main() -> int:
         leaked = [s for s in DEAD_NAMES if holds(arsc, s)]
         ok &= check("aucun nom d'affichage S0und dans les ressources", not leaked, ", ".join(leaked))
         ok &= check("nom d'affichage Twouich présent", all(holds(arsc, s) for s in REBRANDED))
+        # L'accent d'usine de l'app est l'index 0, recoloré en violet Twouich par
+        # patch.py (family theme_red*) : le libellé rouge ne doit plus exister.
+        ok &= check("accent par défaut recoloré (plus de « Red (default) »)",
+                    not holds(arsc, "Red (default)"))
 
         manifest = z.read("AndroidManifest.xml")
         leaked_m = [s for s in DEAD_NAMES if holds(manifest, s)]
