@@ -44,6 +44,14 @@ if [ -z "$KEY_PASS" ]; then
     exit 1
 fi
 
+# Mode CI : SKIP_SIGNING=1 rejoue la chaîne jusqu'à l'APK NON signé.
+# L'objectif est la détection de rupture (patch.py échoue bruitamment si un motif
+# upstream a changé, apktool b si le smali ne compile plus), pas la production
+# d'un livrable : aucune clé de signature n'est nécessaire, et la CI ne doit
+# JAMAIS en obtenir une — c'est ce qui garantit que seul le mainteneur produit
+# des mises à jour installables par-dessus Twouich.
+SKIP_SIGNING="${SKIP_SIGNING:-0}"
+
 VERSION_CODE=150
 VERSION_NAME="v1.0.3"
 APK_NAME="Twouich_v1.0.3.apk"
@@ -53,9 +61,14 @@ echo "  Twouich — build $VERSION_NAME ($VERSION_CODE)"
 echo "═══════════════════════════════════════════════"
 
 # ── 0. Outils ──
-for tool in "$APKTOOL" "$SIGNER"; do
-    [ -f "$tool" ] || { echo "❌ outil manquant : $tool"; exit 1; }
-done
+if [ "$SKIP_SIGNING" = "1" ]; then
+    # Mode CI : apktool seul suffit (pas de signature).
+    [ -f "$APKTOOL" ] || { echo "❌ outil manquant : $APKTOOL"; exit 1; }
+else
+    for tool in "$APKTOOL" "$SIGNER"; do
+        [ -f "$tool" ] || { echo "❌ outil manquant : $tool"; exit 1; }
+    done
+fi
 command -v python >/dev/null 2>&1 || { echo "❌ python introuvable"; exit 1; }
 
 # ── 1. APK upstream (vérification d'intégrité) ──
@@ -110,9 +123,12 @@ echo "🔨 apktool b…"
 rm -f "$BUILD_DIR/twouich_unsigned.apk"
 java -jar "$APKTOOL" b -f -o "$BUILD_DIR/twouich_unsigned.apk" "$DECODED" 2>&1 | tail -5
 
-# ── 5. Clé de signature ──
+# ── 5. Clé de signature (sautée en mode CI) ──
+if [ "$SKIP_SIGNING" = "1" ]; then
+    echo "⏭️  Mode CI : signature sautée (APK non signé, détection de rupture uniquement)"
+fi
 mkdir -p keys
-if [ ! -f "$KEYSTORE" ]; then
+if [ "$SKIP_SIGNING" != "1" ] && [ ! -f "$KEYSTORE" ]; then
     echo "🔑 Création de la clé Twouich (à sauvegarder !)…"
     keytool -genkeypair -v -keystore "$KEYSTORE" -alias "$KEY_ALIAS" \
         -keyalg RSA -keysize 2048 -validity 10000 \
@@ -120,7 +136,19 @@ if [ ! -f "$KEYSTORE" ]; then
         -dname "CN=Twouich, OU=Twouich, O=Twouich, L=Paris, C=FR" >/dev/null
 fi
 
-# ── 6. Signature v1+v2+v3 (+ zipalign intégré) ──
+# ── 6. Signature v1+v2+v3 (+ zipalign intégré) — sautée en mode CI ──
+if [ "$SKIP_SIGNING" = "1" ]; then
+    echo "🧾 APK non signé :"
+    sha256sum "$BUILD_DIR/twouich_unsigned.apk"
+    ls -l "$BUILD_DIR/twouich_unsigned.apk"
+    cat <<EOF
+
+═══════════════════════════════════════════════
+  BUILD CI TERMINÉ (sans signature) → $BUILD_DIR/twouich_unsigned.apk
+═══════════════════════════════════════════════
+EOF
+    exit 0
+fi
 echo "🔐 Alignement + signature…"
 rm -f dist/*.apk dist/*.idsig
 java -jar "$SIGNER" \

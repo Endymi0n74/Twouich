@@ -1,0 +1,83 @@
+name: build
+
+# Détecte une rupture de patch : si une nouvelle beta upstream change un motif
+# que patch.py attend, ou si le smali ne passe plus le vérificateur Dalvik,
+# ce job passe au rouge AVANT qu'une release ne parte avec le greffon cassé.
+#
+# La chaîne est rejouée SANS clé de signature (SKIP_SIGNING=1) : la CI n'en
+# obtient jamais une, et son verdict porte sur tout ce qui précède la signature
+# (patchs, marque, smali, recompilation). Un job vert ne prouve donc pas la
+# signature — il prouve que la recette s'applique encore sur le socle upstream.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: apktool d → patch.py → apktool b (sans signature)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17 (apktool)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installer apktool 3.0.3 (empreinte vérifiée)
+        shell: bash
+        env:
+          APKTOOL_SHA256: dbf930b076c6b9be08d57c449cacefc3bdd6b71ebd59b3066fc0e1f5b14f9423
+        run: |
+          mkdir -p tools
+          curl -sSL --max-time 300 --retry 3 \
+            -o tools/apktool-3.0.3.jar \
+            "https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar"
+          echo "$APKTOOL_SHA256  tools/apktool-3.0.3.jar" | sha256sum -c -
+          java -jar tools/apktool-3.0.3.jar --version
+
+      - name: Patch tests (miroir Python + branchements smali + marque)
+        shell: bash
+        run: |
+          python patch/tests/test_sanitizer.py
+          python patch/tests/test_smali_branches.py
+          python patch/tests/test_brand.py
+
+      - name: Build CI (sans signature — détection de rupture)
+        env:
+          SKIP_SIGNING: '1'
+        shell: bash
+        run: |
+          bash patch/build.sh
+
+      - name: Les pages embarquées décrivent bien la version courante
+        shell: bash
+        run: |
+          V="$(sed -n 's/^VERSION_NAME=//p' patch/build.sh | head -1 | tr -d '"')"
+          grep -q "Twouich $V" work/decoded/assets/S0undTV_changelog.html
+          grep -q "Twouich" work/decoded/assets/S0undTV_about.html
+
+      - name: Upload de l'APK non signé (diagnostic)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: twouich-unsigned
+          path: work/build/twouich_unsigned.apk
+          if-no-files-found: ignore
+          retention-days: 7
