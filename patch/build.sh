@@ -88,7 +88,12 @@ echo "✅ APK upstream conforme (SHA-256)"
 # réécrire (et il a raison : mieux vaut échouer que livrer un APK dont la page
 # « Nouveautés » cite une autre version). On redésassemble dès que la version du
 # script n'est plus celle de l'arbre, pour que « bump puis rebuild » marche seul.
-DECODED_VERSION="$(sed -n 's/^ *versionName: //p' "$DECODED/apktool.yml" 2>/dev/null | head -1)"
+# Sonde robuste à `pipefail` (GitHub Actions lance bash avec -o pipefail) : le
+# fichier peut être absent (premier build), et sed sortirait alors en erreur.
+DECODED_VERSION=""
+if [ -f "$DECODED/apktool.yml" ]; then
+    DECODED_VERSION="$(sed -n 's/^ *versionName: //p' "$DECODED/apktool.yml" | head -1)" || DECODED_VERSION=""
+fi
 if [ -f "$DECODED/apktool.yml" ] && [ "$DECODED_VERSION" != "$VERSION_NAME" ]; then
     echo "♻️  Arbre en $DECODED_VERSION ≠ $VERSION_NAME → désassemblage neuf"
     rm -rf "$DECODED"
