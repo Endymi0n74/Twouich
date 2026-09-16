@@ -149,6 +149,23 @@ v1.0.1 publiée.
 - **État final propre** : le build instrumenté utilisé pour le diagnostic a été remplacé par la
   v1.0.1 publiée (`install -r`) ; SHA-256 du `base.apk` installé = `469db927…` = release = `dist/`.
 
+### Validé sur le vrai téléviseur du foyer (Freebox Pop, Android 10) : 149 → 150, le 16/09/2026
+
+Même protocole sur matériel réel cette fois, et double preuve au passage :
+
+- **la Freebox était en 149 (v1.0.2), installation fraîche de la veille** — donc démarrée en canal
+  **Stable** grâce au correctif `b.a = false` : c'est ce canal qui lui a fait voir l'entrée stable
+  de `update.json`. Le correctif v1.0.2 est donc prouvé **en production** : aucune bascule manuelle
+  de canal n'a eu lieu, et le dialogue est arrivé au cold start suivant la publication ;
+- parcours complet observé : `UpdateActivity` ouverte seule (« New update available! — Version:
+  v1.0.3 / Version code: 150 ») → « Install update » → `S0undTV_AutoUpdateSrv` :
+  `releases/download/v1.0.3/Twouich_v1.0.3.apk` (URL exacte du tag) → `PackageInstallerActivity`
+  → « Application installée » → `versionCode=150 versionName=v1.0.3` ;
+- **octets installés = livrable** (`pm path` + `pull` → SHA-256 `147562df…` = `dist/` = octets
+  servis, cf. `check-release.sh`) ;
+- **session Twitch conservée** (22 chaînes suivies affichées à l'accueil), self-test **18/18**,
+  relance sans dialogue (`FireTVMainActivity` reste au premier plan).
+
 ### Deux pièges qui font échouer ce test sans rien casser
 
 1. **Le canal de mise à jour.** `helpers/a.b()` filtre par canal *avant* de regarder la version
