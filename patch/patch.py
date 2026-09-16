@@ -26,7 +26,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 REPO = "Endymi0n74/Twouich"
 UPSTREAM = "S0und/S0undTV"
-DEFAULT_APK_NAME = "Twouich_v1.0.1.apk"
+DEFAULT_APK_NAME = "Twouich_v1.0.2.apk"
 
 # ── Étape 1 : greffon anti-pub ────────────────────────────────────────────
 GRAFT_DIR = "com/twouich/adblock"
@@ -102,6 +102,18 @@ UPDATE_VERSION_METHOD = """.method private i()I
 .end method
 
 """
+
+# Étape 3b : le socle upstream est un build beta — le flag gravé
+# Lcom/s0und/s0undtv/b;->a:Z = true fait écrire pref_update_channel = "1"
+# (Beta) au premier lancement de TOUTE installation neuve (MainApp.p()).
+# Or, sur le canal Beta, l'updater n'accepte que des entrées ReleaseType: 1 :
+# une update.json ne publiant qu'une entrée stable n'y produit AUCUN dialogue,
+# sans erreur nulle part. Forcer le flag à false rend le canal stable par
+# défaut : g() lit "0" quand la préférence est absente, ce qui est exactement
+# ce que nous publions.
+BETA_FLAG_PATH = "smali/com/s0und/s0undtv/b.smali"
+BETA_FLAG_OLD = ".field public static final a:Z = true"
+BETA_FLAG_NEW = ".field public static final a:Z = false"
 
 
 # ── Étape 2 : identité visuelle ───────────────────────────────────────────
@@ -435,6 +447,29 @@ def patch_update_version_comparison(decoded: pathlib.Path) -> None:
     log("corrigé : l'updater compare désormais la version installée")
 
 
+def force_stable_channel(decoded: pathlib.Path) -> None:
+    """Étape 3b — Toute installation neuve démarre en canal Beta.
+
+    Cause racine (mesurée sur appareil le 16/09) : le socle upstream est un
+    build beta, flag gravé `b.a = true`, et MainApp.p() en déduit
+    pref_update_channel = "1" au premier lancement. Or le canal Beta ne voit
+    que des entrées ReleaseType: 1 — notre publication stable y est muette.
+    Remettre le flag à false supprime l'impasse pour les nouveaux utilisateurs
+    (les installations existantes gardent leur préférence, c'est voulu).
+    """
+    path = decoded / BETA_FLAG_PATH
+    if not path.is_file():
+        fail(f"fichier attendu absent : {BETA_FLAG_PATH}")
+    text = path.read_text(encoding="utf-8")
+    if BETA_FLAG_NEW in text:
+        log("déjà appliqué : flag beta désactivé (canal stable par défaut)")
+        return
+    if BETA_FLAG_OLD not in text:
+        fail(f"champ beta introuvable dans {BETA_FLAG_PATH} (attendu : {BETA_FLAG_OLD!r})")
+    path.write_text(text.replace(BETA_FLAG_OLD, BETA_FLAG_NEW, 1), encoding="utf-8")
+    log("corrigé : le flag beta gravé est désactivé (canal stable par défaut)")
+
+
 def repoint_updater(decoded: pathlib.Path, apk_name: str) -> None:
     print("[3/5] Mise à jour automatique → dépôt Twouich")
     for rel in URL_FILES:
@@ -450,6 +485,7 @@ def repoint_updater(decoded: pathlib.Path, apk_name: str) -> None:
         )
 
     patch_update_version_comparison(decoded)
+    force_stable_channel(decoded)
 
     service = decoded / "smali_classes2/com/s0und/s0undtv/service/AutoUpdateService.smali"
     if service.is_file():
@@ -551,8 +587,8 @@ def main() -> int:
     here = pathlib.Path(__file__).resolve().parent
     parser = argparse.ArgumentParser()
     parser.add_argument("--decoded", required=True, type=pathlib.Path)
-    parser.add_argument("--version-code", type=int, default=148)
-    parser.add_argument("--version-name", default="v1.0.1")
+    parser.add_argument("--version-code", type=int, default=149)
+    parser.add_argument("--version-name", default="v1.0.2")
     parser.add_argument("--apk-name", default=DEFAULT_APK_NAME)
     args = parser.parse_args()
 
@@ -578,6 +614,7 @@ def main() -> int:
         ("smali_classes2/com/s0und/s0undtv/helpers/UpdateHelper.smali", f"raw.githubusercontent.com/{REPO}"),
         ("smali_classes2/com/s0und/s0undtv/helpers/a.smali", f"github.com/{REPO}/releases/download/"),
         ("smali_classes2/com/s0und/s0undtv/helpers/a.smali", "PackageManager;->getPackageInfo"),
+        (BETA_FLAG_PATH, BETA_FLAG_NEW),
         ("res/values/strings.xml", APP_NAME_NEW),
         ("AndroidManifest.xml", APP_LABEL_NEW),
         ("res/drawable/s0undtv_logo_with_text_2.xml", "@drawable/twouich_splash"),

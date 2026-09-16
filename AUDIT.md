@@ -172,10 +172,16 @@ n'avaient signalés, et que ce test a rendus visibles :
 
 Premier défaut : **corrigé depuis** — la v1.0.0 compare la release à la version réellement
 installée (`PackageManager.getPackageInfo()`), vérifié par `test_smali_branches.py` sur le code
-compilé. Le canal Beta reste à couvrir côté publication (voir § 5).
+compilé. Le canal Beta, lui, est **corrigé structurellement depuis la v1.0.2 (149)** : le flag
+beta gravé `b.a` est forcé à `false` par `patch.py` (étape 3b), donc une installation **neuve**
+démarre en Stable — c'est le défaut de lecture de `g()` (« 0 ») qui s'applique. Vérifié sur les
+octets installés : le `base.apk` relu de l'appareil décode `a:Z` sans initialisateur (false)
+là où l'upstream `beta_144` décode `a:Z = true` (contrôle négatif) ; garde-fou ajouté à
+`test_smali_branches.py`.
 
-Conséquence pour la distribution : publier **aussi** une entrée `ReleaseType: 1`, sinon une partie
-de l'audience ne verra jamais les releases. Le détail est en `memory.md` § 5 et § 8.
+Conséquence pour la distribution : les installations **existantes** en Beta gardent leur
+préférence — publier **aussi** une entrée `ReleaseType: 1`, ou leur faire basculer le canal,
+reste nécessaire pour cette population. Le détail est en `memory.md` § 5 et § 8.
 
 Un troisième écart, de nature différente, a été constaté au passage : l'**apparence par défaut** de
 l'app est encore rouge. Réglages d'usine : thème « Dark grey (default) » + accent **« Red

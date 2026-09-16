@@ -55,7 +55,7 @@ Les formes à deux registres (`if-le v4, v3`, `if-ge v2, v3`) sont littérales.
 
 - **Interdit** : `if-gez` et `if-gtz`. Utiliser `if-ltz` (`v < 0`) ou `if-lez` (`v <= 0`), avec un
   commentaire au-dessus quand l'intention n'est pas évidente.
-- Après **toute** édition de smali : `python patch/tests/test_smali_branches.py` (9 vérifications).
+- Après **toute** édition de smali : `python patch/tests/test_smali_branches.py` (11 vérifications).
   Ce test refuse les opcodes ambigus et l'inversion des branchements critiques ; il balaie **tout**
   `patch/smali/**/*.smali`, donc un nouveau fichier est surveillé sans rien changer.
 - **Sens des branchements sur un test de forme.** `if-eqz` branche quand le résultat est faux,
@@ -103,7 +103,7 @@ bash patch/build.sh          # APK upstream → apktool d → patch.py → apkto
 
 ```bash
 python patch/tests/test_sanitizer.py       # 22 assertions : règles de nettoyage (miroir Python)
-python patch/tests/test_smali_branches.py  # 10 assertions : branchements réels du smali
+python patch/tests/test_smali_branches.py  # 11 assertions : branchements réels du smali
 python patch/tests/test_brand.py           # 14 assertions : identité visuelle (voir plus bas)
 python patch/tests/test_apk.py             # 13 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),
                                            #   dont l'accord avec update.json

@@ -4,7 +4,7 @@
 > upstream **S0undTV**. Dépôt : `https://github.com/Endymi0n74/Twouich` — atelier local :
 > `D:\Codex\Twouich`.
 
-Dernière mise à jour : **15 septembre 2026**.
+Dernière mise à jour : **16 septembre 2026**.
 
 ---
 
@@ -17,8 +17,8 @@ Dernière mise à jour : **15 septembre 2026**.
 | Identité visuelle | piste **C** « dégradé + monogramme », générée par `patch/branding/make_brand.py` |
 | Palette | violet profond `#7c22e8` → `#210849` (dégradé 315°), mot-symbole puffy `#ffffff`, tagline `#e6d8ff` |
 | Base upstream | S0undTV `beta_144.apk`, SHA-256 `578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0` |
-| Version produite | `versionCode 147` / `versionName v1.0.0` |
-| Livrable | `dist/Twouich_v1.0.0.apk` (signé v1+v2+v3, zipalign vérifié) |
+| Version produite | `versionCode 149` / `versionName v1.0.2` |
+| Livrable | `dist/Twouich_v1.0.2.apk` (signé v1+v2+v3, zipalign vérifié, SHA-256 `5696048e…`) |
 | Clé de signature | `keys/twouich.keystore`, alias `twouich-dev` — **non versionnée, à sauvegarder hors du dossier** ; mot de passe **hors du dépôt** (`keys/keystore.properties`, ignoré, ou `KEY_PASS`) |
 | Modèle Android minimum | API 23 (Android 6), cible 35 |
 
@@ -152,7 +152,7 @@ Détail complet : [`AUDIT.md`](AUDIT.md).
 
 ```bash
 python patch/tests/test_sanitizer.py      # 22 assertions : règles de nettoyage (miroir Python)
-python patch/tests/test_smali_branches.py # 9 assertions : branchements réels du smali (pièges Dalvik)
+python patch/tests/test_smali_branches.py # 11 assertions : branchements réels du smali (pièges Dalvik)
 python patch/tests/test_brand.py          # 14 assertions : identité visuelle (assets, rouge mort, zone sûre,
                                           #   captures du tutoriel remappées)
 python patch/tests/test_apk.py            # 13 verdicts sur l'APK livré (et non sur l'arbre de travail),
@@ -260,7 +260,9 @@ téléchargement, le choix de l'URL et le lancement de l'installeur sont faits p
 
 Les deux viennent de l'upstream (ils précèdent Twouich) : consignés ici, pas corrigés en silence.
 La **comparaison de version a été corrigée depuis** (v1.0.0 : lecture de la version installée via
-`PackageManager.getPackageInfo()`) ; le canal Beta reste à couvrir côté publication.
+`PackageManager.getPackageInfo()`). Le **canal Beta est corrigé structurellement depuis la v1.0.2** :
+le flag gravé `b.a` est forcé à `false` par `patch.py` (étape 3b), donc une installation neuve
+démarre en Stable — voir § 8, point 3.
 
 #### Un piège que ce parcours a révélé
 
@@ -372,8 +374,17 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
    `v1.5.10x-twouich2` (versionCode 146) publiée, app installée en 145 mise à jour **par elle-même**
    (dialogue ouvert seule, téléchargement, passage à l'installeur système), octets installés
    identiques au livrable au SHA-256 près (voir §5). Reste, côté produit :
-   - **canal Beta** — publier une entrée `ReleaseType: 1` dans `update.json`, sinon les appareils
-     hérités de S0undTV (canal Beta, comme celui du test) ne voient aucune de nos releases ;
+   - **canal Beta, installation neuve** — ~~toute installation neuve démarrait en Beta~~
+     **corrigé structurellement le 16/09/2026 (v1.0.2, 149)** : `patch.py` étape 3b force
+     `b.a = false`, donc `p()` n'écrit plus `pref_update_channel = "1"` et le défaut de `g()`
+     (« 0 » = Stable) s'applique. Preuve par les octets installés : `base.apk` relu de l'appareil
+     décodé → `a:Z` sans initialisateur (false), upstream `beta_144` → `a:Z = true` (contrôle
+     négatif discriminant) ; garde-fou dans `test_smali_branches.py` (mordance vérifiée).
+   - **canal Beta, installations existantes** — publier aussi une entrée `ReleaseType: 1` dans
+     `update.json`, sinon les appareils hérités de S0undTV restés en Beta (comme celui du test)
+     ne voient aucune de nos releases. **Publication v1.0.2 non faite** (sur demande) : quand elle
+     aura lieu, pousser `update.json` APRÈS la release, puis mettre à jour le README
+     (téléchargement + section version).
    - ~~**comparaison de version** — remplacer le plancher figé (144) par la version installée~~ —
      **fait le 15/09/2026** : la comparaison lit désormais `PackageManager.getPackageInfo()` et ne
      propose une mise à jour que si la release est plus récente que la version installée
@@ -421,3 +432,4 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
 | 2026-09-15 | `patch/check-release.sh` : la vérification de publication (encore manuelle) devient une commande — `update.json` → tag → assets → **octets réellement servis** comparés au livrable local. Contrôle négatif joué (version inexistante → 404 + sortie 1). |
 | 2026-09-15 | Constaté sur l'appareil en passant par ses réglages : thème « Dark grey (default) » + accent **« Red (default) »** → l'app, réglages d'origine, **s'affiche encore rouge** (mesuré `#a00f2b` sur le commutateur). La refonte a couvert les assets et les textes, pas l'accent par défaut. Consigné en §8 (deux correctifs possibles, dont un choix). |
 | 2026-09-16 | **Accent d'usine repeint** : la famille `theme_red*` passe aux couleurs de marque et le libellé « Red (default) » devient « Twouich » (`patch.py` étape 4b, contrôle `test_apk.py` sur `resources.arsc`). Mesuré sur l'appareil après mise à jour (`install -r`) : **0 pixel** des anciens accents UI, violet de marque `#7c22e8` sur les zones de focus, self-test toujours **18/18** — le rouge restant à l'écran appartient aux miniatures des chaînes (contenu), pas à l'interface. |
+| 2026-09-16 | **Canal Beta corrigé à la source (v1.0.2, 149)** : `patch.py` étape 3b force `b.a = false` — le flag beta gravé upstream faisait démarrer toute installation neuve en canal Beta, muet pour une publication stable (cause racine documentée le matin même dans `TEST-DEVICE.md`). Preuve : installation fraîche 149/v1.0.2 sur l'émulateur, `base.apk` relu (`pm path` + `pull`) → SHA-256 = livrable, re-décodage → `a:Z` sans initialisateur (false) là où l'upstream décode `a:Z = true` ; self-test **18/18** d'emblée ; rail de réglages focus en violet `#7c22e8`. Garde-fou `test_smali_branches.py` porté à 11 vérifications (mordance vérifiée par mutation). Limite de terrain : lecture directe des préférences impossible sur cet émulateur (pas de root, pas de `run-as`, `adb backup` bloqué) et réglages verrouillés derrière la connexion Twitch — la preuve du canal effectif sur appareil connecté reste à faire (§ 8). |

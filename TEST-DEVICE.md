@@ -162,9 +162,13 @@ v1.0.1 publiée.
    **Cause racine (16/09).** Le socle upstream est un build **beta** : le flag `MainApp.b.a = true`
    est gravé dans le smali d'origine, et `MainApp.p()` écrit `pref_update_channel = "1"` au premier
    lancement quand la préférence est absente. **Toute installation neuve de Twouich démarre donc en
-   canal Beta** — ce n'est pas un réglage hérité, c'est l'état d'usine du paquet. Correctif
-   structurel planifié (v1.0.2) : forcer `b.a = false` et le canal stable dans le build, pour
-   supprimer cette impasse pour les nouveaux utilisateurs.
+   canal Beta** — ce n'est pas un réglage hérité, c'est l'état d'usine du paquet. **Corrigé depuis la
+   v1.0.2 (149)** : `patch.py` (étape 3b) force `b.a = false`, `p()` n'écrit plus rien et le défaut
+   de lecture de `g()` (« 0 » = Stable) s'applique. Vérifié sur les octets installés : le `base.apk`
+   relu de l'appareil décode `a:Z` sans initialisateur (false) là où l'upstream `beta_144` décode
+   `a:Z = true` (contrôle négatif) ; garde-fou ajouté à `test_smali_branches.py`. Les installations
+   existantes gardent leur canal sauvegardé — pour elles, publier aussi une entrée `ReleaseType: 1`
+   ou basculer le canal à la main reste la solution.
 2. **La comparaison de version est fausse en amont.** `b()` compare la version publiée à un plancher
    figé (144), jamais à la version installée : l'app propose d'installer… la version qu'elle exécute
    déjà. Une fois en 146, elle redemande 146 au démarrage suivant. C'est un défaut d'origine ; il

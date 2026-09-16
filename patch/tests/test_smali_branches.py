@@ -157,7 +157,21 @@ def main():
         "le patch doit remplacer le plancher upstream par la version installée",
     )
 
-    # --- 9. Le nettoyage doit bien etre atteignable (pas de return avant) -------
+    # --- 9. Le canal de mise à jour doit démarrer STABLE (flag beta désactivé) --
+    # Le socle upstream est un build beta : b.a = true fait écrire
+    # pref_update_channel = "1" au premier lancement de toute installation
+    # neuve, et le canal Beta ne voit que des entrées ReleaseType: 1 — notre
+    # publication stable y est muette, sans aucune erreur.
+    check(
+        "Canal : le patch force le flag beta à false (canal stable par défaut)",
+        "BETA_FLAG_OLD" in patcher
+        and "BETA_FLAG_NEW" in patcher
+        and "force_stable_channel" in patcher
+        and ".field public static final a:Z = false" in patcher,
+        "le patch doit replacer b.a = true par b.a = false (voir BETA_FLAG_*)",
+    )
+
+    # --- 10. Le nettoyage doit bien etre atteignable (pas de return avant) -------
     body_ok = sanitizer.find(":body_ok")
     is_playlist = sanitizer.find(":is_playlist")
     check(

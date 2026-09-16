@@ -44,9 +44,9 @@ if [ -z "$KEY_PASS" ]; then
     exit 1
 fi
 
-VERSION_CODE=148
-VERSION_NAME="v1.0.1"
-APK_NAME="Twouich_v1.0.1.apk"
+VERSION_CODE=149
+VERSION_NAME="v1.0.2"
+APK_NAME="Twouich_v1.0.2.apk"
 
 echo "═══════════════════════════════════════════════"
 echo "  Twouich — build $VERSION_NAME ($VERSION_CODE)"
