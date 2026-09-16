@@ -415,6 +415,19 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
    `pipefail` sans arbre décodé, et surtout **chemin de fabrique `z3.1` vs `z3` selon la
    plateforme** — `find_factory()` localise désormais au lieu de supposer). Livrable v1.0.3
    régénéré après refactor : 2 173 entrées identiques au CRC, `dist/` restauré aux octets publiés.
+   **Extension du 16/09 (soir) — CI signante** : le workflow a maintenant deux jobs. Sur branche,
+   le job sans signature (comme avant) ; sur **push de tag `v*`**, un job signé publie l'APK +
+   `changelog.html` sur la release du tag. La clé vit dans 4 secrets GitHub chiffrés
+   (`KEYSTORE_B64`/`KEYSTORE_SHA256`/`KEYSTORE_PASS`/`KEY_ALIAS`), l'empreinte du keystore est
+   vérifiée après restauration, `KEY_PASS` ne transite que par l'env de step, et `update.json`
+   reste **manuel** (poussé après la release — piège 404 documenté) ; `test_apk.py` en CI tourne
+   avec `ALLOW_UPDATE_JSON_LAG=1` pour tolérer ce décalage par design. `build.sh` corrige au
+   passage un vrai bug : `KEY_PASS=""` écrasait la variable d'env (invisible en local,
+   `keystore.properties` masquait le chemin env) — désormais `${KEY_PASS:-}`/`${KEY_ALIAS:-...}`.
+   Garde-fou de publication : le tag poussé doit égaler le `VERSION_NAME` de `build.sh`.
+   Validé par **répétition signée** (`workflow_dispatch` : keystore restauré + vérifié, v1+v2+v3,
+   signature contrôlée, empreinte relevée, publication et contrôle d'octets ignorés, release
+   v1.0.3 intacte). Le dispatch ne publie jamais : c'est le mode répétition.
 5. ~~Rebranding~~ — **fait le 15/09/2026** : nom, écran de démarrage, icônes, bannière TV, icône
    adaptative, thème par défaut et pages embarquées sont passés à l'identité Twouich (voir §2 et
    §5). Les **images du tutoriel** (`tut_*.webp`) ont été remappées au lieu d'être recapturées (voir
@@ -455,3 +468,4 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
 | 2026-09-16 | **Release `v1.0.3` (150) publiée** — version de maintenance sans changement fonctionnel, destinée à valider le self-update de l'app 149 installée sur la Freebox. Piège d'asset évité de justesse : le `changelog.html` uploadé d'abord était la copie v1.0.2 d'avant build (remplacé via `gh release upload --clobber`, et un second asset créé à tort par le suffixe `#label` supprimé) ; le `curl` peut ensuite servir un cache CDN périmé — l'API des assets (taille + `updated_at`) fait foi, et `check-release.sh` (« octets servis ») est vert. Observation du self-update **en attente** : la Freebox est repassée `unauthorized` (dialogue ADB à ré-accepter sur l'écran) et la session Twitch y est absente depuis l'installation fraîche — l'updater ne s'exécute qu'après connexion. |
 | 2026-09-16 | **Self-update validé sur le vrai téléviseur (Freebox Pop, Android 10) : 149 → 150.** Cold start → `UpdateActivity` ouverte seule (« v1.0.3 / 150 ») → « Install update » → URL exacte du tag → `PackageInstallerActivity` → installation → octets installés = livrable (`147562df…`), session Twitch conservée (22 chaînes), self-test **18/18**, relance sans dialogue. **Le correctif canal Stable (v1.0.2) est prouvé en production** : la Freebox, installée fraîche en 149, a vu le dialogue sans aucune bascule manuelle. Reste la même limite qu'en § 0.2 : le « INSTALLER » du système est le seul geste humain du parcours. |
 | 2026-09-16 | **CI GitHub Actions verte** (`.github/workflows/build.yml` + mode `SKIP_SIGNING=1` de `build.sh`) : la chaîne est rejouée sans clé à chaque push. Quatre divergences local/CI corrigées en route — dépendances numpy/Pillow du test de marque, ordre garde-mot-de-passe/définition SKIP_SIGNING, sensibilité `pipefail` de la sonde de version sans arbre décodé, et le chemin de fabrique `z3.1`/`z3` propre au décodage Windows (`find_factory()` localise, échoue bruyamment si absent). Le livrable v1.0.3 reconstruit après refactor reste **identique au CRC** (2 173 entrées) aux octets publiés — la recette est redevenue portable sans changer un seul octet du produit. |
+| 2026-09-16 | **CI signante** : secrets keystore chiffrés, job de publication automatique sur tags `v*` (APK + changelog.html), `update.json` resté manuel, répétition signée validée par dispatch. Bug réel corrigé au passage : `KEY_PASS=""` écrasait l'environnement dans `build.sh`. |
