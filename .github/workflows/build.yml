@@ -30,18 +30,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Java 17 (apktool)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Python 3.11 + dépendances (numpy, Pillow)
+      - name: Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Installer numpy et Pillow (épinglés)
-        run: |
-          python -m pip install --disable-pip-version-check numpy==2.3.5 Pillow==11.3.0
 
       - name: Installer apktool 3.0.3 (empreinte vérifiée)
         shell: bash
@@ -55,12 +52,15 @@ jobs:
           echo "$APKTOOL_SHA256  tools/apktool-3.0.3.jar" | sha256sum -c -
           java -jar tools/apktool-3.0.3.jar --version
 
-      - name: Patch tests (miroir Python + branchements smali + marque)
+      - name: Patch tests (miroir Python + branchements smali)
         shell: bash
         run: |
           python patch/tests/test_sanitizer.py
           python patch/tests/test_smali_branches.py
-          python patch/tests/test_brand.py
+          # test_brand.py exige les polices Windows du mot-symbole (ARLRDBD.TTF,
+          # non redistribuables) et test_apk.py exige un APK SIGNÉ : tous deux
+          # restent des contrôles de la machine du mainteneur. La CI prouve la
+          # recette (patchs + recompilation), pas les visuels ni la signature.
 
       - name: Build CI (sans signature — détection de rupture)
         env:
