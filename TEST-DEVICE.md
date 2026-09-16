@@ -125,6 +125,30 @@ poussé après elle.
 Le seul geste humain est le « INSTALLER » du système — Android l'impose, l'app ne peut pas
 l'éviter. Choisir l'URL, télécharger, et lancer l'installeur : tout est fait par l'app.
 
+### Revalidé le 16/09/2026 sur la chaîne v1.0.0 → v1.0.1 (147 → 148)
+
+Même protocole, conditions plus dures cette fois : **installation neuve** de la v1.0.0 (octets de
+la release GitHub, pas un `install -r` qui aurait conservé la session), puis self-update vers la
+v1.0.1 publiée.
+
+- **Sans session Twitch, pas de vérification de mise à jour.** Le helper n'est construit qu'une
+  fois l'utilisateur connecté (callbacks d'auth/RESUME) ; sur une installation fraîche, la
+  connexion du compte fait partie du test. Diagnostic posé par observation `/proc/net/tcp` :
+  aucune connexion vers `raw.githubusercontent.com` tant que la session est absente.
+- **Le canal Beta a de nouveau muetté l'updater — cause racine trouvée.** L'appareil neuvement
+  installé est reparti en Beta (voir piège 1 ci-dessous) : le fetch part bien (connexion TCP
+  observée), le JSON est servi correctement (200 sur `master/update.json`, entrée 148 stable), et
+  pourtant aucun dialogue — l'entrée stable est filtrée avant la comparaison. Bascule **Stable**
+  via Réglages → Updates, comme au 15/09.
+- **Parcours complet observé en 147** : cold start → `UpdateActivity` ouverte seule (« New update
+  available! — Version: v1.0.1 (148) ») → « Install update » → téléchargement depuis la release →
+  installeur système → « Application installée » → `versionCode=148 versionName=v1.0.1`,
+  **session Twitch conservée** (22 chaînes suivies), self-test 18/18.
+- **La comparaison corrigée est prouvée** (piège 2) : en 147, l'app propose exactement 148 — ni
+  147 en boucle, ni rien ; une fois en 148, plus aucune proposition.
+- **État final propre** : le build instrumenté utilisé pour le diagnostic a été remplacé par la
+  v1.0.1 publiée (`install -r`) ; SHA-256 du `base.apk` installé = `469db927…` = release = `dist/`.
+
 ### Deux pièges qui font échouer ce test sans rien casser
 
 1. **Le canal de mise à jour.** `helpers/a.b()` filtre par canal *avant* de regarder la version
@@ -134,6 +158,13 @@ l'éviter. Choisir l'URL, télécharger, et lancer l'installeur : tout est fait 
    S0undTV : même paquet, donc même préférences) — deux lancements muets, puis dialogue immédiat
    après passage en Stable (Réglages → General settings → *Update channel*). **Avant de suspecter la
    publication, lire ce canal.**
+
+   **Cause racine (16/09).** Le socle upstream est un build **beta** : le flag `MainApp.b.a = true`
+   est gravé dans le smali d'origine, et `MainApp.p()` écrit `pref_update_channel = "1"` au premier
+   lancement quand la préférence est absente. **Toute installation neuve de Twouich démarre donc en
+   canal Beta** — ce n'est pas un réglage hérité, c'est l'état d'usine du paquet. Correctif
+   structurel planifié (v1.0.2) : forcer `b.a = false` et le canal stable dans le build, pour
+   supprimer cette impasse pour les nouveaux utilisateurs.
 2. **La comparaison de version est fausse en amont.** `b()` compare la version publiée à un plancher
    figé (144), jamais à la version installée : l'app propose d'installer… la version qu'elle exécute
    déjà. Une fois en 146, elle redemande 146 au démarrage suivant. C'est un défaut d'origine ; il
