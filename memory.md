@@ -382,9 +382,17 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
      négatif discriminant) ; garde-fou dans `test_smali_branches.py` (mordance vérifiée).
    - **canal Beta, installations existantes** — publier aussi une entrée `ReleaseType: 1` dans
      `update.json`, sinon les appareils hérités de S0undTV restés en Beta (comme celui du test)
-     ne voient aucune de nos releases. **Publication v1.0.2 non faite** (sur demande) : quand elle
-     aura lieu, pousser `update.json` APRÈS la release, puis mettre à jour le README
-     (téléchargement + section version).
+     ne voient aucune de nos releases.
+     **Décision produit (16/09) : pas d'entrée beta sur ce fork** — les installations 147/148
+     restées en canal Beta doivent basculer en Stable dans les réglages (une fois) pour recevoir
+     les mises à jour ; toute installation d'après la v1.0.2 démarre déjà en Stable.
+     **Publication v1.0.2 faite le 16/09 au soir** : release `v1.0.2` (APK + `changelog.html`,
+     tag = VersionName), `update.json` poussé APRÈS la release, README à jour (section + liens),
+     `check-release.sh` vert de bout en bout (assets 200, octets servis = livrable).
+     **Nettoyage GitHub le même soir** : releases de test `v1.5.10x-twouich1/2` supprimées et
+     tags hérités de S0und (`beta`, `v1.4` … `v1.5.10x`) supprimés — ne restent que les
+     `v1.0.0/1/2`. Le tag `beta` supprimé casse l'URL beta gravée dans l'app, cohérent avec
+     l'absence d'entrée beta.
    - ~~**comparaison de version** — remplacer le plancher figé (144) par la version installée~~ —
      **fait le 15/09/2026** : la comparaison lit désormais `PackageManager.getPackageInfo()` et ne
      propose une mise à jour que si la release est plus récente que la version installée
@@ -433,3 +441,5 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
 | 2026-09-15 | Constaté sur l'appareil en passant par ses réglages : thème « Dark grey (default) » + accent **« Red (default) »** → l'app, réglages d'origine, **s'affiche encore rouge** (mesuré `#a00f2b` sur le commutateur). La refonte a couvert les assets et les textes, pas l'accent par défaut. Consigné en §8 (deux correctifs possibles, dont un choix). |
 | 2026-09-16 | **Accent d'usine repeint** : la famille `theme_red*` passe aux couleurs de marque et le libellé « Red (default) » devient « Twouich » (`patch.py` étape 4b, contrôle `test_apk.py` sur `resources.arsc`). Mesuré sur l'appareil après mise à jour (`install -r`) : **0 pixel** des anciens accents UI, violet de marque `#7c22e8` sur les zones de focus, self-test toujours **18/18** — le rouge restant à l'écran appartient aux miniatures des chaînes (contenu), pas à l'interface. |
 | 2026-09-16 | **Canal Beta corrigé à la source (v1.0.2, 149)** : `patch.py` étape 3b force `b.a = false` — le flag beta gravé upstream faisait démarrer toute installation neuve en canal Beta, muet pour une publication stable (cause racine documentée le matin même dans `TEST-DEVICE.md`). Preuve : installation fraîche 149/v1.0.2 sur l'émulateur, `base.apk` relu (`pm path` + `pull`) → SHA-256 = livrable, re-décodage → `a:Z` sans initialisateur (false) là où l'upstream décode `a:Z = true` ; self-test **18/18** d'emblée ; rail de réglages focus en violet `#7c22e8`. Garde-fou `test_smali_branches.py` porté à 11 vérifications (mordance vérifiée par mutation). Limite de terrain : lecture directe des préférences impossible sur cet émulateur (pas de root, pas de `run-as`, `adb backup` bloqué) et réglages verrouillés derrière la connexion Twitch — la preuve du canal effectif sur appareil connecté reste à faire (§ 8). |
+| 2026-09-16 | **v1.0.2 installée sur la Freebox Pop du foyer (192.168.1.24, Android 10)** : l'ADB réseau n'était pas appairé (dialogue d'autorisation validé à la télécommande) ; la S0undTV officielle beta_144 qui y était a été désinstallée (signature différente) puis Twouich installée — session Twitch à reconnecter une fois. Self-test **18/18** dès le premier lancement, aucune erreur, updater silencieux (149 = dernière). |
+| 2026-09-16 | **Release `v1.0.2` publiée** (tag = VersionName, APK + `changelog.html`), `update.json` poussé après la release, README mis à jour ; `check-release.sh` vert de bout en bout (assets servis 200, SHA-256 servi = livrable). **Décision produit : aucune entrée beta** — releases de test `v1.5.10x-twouich1/2` supprimées et **tous les tags hérités de S0und supprimés** (`beta`, `v1.4`…`v1.5.10x`) : le dépôt GitHub ne montre plus que `v1.0.0/1/2`, aucun vieux numéro de version nulle part. Les installations 147/148 restées en Beta doivent basculer en Stable dans les réglages pour recevoir les mises à jour. |
