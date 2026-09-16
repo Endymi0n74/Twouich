@@ -1,5 +1,7 @@
 # Twouich
 
+[![CI](https://github.com/Endymi0n74/Twouich/actions/workflows/build.yml/badge.svg)](https://github.com/Endymi0n74/Twouich/actions/workflows/build.yml)
+
 Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires SSAI.
 
 > Projet indépendant, sans affiliation avec Twitch Interactive, Inc.
