@@ -150,7 +150,8 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           mkdir -p keys
-          base64 -d "$KEYSTORE_B64" > keys/twouich.keystore
+          # GNU base64 -d attend un fichier : passer par stdin, pas en argument.
+          printf '%s' "$KEYSTORE_B64" | base64 -d > keys/twouich.keystore
           echo "$KEYSTORE_SHA256  keys/twouich.keystore" | sha256sum -c -
 
       - name: Build signé v1+v2+v3
