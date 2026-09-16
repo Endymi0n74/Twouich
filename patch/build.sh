@@ -53,9 +53,9 @@ if [ "$SKIP_SIGNING" != "1" ] && [ -z "$KEY_PASS" ]; then
     exit 1
 fi
 
-VERSION_CODE=150
-VERSION_NAME="v1.0.3"
-APK_NAME="Twouich_v1.0.3.apk"
+VERSION_CODE=151
+VERSION_NAME="v1.0.4"
+APK_NAME="Twouich_v1.0.4.apk"
 
 echo "═══════════════════════════════════════════════"
 echo "  Twouich — build $VERSION_NAME ($VERSION_CODE)"

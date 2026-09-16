@@ -14,7 +14,11 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 
 ## Installation
 
-Télécharger depuis la release publiée.
+Télécharger [`Twouich_v1.0.4.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.4/Twouich_v1.0.4.apk) depuis la release publiée.
+
+```bash
+adb install -r Twouich_v1.0.4.apk
+```
 
 
 

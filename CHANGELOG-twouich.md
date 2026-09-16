@@ -1,5 +1,9 @@
 # Journal des modifications — Twouich
 
+## v1.0.4 — 16 septembre 2026
+
+- Version de maintenance, publiée pour valider la chaîne de publication automatique (tag poussé → build signé par la CI) ; aucun changement fonctionnel par rapport à la v1.0.3.
+
 ## v1.0.3 — 16 septembre 2026
 
 - Version de maintenance, publiée pour valider le parcours de mise à jour automatique (aucun changement fonctionnel par rapport à la v1.0.2).
