@@ -149,6 +149,21 @@ v1.0.1 publiée.
 - **État final propre** : le build instrumenté utilisé pour le diagnostic a été remplacé par la
   v1.0.1 publiée (`install -r`) ; SHA-256 du `base.apk` installé = `469db927…` = release = `dist/`.
 
+### Validé sur le vrai téléviseur du foyer (Freebox Pop, Android 10) : 150 → 151 (v1.0.4, APK signé par la CI), le 16/09/2026
+
+Même protocole, et cette fois l'APK proposé n'a jamais été construit localement : c'est le
+**build signé par la CI** au push du tag `v1.0.4` (SHA-256 `dcaa1efd…`) — premier self-update
+à installer les octets produits par la chaîne tag → build signé → publication automatique :
+
+- parcours complet : `UpdateActivity` ouverte seule (« New update available! — Version: v1.0.4 /
+  Version code: 151 ») → « Install update » → `AutoUpdateSrv` : `releases/download/v1.0.4/`
+  → `PackageInstallerActivity` (« Voulez-vous mettre à jour cette application ? » — l'écran
+  « INSTALLER » système a été piloté par ADB) → `versionCode=151 versionName=v1.0.4` ;
+- **octets installés = octets servis** (`pm path` + `pull` → SHA-256 `dcaa1efd…` = livrable CI) ;
+- **session Twitch conservée** (« Followed Channels (22) »), self-test **18/18**, relance sans
+  dialogue. Transport ADB instable pendant la session (TV passée hors réseau un temps) : les
+  étapes courtes avec reconnexion ont suffi.
+
 ### Validé sur le vrai téléviseur du foyer (Freebox Pop, Android 10) : 149 → 150, le 16/09/2026
 
 Même protocole sur matériel réel cette fois, et double preuve au passage :
