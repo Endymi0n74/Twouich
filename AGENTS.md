@@ -170,6 +170,7 @@ Les documents sont **en français**, comme le reste du projet.
 
 - [ ] `bash patch/build.sh` passe jusqu'à `signature verified [v1, v2, v3]` ;
 - [ ] les tests locaux passent (4 suites + `bash patch/check-release.sh` s'il y a une publication) ;
+- [ ] `python patch/sync-readme.py --check` passe (README et CHANGELOG synchronisés) ;
 - [ ] le self-test embarqué passe sur appareil (`bash patch/test-selftest.sh` → `SELFTEST n/n`) ;
 - [ ] si le chemin de lecture est touché : lecture réelle vérifiée sur appareil (flux qui tourne,
       `0 erreur de lecture`), pas seulement « l'app se lance » ;
@@ -178,7 +179,10 @@ Les documents sont **en français**, comme le reste du projet.
 
 ## 8. Release (sur demande uniquement)
 
-1. Incrémenter `VERSION_CODE` / `VERSION_NAME` dans `patch/build.sh` ;
+1. Incrémenter `VERSION_CODE` / `VERSION_NAME` dans `patch/build.sh`, puis ajouter l'entrée
+   correspondante en tête de `CHANGELOG-twouich.md` ; `python patch/sync-readme.py` aligne alors
+   le README (lien d'installation vers l'APK du tag + section de version manquante) — la CI
+   vérifie cet alignement à chaque push (`sync-readme.py --check`) ;
 2. reconstruire, puis `update.json` doit décrire **exactement** le livrable
    (`APK`, `ReleaseDate`, `ReleaseType`, `VersionCode`, `VersionName`, `hasChangeLog`) ;
 3. le **tag Git doit être identique au `VersionName`** — l'updater de l'app s'appuie dessus ;

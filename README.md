@@ -109,6 +109,7 @@ Ce dépôt redistribue uniquement des binaires patchés et les patchs associés 
 | `patch/branding/make_brand.py` | génération du splash, des icônes et de la bannière |
 | `patch/smali/com/twouich/adblock/` | filtre HLS et self-test embarqué |
 | `update.json` | release annoncée à l'application |
+| `patch/sync-readme.py` | synchronise le README (liens + sections) avec le CHANGELOG |
 | `CHANGELOG-twouich.md` | journal public |
 | `TEST-DEVICE.md` | procédure de validation appareil |
 | `AUDIT.md` | audit technique et limites connues |

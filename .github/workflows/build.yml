@@ -73,6 +73,11 @@ jobs:
           # restent des contrôles du mainteneur. La CI prouve la recette, pas
           # les visuels ni la signature.
 
+      - name: Vérifier la synchronisation README/CHANGELOG
+        shell: bash
+        run: |
+          python patch/sync-readme.py --check
+
       - name: Build CI (sans signature — détection de rupture)
         env:
           SKIP_SIGNING: '1'
