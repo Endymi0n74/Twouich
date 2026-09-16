@@ -8,7 +8,10 @@
 #
 #   1. le bloc « Télécharger … / adb install -r … » pointe l'APK de la
 #      version la PLUS RÉCENTE du CHANGELOG (URL exacte du tag) ;
-#   2. chaque entrée « ## vX.Y.Z » du CHANGELOG a sa section dans le README.
+#   2. chaque entrée « ## vX.Y.Z » du CHANGELOG a sa section dans le README,
+#      SAUF si le README n'en contient plus aucune (opt-out : une éditation
+#      qui retire toutes les sections désactive cette règle — le script ne
+#      les réimpose pas).
 #
 # Mode `sync` (défaut)  : corrige le bloc de liens et insère les sections
 #                         manquantes au-dessus de la première existante.
@@ -124,27 +127,33 @@ def readme_versions(text: str) -> list[str]:
 
 
 def fix_link_block(lines: list[str], version: str) -> list[str]:
-    """Remplace les deux lignes du bloc de liens par leur forme attendue."""
+    """Pointe le bloc de liens vers la version donnée.
+
+    Le bloc possédé tolère deux formes : le bloc complet (lien + clôture
+    adb), ou une ligne « Télécharger … » remaniée à la main sans lien —
+    la clôture adb est alors recréée. Sans aucune ligne « Télécharger »,
+    le bloc est perdu : échec bruyant.
+    """
     expected_link, expected_adb = link_lines(version)
     link_idx = adb_idx = None
     for i, line in enumerate(lines):
-        if re.match(r"^Télécharger \[`Twouich_", line):
+        if re.match(r"^Télécharger", line):
             link_idx = i
         elif re.match(r"^adb install -r Twouich_", line):
             adb_idx = i
-    if link_idx is None or adb_idx is None:
-        missing = []
-        if link_idx is None:
-            missing.append("ligne « Télécharger [`Twouich_…") 
-        if adb_idx is None:
-            missing.append("ligne « adb install -r Twouich_… »")
+    if link_idx is None:
         raise SystemExit(
             "❌ bloc d'installation introuvable dans README.md ("
-            + " et ".join(missing)
-            + ").\n   Réinsérer le bloc sous « ## Installation », puis relancer."
+            "aucune ligne « Télécharger … » sous « ## Installation »).\n"
+            "   Réinsérer le bloc, puis relancer."
         )
     lines[link_idx] = expected_link
-    lines[adb_idx] = expected_adb
+    if adb_idx is None:
+        lines[link_idx + 1 : link_idx + 1] = [
+            "", "```bash", expected_adb, "```",
+        ]
+    else:
+        lines[adb_idx] = expected_adb
     return lines
 
 
@@ -153,6 +162,10 @@ def insert_missing_sections(
 ) -> tuple[list[str], list[str]]:
     """Insère les sections manquantes au-dessus de la première existante."""
     present = set(readme_versions("\n".join(lines)))
+    if not present:
+        # Opt-out : une édition qui retire toutes les sections désactive la
+        # règle — le script ne les réimpose pas.
+        return lines, []
     missing = [e for e in entries if e["version"] not in present]
     if not missing:
         return lines, []
@@ -191,7 +204,7 @@ def check(lines: list[str], entries: list[dict]) -> int:
     problems: list[str] = []
 
     actual_link = next(
-        (l for l in lines if re.match(r"^Télécharger \[`Twouich_", l)), None
+        (l for l in lines if re.match(r"^Télécharger", l)), None
     )
     if actual_link is None:
         problems.append("bloc d'installation introuvable (ligne « Télécharger … »)")
@@ -211,7 +224,9 @@ def check(lines: list[str], entries: list[dict]) -> int:
 
     present = set(readme_versions("\n".join(lines)))
     absent = [e["version"] for e in entries if e["version"] not in present]
-    if absent:
+    # Opt-out : le contrôle des sections ne s'applique que si le README en
+    # a encore au moins une (sinon il ne les réimpose pas).
+    if absent and present:
         problems.append(
             "sections de version absentes du README : " + ", ".join(absent)
         )
