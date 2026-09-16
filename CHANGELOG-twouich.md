@@ -1,5 +1,9 @@
 # Journal des modifications — Twouich
 
+## v1.0.3 — 16 septembre 2026
+
+- Version de maintenance, publiée pour valider le parcours de mise à jour automatique (aucun changement fonctionnel par rapport à la v1.0.2).
+
 ## v1.0.2 — 16 septembre 2026
 
 - Les nouvelles installations démarrent désormais sur le canal de mise à jour **Stable** (le socle d'origine était un build beta et forçait le canal Beta au premier lancement, ce qui rendait la mise à jour automatique muette tant qu'aucune entrée beta n'était publiée).
