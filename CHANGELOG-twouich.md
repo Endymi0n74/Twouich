@@ -1,5 +1,10 @@
 # Journal des modifications — Twouich
 
+## v1.0.5 — 18 septembre 2026
+
+- Sentinelle intégrée au filtre : toute balise publicitaire non reconnue est consignée en logcat (`marqueur pub inconnu`), pour détecter automatiquement un futur changement de format côté Twitch.
+- Build reproductible au sens strict : horodatage ZIP normalisé, date de la page « Nouveautés » figée, fins de ligne canonisées — deux builds du même arbre produisent des octets identiques.
+
 ## v1.0.4 — 16 septembre 2026
 
 - Version de maintenance, publiée pour valider la chaîne de publication automatique (tag poussé → build signé par la CI) ; aucun changement fonctionnel par rapport à la v1.0.3.
