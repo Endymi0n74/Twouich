@@ -102,7 +102,7 @@ bash patch/build.sh          # APK upstream → apktool d → patch.py → apkto
 ## 5. Vérifier (obligatoire avant de dire « c'est bon »)
 
 ```bash
-python patch/tests/test_sanitizer.py       # 22 assertions : règles de nettoyage (miroir Python)
+python patch/tests/test_sanitizer.py       # 48 assertions : règles de nettoyage (miroir Python) + fixture SSAI réelle du 18/09/2026 + sentinelle marqueur inconnu
 python patch/tests/test_smali_branches.py  # 11 assertions : branchements réels du smali
 python patch/tests/test_brand.py           # 14 assertions : identité visuelle (voir plus bas)
 python patch/tests/test_apk.py             # 13 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),

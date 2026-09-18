@@ -37,8 +37,16 @@ export MSYS2_ARG_CONV_EXCL='*'
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-APK="dist/Twouich_v1.0.1.apk"
 PKG="com.s0und.s0undtv"
+# Les valeurs figées (nom du livrable) vivent dans patch/build.sh et nulle part
+# ailleurs : on les y lit, sinon chaque bump de version ferait échouer ce
+# harnais pour une mauvaise raison — même mécanique que test-device.sh.
+APK_NAME="$(sed -n 's/^APK_NAME="\(.*\)"$/\1/p' patch/build.sh | head -1)"
+if [ -z "$APK_NAME" ]; then
+    echo "❌ APK_NAME illisible dans patch/build.sh"
+    exit 1
+fi
+APK="dist/$APK_NAME"
 ACTIVITY="$PKG/com.s0und.s0undtv.activities.FireTVMainActivity"
 REMOTE="/data/local/tmp/twouich-selftest.apk"
 SERIAL=""

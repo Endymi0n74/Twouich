@@ -8,6 +8,11 @@
 # Lu par AdBlockDataSource pour tracer le resultat sur logcat.
 .field public static lastCut:I
 
+# Sentinelle « marqueur pub inconnu » : true si la derniere playlist contenait
+# une balise ressemblant a un marqueur publicitaire qu'aucune regle connue ne
+# couvre (cf. b()). Purement indicative : le nettoyage n'en depend pas.
+.field public static suspicious:Z
+
 
 # direct methods
 .method public constructor <init>()V
@@ -78,6 +83,11 @@
     const/4 v6, 0x0
 
     const/4 v11, 0x0
+
+    # sentinelle : drapeau reinitialise a chaque playlist
+    const/4 v0, 0x0
+
+    sput-boolean v0, Lcom/twouich/adblock/PlaylistSanitizer;->suspicious:Z
 
     :loop
     if-ge v2, v3, :end_loop
@@ -189,6 +199,12 @@
     goto :drop
 
     :not_in_ad
+    # sentinelle « marqueur pub inconnu » : observation pure, aucune consequence
+    # sur le nettoyage (voir b() et le miroir patch/tests/test_sanitizer.py).
+    # Pose ici (hors de toute zone pub deja reconnue) pour ne pas signaler les
+    # balises d'un pod identifie ; une seule alerte par playlist (drapeau).
+    invoke-static {v4}, Lcom/twouich/adblock/PlaylistSanitizer;->b(Ljava/lang/String;)V
+
     const-string v5, "#EXTINF"
 
     invoke-virtual {v4, v5}, Ljava/lang/String;->startsWith(Ljava/lang/String;)Z
@@ -251,4 +267,118 @@
     move-result-object p0
 
     return-object p0
+.end method
+
+
+# Sentinelle « marqueur pub inconnu » : cette balise ressemble-t-elle a un
+# marqueur publicitaire qu'aucune regle connue ne couvre ? Si oui, Log.w une
+# fois par playlist (drapeau suspicious). Appelée depuis a() en :not_in_ad,
+# uniquement pour des lignes hors zone pub deja reconnue — donc les balises
+# d'un pod identifie (DATERANGE stitched-ad, CUE-OUT/IN...) n'arrivent jamais
+# ici par le flux normal.
+# Scenario couvert : Twitch renomme son format (classe SSAI differente avec les
+# memes attributs de diffusion X-TV-TWITCH-AD-*, ou nouvelle balise CUE).
+# Miroir exact : suspicious_tag() dans patch/tests/test_sanitizer.py.
+.method public static b(Ljava/lang/String;)V
+    .locals 3
+
+    # p0 = ligne (deja trimmee par a())
+
+    # famille CUE client-side : tout #EXT-X-CUE* autre que CUE-OUT / CUE-IN
+    const-string v0, "#EXT-X-CUE"
+
+    invoke-virtual {p0, v0}, Ljava/lang/String;->startsWith(Ljava/lang/String;)Z
+
+    move-result v0
+
+    if-eqz v0, :not_cue
+
+    const-string v0, "#EXT-X-CUE-OUT"
+
+    invoke-virtual {p0, v0}, Ljava/lang/String;->startsWith(Ljava/lang/String;)Z
+
+    move-result v0
+
+    if-nez v0, :silent
+
+    const-string v0, "#EXT-X-CUE-IN"
+
+    invoke-virtual {p0, v0}, Ljava/lang/String;->startsWith(Ljava/lang/String;)Z
+
+    move-result v0
+
+    if-nez v0, :silent
+
+    goto :report
+
+    :not_cue
+    # seule une plage DATERANGE peut porter des attributs de diffusion pub
+    const-string v0, "#EXT-X-DATERANGE"
+
+    invoke-virtual {p0, v0}, Ljava/lang/String;->startsWith(Ljava/lang/String;)Z
+
+    move-result v0
+
+    if-eqz v0, :silent
+
+    # sans attribut X-TV-TWITCH-AD-* : plage utilitaire (timestamp, session,
+    # stream-source, trigger...) — rien a signaler
+    const-string v0, "X-TV-TWITCH-AD-"
+
+    invoke-virtual {p0, v0}, Ljava/lang/String;->contains(Ljava/lang/CharSequence;)Z
+
+    move-result v0
+
+    if-eqz v0, :silent
+
+    # classe connue
+    const-string v0, "stitched-ad"
+
+    invoke-virtual {p0, v0}, Ljava/lang/String;->contains(Ljava/lang/CharSequence;)Z
+
+    move-result v0
+
+    if-nez v0, :silent
+
+    # metadonnee de pod connue : twitch-ad-quartile
+    const-string v0, "quartile"
+
+    invoke-virtual {p0, v0}, Ljava/lang/String;->contains(Ljava/lang/CharSequence;)Z
+
+    move-result v0
+
+    if-eqz v0, :report
+
+    goto :silent
+
+    :report
+    # une seule alerte par playlist
+    sget-boolean v0, Lcom/twouich/adblock/PlaylistSanitizer;->suspicious:Z
+
+    if-nez v0, :silent
+
+    const/4 v0, 0x1
+
+    sput-boolean v0, Lcom/twouich/adblock/PlaylistSanitizer;->suspicious:Z
+
+    const-string v0, "Twouich"
+
+    new-instance v1, Ljava/lang/StringBuilder;
+
+    invoke-direct {v1}, Ljava/lang/StringBuilder;-><init>()V
+
+    const-string v2, "marqueur pub inconnu : "
+
+    invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+
+    invoke-virtual {v1, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+
+    invoke-virtual {v1}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
+
+    move-result-object v1
+
+    invoke-static {v0, v1}, Landroid/util/Log;->w(Ljava/lang/String;Ljava/lang/String;)I
+
+    :silent
+    return-void
 .end method

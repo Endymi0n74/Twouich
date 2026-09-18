@@ -14,6 +14,11 @@ CUTS="$(grep -o 'segments pub retires : *[0-9]*' "$LOG" | sed 's/.*: *//' | awk 
 MAXCUT="$(grep -o 'segments pub retires : *[0-9]*' "$LOG" | sed 's/.*: *//' | sort -n | tail -1)"
 CUTLINES="$(grep -c 'segments pub retires : *[1-9]' "$LOG" || true)"
 PROXYFAIL="$(grep -c 'proxy indisponible' "$LOG" || true)"
+# Sentinelle « marqueur pub inconnu » (PlaylistSanitizer.b()) : balises qui
+# ressemblent a un marqueur pub sans etre couvertes par une regle connue.
+# Voir AUDIT.md § 4.3 et le miroir patch/tests/test_sanitizer.py.
+UNKNOWN="$(grep 'marqueur pub inconnu' "$LOG" | grep -v 'marqueur pub inconnu : SENTINEL' || true)"
+UNKNOWN_N="$(printf '%s\n' "$UNKNOWN" | grep -c . || true)"
 
 echo "═══════════════════════════════════════════════════════════════════════"
 echo "  VERDICT DE LA CAPTURE — $(basename "$LOG")"
@@ -23,7 +28,14 @@ printf '  playlists avec pubs retirées : %s\n' "$CUTLINES"
 printf '  segments pub retirés (total) : %s\n' "$CUTS"
 printf '  max sur une playlist         : %s\n' "${MAXCUT:-0}"
 printf '  replis proxy → direct        : %s\n' "$PROXYFAIL"
+printf '  marqueurs pub inconnus       : %s\n' "$UNKNOWN_N"
 echo ""
+
+if [ "$UNKNOWN_N" -gt 0 ]; then
+    echo "  🚨 balises suspectées publicitaires NON couvertes par les règles :"
+    printf '%s\n' "$UNKNOWN" | head -3 | sed 's/^/     /'
+    echo ""
+fi
 
 if [ "$CLEANED" -gt 0 ]; then
     echo "  🕒 premières coupures observées :"
@@ -49,6 +61,12 @@ if [ "$CLEANED" -eq 0 ]; then
     echo "  ❓ AUCUNE playlist nettoyée : le lecteur n'est pas passé par le filtre."
     echo "     → vérifie que la version installée est bien celle du dépôt (patch/build.sh, VERSION_NAME)"
     echo "     → relance une capture : adb logcat -v time -s Twouich:V *:S"
+elif [ "$UNKNOWN_N" -gt 0 ]; then
+    echo "  🚨 MARQUEUR(S) PUB NON RECONNU(S) : Twitch a changé de format —"
+    echo "     les balises ci-dessus ressemblent à des pubs (X-TV-TWITCH-AD-* / CUE)"
+    echo "     qu'aucune règle de PlaylistSanitizer ne couvre. Capturer la playlist"
+    echo "     brute (méthode AUDIT.md § 4.4), ajouter la règle dans le smali + un cas"
+    echo "     figé dans patch/tests/test_sanitizer.py, puis rebuild."
 elif [ "$CUTS" -eq 0 ]; then
     echo "  ⚠️  Le filtre tourne mais n'a rien retiré."
     echo "     → soit aucune coupure publicitaire n'a eu lieu pendant la capture,"

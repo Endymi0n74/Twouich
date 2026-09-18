@@ -4,7 +4,7 @@
 > upstream **S0undTV**. Dépôt : `https://github.com/Endymi0n74/Twouich` — atelier local :
 > `D:\Codex\Twouich`.
 
-Dernière mise à jour : **16 septembre 2026**.
+Dernière mise à jour : **18 septembre 2026**.
 
 ---
 
@@ -17,8 +17,8 @@ Dernière mise à jour : **16 septembre 2026**.
 | Identité visuelle | piste **C** « dégradé + monogramme », générée par `patch/branding/make_brand.py` |
 | Palette | violet profond `#7c22e8` → `#210849` (dégradé 315°), mot-symbole puffy `#ffffff`, tagline `#e6d8ff` |
 | Base upstream | S0undTV `beta_144.apk`, SHA-256 `578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0` |
-| Version produite | `versionCode 149` / `versionName v1.0.2` |
-| Livrable | `dist/Twouich_v1.0.2.apk` (signé v1+v2+v3, zipalign vérifié, SHA-256 `5696048e…`) |
+| Version produite | `versionCode 151` / `versionName v1.0.4` |
+| Livrable | `dist/Twouich_v1.0.4.apk` (signé par la CI, v1+v2+v3, zipalign vérifié, SHA-256 `dcaa1efd…`) |
 | Clé de signature | `keys/twouich.keystore`, alias `twouich-dev` — **non versionnée, à sauvegarder hors du dossier** ; mot de passe **hors du dépôt** (`keys/keystore.properties`, ignoré, ou `KEY_PASS`) |
 | Modèle Android minimum | API 23 (Android 6), cible 35 |
 
@@ -151,7 +151,7 @@ Détail complet : [`AUDIT.md`](AUDIT.md).
 ### En local, sans appareil
 
 ```bash
-python patch/tests/test_sanitizer.py      # 22 assertions : règles de nettoyage (miroir Python)
+python patch/tests/test_sanitizer.py      # 48 assertions : règles de nettoyage (miroir Python) + fixture SSAI réelle du 18/09/2026 + sentinelle marqueur inconnu
 python patch/tests/test_smali_branches.py # 11 assertions : branchements réels du smali (pièges Dalvik)
 python patch/tests/test_brand.py          # 14 assertions : identité visuelle (assets, rouge mort, zone sûre,
                                           #   captures du tutoriel remappées)
@@ -291,6 +291,26 @@ Twitch gratuit connecté, session de 4 minutes sur une chaîne en direct :
   code compilé (623 → 328 octets, 3 segments retirés). La capture live reste utile pour vérifier la
 tenne pendant un direct, mais elle n'est plus la seule preuve possible.
 
+**Validé le 18/09/2026** (même émulateur, v1.0.4, compte Twitch reconnecté) — la première coupure
+publicitaire **réelle** servie à l'app, avec recoupage PC ↔ appareil :
+
+- **radar multi-chaînes côté PC** (refetch token GQL anonyme → `usher.ttvnw.net` → playlist
+  variante toutes les ~8 s) pour trouver une chaîne avec pod publicitaire en cours, puis lecture
+  de cette chaîne sur l'appareil pendant la session ;
+- **1782 nettoyages, 571 playlists avec pubs retirées, 5974 segments pub supprimés** — pod
+  maximum : 22 segments d'un coup (playlist 58 ko → 2,8 ko), 0 repli proxy ;
+- le marqueur servi ce jour-là est **exactement celui des 3 règles** (`twitch-stitched-ad`,
+  titres `Amazon|<id>`, `DISCONTINUITY`) plus une classe nouvelle sans effet
+  (`twitch-ad-quartile`) : **34 playlists brutes capturées, 0 fuite** au rejouage dans le miroir
+  Python, dont une figée comme fixture de régression (`patch/tests/fixtures/ssai-2026-09-18.m3u8`,
+  session et tracking neutralisés) — l'hypothèse d'un format non reconnu est invalidée ;
+- les **24 « Source error »** de la session sont des `PlaylistResetException` d'ExoPlayer en
+  **fin de pod** (la playlist pub est un flux de substitution `MEDIA-SEQUENCE:0` ; au retour du
+  contenu, la renumérotation force une resync en 2–4 s, récupérée automatiquement) — effet de
+  bord attendu du stripping, pas des fuites ;
+- l'insertion SSAI est **par session de token** : le PC et l'app peuvent être simultanément dans
+  des états pub différents — un écart entre les deux flux n'est pas une preuve de fuite.
+
 ## 6. Leçons — les cinq bugs de branchement
 
 Quatre cassaient la lecture, le cinquième faussait la preuve. Tous invisibles pour le miroir Python
@@ -365,8 +385,9 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
 
 1. ~~Prouver le retrait effectif d'une pub~~ — **fait le 15/09/2026** : self-test embarqué vert sur
    l'appareil (`SELFTEST 18/18`, `623 -> 328 octets, segments pub retires : 3`), donc plus besoin
-   d'attendre une coupure. Reste optionnel : une **capture longue** sur une chaîne à pubs, verdict de
-   `analyze_device_log.sh`, pour vérifier la tenue pendant un direct entier.
+   d'attendre une coupure. **Capturé en réel le 18/09/2026** : session live sur une chaîne à forte
+   charge publicitaire, 571 pods retirés / 5974 segments, 0 fuite au rejouage des playlists brutes
+   capturées (détail en §5).
 2. ~~**Publication de la release** `v1.5.10x-twouich1`~~ — **fait le 15/09/2026** : tag exactement
    égal au `VersionName`, APK `Twouich_beta144_ttv1.apk` (SHA-256 `a80be686…`) + `changelog.html`
    joints.
@@ -472,3 +493,7 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
 | 2026-09-16 | **Synchronisation README/CHANGELOG automatisée** : `patch/sync-readme.py` (mode `sync` correcteur, `--check` pour la CI) pointe le bloc d'installation vers l'APK de la version la plus récente et insère les sections de version manquantes — sans jamais réécrire les sections existantes. Contrôle câblé dans le job CI `build` ; garde prouvé par mutations (exit 1) et autoréparation vérifiée. |
 | 2026-09-16 | **Chemin tag → publication validé en réel** : bump 151/v1.0.4 → tag poussé → CI signante a construit, signé, **créé la release** et publié APK + changelog.html, puis vérifié ses octets servis (SHA CI `dcaa1efd…`). `dist/` aligné sur les octets CI (horodatages ZIP apktool), `update.json` poussé après (verdict check-release rouge ~5 min le temps du CDN raw — attendu), chaîne verte ensuite. Au passage : édition web du README intégrée sans l'écraser, et `sync-readme.py` durci (opt-out sections + bloc remanié toléré). |
 | 2026-09-16 | **Self-update 150 → 151 validé sur la Freebox, avec APK signé par la CI** : dialogue v1.0.4/151 ouvert seul au cold start, URL du tag en logcat, « INSTALLER » système piloté par ADB, octets installés = octets servis CI (`dcaa1efd…`), session Twitch conservée (22 chaînes), self-test 18/18. La chaîne complète push → CI signante → self-update sur TV réelle est désormais prouvée de bout en bout. |
+| 2026-09-18 | **Endpoints tiers : tous vivants, point clos.** Lecture statique du smali décompilé (`work/decoded/`) : 7TV appelle **déjà l'API v3** (`7tv.io/v3/emote-sets/global` + `users/twitch/<login>` — l'hypothèse d'un ancien endpoint cassé est invalidée), BTTV/FFZ/robotty répondent 200 (robotty = opt-in via réglage), le chat charge réellement sur l'appareil (`FFZ Done`/`BTTV Done`/`7TV Done`, 45 emotes globales 7TV). Le « proxy Tokyo » n'existe pas : le seul `"Tokyo"` du smali est une table de fuseaux horaires (`tyo`/`Tokyo`, `P6/d.smali`). Aucun service de pronouns dans la build. Rien à patcher. |
+| 2026-09-18 | **Première coupure pub réelle capturée et retirée** : radar multi-chaînes côté PC (token GQL anonyme → usher → variante, dumps bruts au moment d'une pub) pour cibler une chaîne avec pod en cours, puis session sur l'appareil — 1782 nettoyages, 571 pods retirés, 5974 segments, max 22/pod. Les 34 playlists brutes rejouées dans le miroir : **0 fuite** ; une fixture de régression figée (`patch/tests/fixtures/ssai-2026-09-18.m3u8`, session/tracking neutralisés). Le marqueur servi est exactement celui des 3 règles existantes — l'hypothèse d'un format non reconnu est invalidée, aucune règle à ajouter. `test_sanitizer.py` porté à 33 assertions (compteurs synchronisés dans AGENTS.md/AUDIT.md). |
+| 2026-09-18 | **Sentinelle « marqueur pub inconnu » implantée** : détection automatique si Twitch sert un jour un format hors des 3 règles. `PlaylistSanitizer.b(String)` émet `Log.w("Twouich", "marqueur pub inconnu : …")` (1 ligne max/playlist, drapeau reseté par playlist, appelé uniquement hors zones déjà reconnues) sur deux familles : `#EXT-X-CUE*` inconnu, et DATERANGE avec attributs `X-TV-TWITCH-AD-*` sans `stitched-ad` ni `quartile`. Logique prouvée dans le miroir d'abord (leçon des 5 bugs de branchement — le portage smali a de nouveau révélé un branchement inversé dans la sonde, attrapé avant le build), sonde `SentinelProbe` (`SENTINEL 6/6` sur appareil via app_process), verdict 🚨 branché dans `analyze_device_log.sh` **avant** les autres (un format renommé masquerait les compteurs), et silence vérifié en live réel (>20 min, 0 alerte). `test_sanitizer.py` à 48 assertions. Sémantique de nettoyage inchangée — observation pure. |
+| 2026-09-18 | **Les « Source error » de fin de pod expliquées** : `m3.l$d` = `PlaylistResetException` d'ExoPlayer — la playlist pub est un flux de substitution (`MEDIA-SEQUENCE:0`, `EXT-X-START`) et la renumérotation au retour du contenu force une resync de 2–4 s, récupérée seule. Effet de bord inhérent au stripping, non corrigeable sans re-reset de session usher ; toutes les variantes restent en contenu pendant un pod (vérifié), donc pas d'atténuation possible par bascule de variante. |
