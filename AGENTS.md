@@ -107,6 +107,8 @@ python patch/tests/test_smali_branches.py  # 11 assertions : branchements réels
 python patch/tests/test_brand.py           # 14 assertions : identité visuelle (voir plus bas)
 python patch/tests/test_apk.py             # 13 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),
                                            #   dont l'accord avec update.json
+python patch/tests/test_normalize_apk.py   # 9 assertions : le normaliseur d'horodatage ZIP ne touche que
+                                           #   l'horodatage (CRC/contenu intacts, faux EOCD ignoré, idempotent)
 bash   patch/tests/test_analyzer.sh        # 8 verdicts sur captures synthétiques
 bash   patch/test-selftest.sh              # self-test embarqué, sur appareil (voir plus bas)
 bash   patch/check-release.sh              # chaîne update.json → tag → asset → octets servis
@@ -190,9 +192,11 @@ Les documents sont **en français**, comme le reste du projet.
 5. joindre **aussi** `changelog.html` — copie de `work/decoded/assets/S0undTV_changelog.html` :
    l'updater pointe le bouton « changelog » sur cet asset **au tag**, donc sans ce fichier la page
    « Nouveautés » de l'app est vide pour tout utilisateur à jour ;
-6. annoncer le **SHA-256** de l'APK, et « ce hash identifie le fichier publié, pas la recette » :
-   reconstruire le même arbre donne un APK dont les 2172 entrées sont **identiques au CRC** mais dont
-   le hash diffère (apktool estampille les entrées ZIP à l'heure du build) ;
+6. annoncer le **SHA-256** de l'APK — le build est **reproductible au sens strict** depuis le 18/09/2026 :
+   deux builds du même arbre produisent les **mêmes octets** (horodatage ZIP normalisé par
+   `patch/normalize_apk.py` avant signature, date du changelog figée par version dans `build.sh`,
+   pages embarquées canonisées LF). Le SHA publié identifie donc désormais aussi la **recette** :
+   un rebuild conforme doit reproduire le hash exact ;
 7. vérifier la chaîne entière d'une commande — `bash patch/check-release.sh` couvre `update.json`,
    le tag, les deux assets et les **octets réellement servis** (comparés au livrable local). Il fait
    aussi contrôle négatif : lancé sur une version inexistante, il doit sortir en 1 ;

@@ -56,6 +56,10 @@ fi
 VERSION_CODE=151
 VERSION_NAME="v1.0.4"
 APK_NAME="Twouich_v1.0.4.apk"
+# Date AFFICHÉE dans la page « Nouveautés » embarquée — constante figée par
+# version, jamais la date du jour : sinon chaque rebuild change les octets du
+# livrable (build reproductible). À faire évoluer au prochain bump de version.
+VERSION_RELEASE_DATE="2026.09.16"
 
 echo "═══════════════════════════════════════════════"
 echo "  Twouich — build $VERSION_NAME ($VERSION_CODE)"
@@ -122,12 +126,26 @@ fi
 
 # ── 3. Patchs ──
 python patch/patch.py --decoded "$DECODED" \
-    --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" --apk-name "$APK_NAME"
+    --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" --apk-name "$APK_NAME" \
+    --release-date "$VERSION_RELEASE_DATE"
 
 # ── 4. Recompilation ──
 echo "🔨 apktool b…"
 rm -f "$BUILD_DIR/twouich_unsigned.apk"
 java -jar "$APKTOOL" b -f -o "$BUILD_DIR/twouich_unsigned.apk" "$DECODED" 2>&1 | tail -5
+
+# ── 4b. Normalisation de l'horodatage ZIP (build reproductible) ──
+# apktool estampille chaque entrée ZIP à l'heure du build : réécrire l'horodatage
+# vers une constante (patch/normalize_apk.py, réécriture au niveau octet) rend
+# deux builds du même arbre identiques bit à bit. Doit rester AVANT la
+# signature : les blocs v2/v3 couvrent le central directory. Idempotent.
+python patch/normalize_apk.py "$BUILD_DIR/twouich_unsigned.apk"
+if python patch/normalize_apk.py --check "$BUILD_DIR/twouich_unsigned.apk" >/dev/null; then
+    echo "✅ Build reproductible : horodatage ZIP normalisé"
+else
+    echo "❌ l'horodatage ZIP n'est pas normalisé — build non reproductible"
+    exit 1
+fi
 
 # ── 5. Clé de signature (sautée en mode CI) ──
 if [ "$SKIP_SIGNING" = "1" ]; then

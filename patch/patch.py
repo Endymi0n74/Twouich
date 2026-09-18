@@ -305,7 +305,8 @@ def replace_in_style(path: pathlib.Path, style: str, old: str, new: str, what: s
     return True
 
 
-def install_branding(decoded: pathlib.Path, here: pathlib.Path, version_name: str) -> dict[str, str]:
+def install_branding(decoded: pathlib.Path, here: pathlib.Path, version_name: str,
+                     release_date: str) -> dict[str, str]:
     print("[2/5] Identité Twouich (écran de démarrage, icônes, bannière, nom)")
     res = here / BRAND_RES
     if not (here / BRAND_JSON).is_file() or not res.is_dir():
@@ -404,7 +405,12 @@ def install_branding(decoded: pathlib.Path, here: pathlib.Path, version_name: st
     )
 
     # 5. Pages embarquées (À propos / Nouveautés) : fond rouge → fond sombre, et
-    #    l'en-tête dit ce qu'est ce build.
+    #    l'en-tête dit ce qu'est ce build. Fins de ligne canonisées en LF : ces
+    #    fichiers sont stockés bruts dans l'APK, et la traduction CRLF (Windows)
+    #    / LF (Linux) de Python briserait la reproductibilité inter-plateformes.
+    #    Conformité HTML sans impact (CRLF n'est qu'une tolérance d'affichage).
+    #    La date affichée est une constante de build (build.sh) — pas today() :
+    #    sinon chaque journée de rebuild change les octets du livrable.
     about = decoded / "assets" / "S0undTV_about.html"
     replace_once(about, ABOUT_OLD, ABOUT_NEW, "page À propos : en-tête Twouich")
     replace_once(about, "background-color: #a30f2d00;", "background-color: #0e0e10;",
@@ -415,11 +421,11 @@ def install_branding(decoded: pathlib.Path, here: pathlib.Path, version_name: st
     about_text = about.read_text(encoding="utf-8")
     about_text = re.sub(r"(?m)^\s*<b>discord:.*?\n", "", about_text)
     about_text = re.sub(r"(?m)^\s*<b>beta:.*?\n", "", about_text)
-    about.write_text(about_text, encoding="utf-8")
+    about.write_text(about_text.replace("\r\n", "\n"), encoding="utf-8", newline="\n")
 
     changelog = decoded / "assets" / "S0undTV_changelog.html"
     changelog_new = CHANGELOG_NEW.format(
-        version=version_name, date=datetime.date.today().strftime("%Y.%m.%d")
+        version=version_name, date=release_date
     )
     if f"<h1>Twouich {version_name}" in changelog.read_text(encoding="utf-8"):
         log("déjà appliqué : page Nouveautés : entrée Twouich")
@@ -442,7 +448,7 @@ def install_branding(decoded: pathlib.Path, here: pathlib.Path, version_name: st
     # No inherited support channel or historical invitation survives in the new
     # page; credits point only to the source project above.
     changelog_text = re.sub(r"(?im)^.*(?:discord|discord channel|zmNjK2S).*$\n?", "", changelog_text)
-    changelog.write_text(changelog_text, encoding="utf-8")
+    changelog.write_text(changelog_text.replace("\r\n", "\n"), encoding="utf-8", newline="\n")
     return brand
 
 
@@ -607,14 +613,24 @@ def main() -> int:
     parser.add_argument("--version-code", type=int, default=151)
     parser.add_argument("--version-name", default="v1.0.4")
     parser.add_argument("--apk-name", default=DEFAULT_APK_NAME)
+    parser.add_argument("--release-date", default=None,
+                        help="date affichée dans la page Nouveautés (AAA.MM.JJ). "
+                             "Défaut : VERSION_RELEASE_DATE de build.sh — jamais "
+                             "today(), pour que la date du livrable ne dépende "
+                             "pas du jour de compilation (build reproductible).")
     args = parser.parse_args()
 
     decoded: pathlib.Path = args.decoded.resolve()
     if not (decoded / "apktool.yml").is_file():
         fail(f"arbre apktool invalide : {decoded}")
 
+    if not args.release_date:
+        fail("--release-date manquant : build.sh doit passer VERSION_RELEASE_DATE "
+             "(constante figée par version — un livrable ne doit pas dépendre "
+             "du jour où on le compile)")
+
     install_graft(decoded, here)
-    brand = install_branding(decoded, here, args.version_name)
+    brand = install_branding(decoded, here, args.version_name, args.release_date)
     install_selftest(decoded)
     repoint_updater(decoded, args.apk_name)
     bump_version(decoded, args.version_code, args.version_name)
