@@ -134,16 +134,18 @@ echo "🔨 apktool b…"
 rm -f "$BUILD_DIR/twouich_unsigned.apk"
 java -jar "$APKTOOL" b -f -o "$BUILD_DIR/twouich_unsigned.apk" "$DECODED" 2>&1 | tail -5
 
-# ── 4b. Normalisation de l'horodatage ZIP (build reproductible) ──
-# apktool estampille chaque entrée ZIP à l'heure du build : réécrire l'horodatage
-# vers une constante (patch/normalize_apk.py, réécriture au niveau octet) rend
-# deux builds du même arbre identiques bit à bit. Doit rester AVANT la
-# signature : les blocs v2/v3 couvrent le central directory. Idempotent.
+# ── 4b. Canonisation ZIP : horodatage constant + ordre des entrées ──
+# apktool estampille chaque entrée à l'heure du build et ordonne les entrées
+# selon l'énumération du système de fichiers (Windows ≠ Linux) : réécrire
+# l'horodatage vers 1980-01-01 et retrier les entrées par nom
+# (patch/normalize_apk.py, réécriture au niveau octet) rend le build
+# reproductible sur toute plateforme. Doit rester AVANT la signature : les
+# blocs v2/v3 couvrent le central directory. Idempotent.
 python patch/normalize_apk.py "$BUILD_DIR/twouich_unsigned.apk"
 if python patch/normalize_apk.py --check "$BUILD_DIR/twouich_unsigned.apk" >/dev/null; then
-    echo "✅ Build reproductible : horodatage ZIP normalisé"
+    echo "✅ Build reproductible : ZIP canonique (horodatage + ordre)"
 else
-    echo "❌ l'horodatage ZIP n'est pas normalisé — build non reproductible"
+    echo "❌ ZIP non canonique — build non reproductible"
     exit 1
 fi
 
