@@ -368,6 +368,14 @@ désormais une commande : `python patch/radar_ads.py`, avec rejeu anti-fuite int
 > que l'étape 3 (la navigation) et l'observation. Les pièges ci-dessous expliquent *pourquoi* le
 > script fait chaque chose. Options : `--serial`, `--connect`, `--list`, `--no-launch`, `--no-quit`,
 > `--analyze <fichier>` (verdict seul).
+>
+> **Ordre des étapes à l'usage** (leçon du 19/09, Freebox) : lancer le script **après** la
+> navigation, pas avant — la fenêtre de 10 min s'est écoulée pendant que le focus D-pad de la
+> grille « Followed Channels » était géré (dumps `uiautomator` en retard d'un cran sur le focus
+> réel : naviguer cran par cran **avec dump isolé entre chaque**, viser l'étiquette, puis ouvrir).
+> `--no-launch` est fait pour ça : capture fraîche pendant l'ouverture du direct, observation
+> complète ensuite. Sur la Freebox, les boutons de la fiche chaîne se pressent au **D-pad**
+> (UP → focus sur LIVE → OK) — l'injection tactile (`input tap`) y est sans effet.
 
 **1. État** — un seul binaire `adb` pour toute la session (piège § 1 : BlueStacks → `HD-Adb.exe`),
 transport `emulator-*` (le TCP ne rend pas les verdicts `app_process`), et la version installée :
