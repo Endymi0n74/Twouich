@@ -169,6 +169,10 @@ Premier self-update à installer des octets **reproductibles inter-plateformes**
   qui est réellement installé sur le téléviseur du foyer ;
 - self-test embarqué **6/6** via `app_process` sur les octets installés — attention, la sonde
   log en logcat (tag `Twouich`), son stdout est vide : lire le journal (cf. § 0.1) ;
+- **session Twitch conservée**, vérifiée par navigation ADB le jour même : rails authentifiés
+  peuplés (« Followed (5) », « Followed Channels (22) » — compte identique aux validations
+  précédentes), grille des chaînes suivies rendue avec noms/titres live/catégories réels et
+  navigable au D-pad (le scroll révèle des chaînes hors écran), retour accueil propre ;
 - **piège du jour — l'installeur peut se figer en silence** : un processus
   `com.google.android.packageinstaller` resté en cache depuis la veille (la session 151→152 de
   21:20) **avale toute nouvelle session sans écran, sans erreur, sans crash** — l'activité
