@@ -148,6 +148,16 @@ SPLASH_THEME = "SplashScreenThemeVector"
 
 BRAND_PAGES = ["assets/S0undTV_about.html", "assets/S0undTV_changelog.html"]
 
+# Pages légales Twouich : sources de vérité sous patch/branding/, injectées dans
+# assets/ à l'étape 5 (mention légale + politique de confidentialité). La source
+# fait foi : si le fichier source manque, le build échoue (pas de page muette).
+LEGAL_PAGES = [
+    ("branding/twouich_legal.html", "assets/twouich_legal.html",
+     "Twouich — mentions légales"),
+    ("branding/twouich_privacy.html", "assets/twouich_privacy.html",
+     "Twouich — politique de confidentialité"),
+]
+
 ABOUT_OLD = """<body>
     <h1>Contact</h1>"""
 ABOUT_NEW = """<body>
@@ -421,7 +431,37 @@ def install_branding(decoded: pathlib.Path, here: pathlib.Path, version_name: st
     about_text = about.read_text(encoding="utf-8")
     about_text = re.sub(r"(?m)^\s*<b>discord:.*?\n", "", about_text)
     about_text = re.sub(r"(?m)^\s*<b>beta:.*?\n", "", about_text)
+    # Liens vers les pages légales embarquées (remplacent la ligne « Legal »
+    # upstream, qui n'était qu'un disclaimer sans politique de confidentialité).
+    LEGAL_BLOCK = (
+        "    <a href=\"file:///android_asset/twouich_legal.html\">Mentions légales</a>"
+        " &nbsp;·&nbsp; "
+        "<a href=\"file:///android_asset/twouich_privacy.html\">"
+        "Politique de confidentialité</a>"
+    )
+    if LEGAL_BLOCK not in about_text:
+        about_text = about_text.replace(
+            '    <div class="legal">',
+            f"{LEGAL_BLOCK}\n    <div class=\"legal\">",
+            1,
+        )
+        if LEGAL_BLOCK not in about_text:
+            fail("page À propos : ancre du bloc légal introuvable")
+        log("appliqué : page À propos : liens vers les pages légales")
+    else:
+        log("déjà appliqué : page À propos : liens vers les pages légales")
     about.write_text(about_text.replace("\r\n", "\n"), encoding="utf-8", newline="\n")
+
+    # Injection des pages légales (source = patch/branding/, canonisation LF,
+    # cf. plus haut : ces fichiers sont stockés bruts dans l'APK).
+    for src_name, dest_rel, what in LEGAL_PAGES:
+        src = here / src_name
+        if not src.is_file():
+            fail(f"source de page légale manquante : {src} — le build refuse d'embarquer une page muette")
+        dest = decoded / dest_rel
+        dest.write_text(src.read_text(encoding="utf-8").replace("\r\n", "\n"),
+                        encoding="utf-8", newline="\n")
+        log(f"appliqué : {what} (embarquée)")
 
     changelog = decoded / "assets" / "S0undTV_changelog.html"
     changelog_new = CHANGELOG_NEW.format(
@@ -656,6 +696,9 @@ def main() -> int:
         ("res/values/arrays.xml", "<item>Twouich</item>"),
         ("assets/S0undTV_about.html", "Twouich"),
         ("assets/S0undTV_changelog.html", "Twouich"),
+        ("assets/twouich_legal.html", "Mentions légales"),
+        ("assets/twouich_privacy.html", "Politique de confidentialité"),
+        ("assets/S0undTV_about.html", "twouich_legal.html"),
     ]:
         if rel_or_marker is None:
             path = find_factory(decoded)

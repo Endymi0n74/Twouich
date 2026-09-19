@@ -1,0 +1,125 @@
+<!doctype html>
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <style>
+        html {
+            font-family: 'Segoe UI';
+            font-size: 20px;
+            padding-top: 75px;
+            padding-left: 100px;
+            padding-right: 100px;
+            background-color: #0e0e10;
+            color: white;
+        }
+        h1 {
+            text-align: center;
+            position: relative;
+        }
+        hr {
+            margin-top: 20px;
+            margin-bottom: 20px;
+            border: 0;
+            height: 1px;
+            background: #333;
+        }
+        ul {
+            list-style: disc outside none;
+        }
+        li {
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+        a:visited {
+            color: #9b6bff;
+        }
+        a:link {
+            color: #9b6bff;
+        }
+        .spacing {
+            line-height: 1.5;
+        }
+        .legal {
+            text-align: center;
+            position: relative;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Politique de confidentialité — Twouich</h1>
+
+    <p class="spacing">
+    <b>En bref :</b> Twouich ne possède <b>aucun serveur</b>, ne crée aucun compte, ne collecte,
+    ne centralise et ne revend aucune donnée. L'application n'ajoute aucun traceur ni aucune
+    publicité — au contraire, son filtre retire les créations publicitaires (SSAI) des flux
+    Twitch, entièrement côté appareil, sans service intermédiaire.
+    </p>
+
+    <hr>
+
+    <h3>Ce qui reste sur l'appareil</h3>
+    <ul>
+        <li>La <b>session Twitch</b> (jeton OAuth obtenu à la connexion) est stockée dans
+        l'espace privé de l'application et n'est transmise qu'aux serveurs de Twitch.</li>
+        <li>Les <b>préférences</b> (thème, réglages), les <b>chaînes suivies et favorites</b> et
+        l'<b>historique de lecture</b> sont stockés localement et ne sont jamais envoyés
+        ailleurs.</li>
+        <li>Tout s'efface en désinstallant l'application (ou via « effacer les données » dans les
+        réglages Android).</li>
+    </ul>
+
+    <hr>
+
+    <h3>Les services avec lesquels l'application communique</h3>
+    <ul>
+        <li><b>Twitch</b> — API (twitch.tv), flux vidéo (usher/CDN jtvnw.net), chat
+        (irc-ws.chat.twitch.tv) et notifications de suivi (eventsub.wss.twitch.tv, connexion
+        WebSocket directe, sans serveur d'envoi push). Authentifié via votre session Twitch
+        lorsque vous êtes connecté, sinon anonyme. Les données traitées par Twitch suivent les
+        règles de Twitch.</li>
+        <li><b>Émotes et badges</b> — 7TV (7tv.io), BetterTTV (betterttv.net),
+        FrankerFaceZ (frankerfacez.com) : requêtes publiques identifiant la chaîne consultée.
+        Aucune donnée personnelle n'est envoyée au-delà.</li>
+        <li><b>Historique du chat</b> — recent-messages.robotty.de, service <b>optionnel</b>
+        (désactivable dans les réglages) qui fournit les messages précédant votre arrivée dans
+        un chat.</li>
+        <li><b>Mises à jour de l'application</b> — consultation de update.json et téléchargement
+        des APK signés depuis GitHub
+        (github.com/Endymi0n74/Twouich). Les serveurs GitHub voient des requêtes HTTPS standard
+        ; le projet n'en reçoit aucune donnée personnelle.</li>
+    </ul>
+
+    <hr>
+
+    <h3>La vérité sur l'héritage (à connaître)</h3>
+    <p class="spacing">
+    La base d'origine embarque des composants <b>Google Firebase (Crashlytics, Analytics)</b>,
+    <b>compilés et toujours configurés</b> avec les identifiants du projet d'origine :
+    des rapports de plantage et des mesures d'usage <b>peuvent</b> être envoyés vers
+    l'infrastructure Google du projet d'origine, selon ses règles. Twouich n'y ajoute aucun
+    événement, n'y a pas accès et n'en tire aucune donnée ; la <b>neutralisation complète</b>
+    de cette télémétrie est un chantier suivi du projet. La permission « identifiant
+    publicitaire » (AD_ID) déclarée par le manifeste provient également de la base d'origine ;
+    Twouich ne diffuse aucune publicité.
+    </p>
+
+    <hr>
+
+    <h3>Caméra et microphone</h3>
+    <p class="spacing">
+    La <b>caméra</b> n'est utilisée que par le lecteur de code QR intégré à l'écran de connexion
+    (lecture d'un code, aucune image enregistrée ni transmise). La permission
+    <b>microphone</b> est déclarée par héritage du manifeste d'origine, mais <b>aucun code
+    compilé n'accède au microphone</b>.
+    </p>
+
+    <hr>
+
+    <p class="spacing">
+    Pour toute question sur la présente politique : <a href="https://github.com/Endymi0n74/Twouich/issues">ouvrir une issue</a>
+    sur le dépôt du projet. <b>Dernière révision :</b> septembre 2026 (v1.0.7) — la version
+    publiée dans le dépôt fait foi.
+    </p>
+</body>

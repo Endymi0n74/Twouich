@@ -222,6 +222,25 @@ def main() -> int:
             ok &= check(f"{page} : identité Twouich, plus de fond rouge",
                         holds(body, "Twouich") and b"#a30f2d" not in body)
 
+        # 4b. Les pages légales embarquées : présentes, avec leur contenu clé, et
+        #     la page À propos pointe vers elles (l'utilisateur doit pouvoir les
+        #     trouver sans lire les assets à la main).
+        for page, needle in (
+            ("assets/twouich_legal.html", "Mentions légales"),
+            ("assets/twouich_privacy.html", "Politique de confidentialité"),
+        ):
+            if page not in names:
+                ok &= check(f"{page} présente", False)
+                continue
+            body = z.read(page)
+            ok &= check(f"{page} : contenu embarqué",
+                        holds(body, needle) and b"<h1>" in body)
+        about_body = (z.read("assets/S0undTV_about.html")
+                      if "assets/S0undTV_about.html" in names else b"")
+        ok &= check("À propos pointe vers les pages légales",
+                    holds(about_body, "twouich_legal.html")
+                    and holds(about_body, "twouich_privacy.html"))
+
         # 5. Un paquet sans signature ne s'installe pas : l'apk porte bien les
         #    blocs v1/v2/v3 (les .SF/.RSA du schéma v1, l'APK Signing Block sinon).
         v1 = any(n.startswith("META-INF/") and n.endswith((".SF", ".RSA", ".DSA")) for n in names)

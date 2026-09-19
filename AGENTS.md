@@ -107,8 +107,8 @@ python patch/tests/test_smali_branches.py  # 11 assertions : branchements réels
 python patch/tests/test_update_check.py    # 20 vérifications : logique updater (table de vérité + gardes smali
                                            #   si work/decoded/ existe) — « annonce en retard » -> silence
 python patch/tests/test_brand.py           # 14 assertions : identité visuelle (voir plus bas)
-python patch/tests/test_apk.py             # 13 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),
-                                           #   dont l'accord avec update.json
+python patch/tests/test_apk.py             # 18 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),
+                                           #   dont l'accord avec update.json et les pages légales embarquées
 python patch/tests/test_normalize_apk.py   # 29 vérifications : le normaliseur canonise horodatage
                                            #   et ordre des entrées ZIP sans rien toucher d'autre
 bash   patch/tests/test_analyzer.sh        # 11 verdicts sur captures synthétiques
