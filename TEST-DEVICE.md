@@ -150,6 +150,35 @@ v1.0.1 publiée.
 - **État final propre** : le build instrumenté utilisé pour le diagnostic a été remplacé par la
   v1.0.1 publiée (`install -r`) ; SHA-256 du `base.apk` installé = `469db927…` = release = `dist/`.
 
+### Validé sur le vrai téléviseur du foyer (Freebox Pop, Android 10) : 152 → 153 (v1.0.6), le 19/09/2026
+
+Premier self-update à installer des octets **reproductibles inter-plateformes** (recette canonisée v1.0.6) — et une leçon d'exploitation sur l'installeur :
+
+- **l'appareil était déjà en 152** (installée la veille au soir) — le franchissement du verrou
+  153 est donc observé depuis 152, mêmes mécaniques que depuis 151 ;
+- parcours complet observé : `UpdateActivity` (« New update available! — Version: v1.0.6 /
+  Version code: 153 ») → « Install update » → `S0undTV_AutoUpdateSrv` :
+  `releases/download/v1.0.6/Twouich_v1.0.6.apk` (téléchargement en ~1,4 s) →
+  `PackageInstallerActivity` (« Voulez-vous mettre à jour cette application ? Vos données
+  actuelles ne seront pas perdues. ») → installation → `versionCode=153 versionName=v1.0.6`,
+  app relancée directement sur `FireTVMainActivity` ;
+- **octets installés = octets servis = livrable local, à l'octet près** : `sha256sum` calculé
+  **sur l'appareil** sur le `base.apk` installé + `pull` ADB relu localement → SHA-256
+  `dadbe5ae…` identique au build local Windows, donc aux octets servis par la CI et par GitHub
+  Releases — première fois que le SHA identifie à la fois le fichier publié, la recette et ce
+  qui est réellement installé sur le téléviseur du foyer ;
+- self-test embarqué **6/6** via `app_process` sur les octets installés — attention, la sonde
+  log en logcat (tag `Twouich`), son stdout est vide : lire le journal (cf. § 0.1) ;
+- **piège du jour — l'installeur peut se figer en silence** : un processus
+  `com.google.android.packageinstaller` resté en cache depuis la veille (la session 151→152 de
+  21:20) **avale toute nouvelle session sans écran, sans erreur, sans crash** — l'activité
+  naît et meurt en < 100 ms (« no activity for token »), aucun `INSTALL_FAILED`, l'app reprend
+  le focus comme si l'utilisateur avait annulé. **Un reboot de la Freebox assainit** (l'écran
+  système apparaît alors normalement). Diagnostics : `ps -A | grep packageinstaller` (processus
+  ancien ≠ frais, `starttime`), fenêtre logcat autour du `START` de l'installeur. Seconde
+  leçon : le **focus D-pad** de l'écran système n'est pas garanti (un OK peut ne rien faire) —
+  le tap ADB sur INSTALLER (coordonnées lues dans le dump `uiautomator`) est le filet de secours.
+
 ### Validé sur le vrai téléviseur du foyer (Freebox Pop, Android 10) : 150 → 151 (v1.0.4, APK signé par la CI), le 16/09/2026
 
 Même protocole, et cette fois l'APK proposé n'a jamais été construit localement : c'est le
