@@ -67,10 +67,15 @@ elif [ "$UNKNOWN_N" -gt 0 ]; then
     echo "     qu'aucune règle de PlaylistSanitizer ne couvre. Capturer la playlist"
     echo "     brute (méthode AUDIT.md § 4.4), ajouter la règle dans le smali + un cas"
     echo "     figé dans patch/tests/test_sanitizer.py, puis rebuild."
+elif [ "$CUTS" -eq 0 ] && [ "$ERRORS" -eq 0 ]; then
+    echo "  ✅ CONTENU TRAVERSÉ SANS POD : $CLEANED playlist(s) nettoyée(s), 0 marqueur inconnu —"
+    echo "     la sentinelle confirme que le format servi est celui des règles. Cas bénin : aucune"
+    echo "     pub n'a été servie pendant la capture (pour voir des retraits, cibler une chaîne à"
+    echo "     forte charge — radar multi-chaînes, AUDIT.md § 4.4)."
 elif [ "$CUTS" -eq 0 ]; then
-    echo "  ⚠️  Le filtre tourne mais n'a rien retiré."
-    echo "     → soit aucune coupure publicitaire n'a eu lieu pendant la capture,"
-    echo "     → soit les marqueurs Twitch ont changé : voir AUDIT.md § 4.2 (constante \"stitched-ad\")."
+    echo "  ⚠️  FILTRE ACTIF, RIEN RETIRÉ, $ERRORS erreur(s) de lecture : à qualifier."
+    echo "     → commencer par les erreurs ci-dessus (TEST-DEVICE.md § 7) ; si elles indiquent un"
+    echo "       format de marqueur non reconnu, suivre AUDIT.md § 4.2 (constante \"stitched-ad\")."
 elif [ "$ERRORS" -eq 0 ]; then
     echo "  ✅ ANTI-PUB FONCTIONNEL : $CUTS segments publicitaires retirés, lecture sans erreur."
 else

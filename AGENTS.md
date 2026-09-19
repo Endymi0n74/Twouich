@@ -109,7 +109,9 @@ python patch/tests/test_apk.py             # 13 verdicts sur l'APK LIVRÉ (pas s
                                            #   dont l'accord avec update.json
 python patch/tests/test_normalize_apk.py   # 29 vérifications : le normaliseur canonise horodatage
                                            #   et ordre des entrées ZIP sans rien toucher d'autre
-bash   patch/tests/test_analyzer.sh        # 8 verdicts sur captures synthétiques
+bash   patch/tests/test_analyzer.sh        # 11 verdicts sur captures synthétiques
+python patch/tests/test_radar.py           # 10 vérifications : rejeu anti-fuite du radar (hors réseau)
+python patch/radar_ads.py                  # radar multi-chaînes + rejeu anti-fuite (méthode AUDIT.md § 4.4)
 bash   patch/test-selftest.sh              # self-test embarqué, sur appareil (voir plus bas)
 bash   patch/test-live.sh                  # observation live longue : capture détachée + verdict (TEST-DEVICE.md § 2)
 bash   patch/check-release.sh              # chaîne update.json → tag → asset → octets servis

@@ -307,7 +307,8 @@ occupé** — typiquement prouver sur un même trafic réel que le filtre retire
 sentinelle « marqueur pub inconnu » reste muette —, la séquence suivante fait tout en commandes
 indépendantes. Recette éprouvée le 18/09/2026 (~13 min de direct : 459 nettoyages, 2539 segments
 retirés, 0 alerte sentinelle — consigné en `AUDIT.md` § 4.4). Pour maximiser les chances de voir
-un pod, choisir une chaîne à forte charge publicitaire (méthode radar de `AUDIT.md` § 4.4).
+un pod, choisir une chaîne à forte charge publicitaire (méthode radar de `AUDIT.md` § 4.4 —
+désormais une commande : `python patch/radar_ads.py`, avec rejeu anti-fuite intégré).
 
 > **Automatisation** : `bash patch/test-live.sh --duration 600` exécute les étapes 1, 2, 4 et 5
 > (état, capture détachée surveillée avec relance en append, arrêt + verdict) — il ne reste à la main
@@ -433,7 +434,8 @@ horodatages des retraits, les replis proxy et les erreurs de lecture, puis concl
 | Conclusion | Suite à donner |
 |---|---|
 | ✅ **ANTI-PUB FONCTIONNEL** | rien à faire ; archiver la capture |
-| ⚠️ **filtre actif mais rien retiré** | aucune coupure pendant la capture, **ou** les marqueurs Twitch ont changé → voir `AUDIT.md` § 4.2 (constante `stitched-ad` de `PlaylistSanitizer`) |
+| ✅ **CONTENU TRAVERSÉ SANS POD** (0 retrait, 0 erreur, sentinelle muette) | cas bénin : le contenu passe par le filtre et aucune pub n'a été servie pendant la capture — pour voir des retraits, cibler une chaîne à forte charge (radar multi-chaînes, `AUDIT.md` § 4.4) |
+| ⚠️ **FILTRE ACTIF, RIEN RETIRÉ + erreurs de lecture** | cas suspect : commencer par les erreurs (§ 7) ; si elles révèlent un format non reconnu, suivre `AUDIT.md` § 4.2 (constante `stitched-ad` de `PlaylistSanitizer`) — la sentinelle (🚨) reste le premier signal d'un format renommé |
 | ⚠️ **pubs retirées mais erreurs de lecture** | garder la capture : les erreurs indiquent quel tag doit être conservé/ajouté |
 | ❓ **aucune playlist nettoyée** | l'APK installé n'est pas le nôtre, ou la capture a démarré avant le lancement du stream |
 

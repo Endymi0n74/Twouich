@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════
-# test_analyzer.sh — vérifie les 4 verdicts d'analyze_device_log.sh
+# test_analyzer.sh — vérifie les verdicts d'analyze_device_log.sh
 # ═══════════════════════════════════════════════════════════════════════
 # Rejoue des captures logcat synthétiques et contrôle la conclusion.
 # Aucun appareil nécessaire :
@@ -60,15 +60,30 @@ echo '09-15 09:40:05.100 I/ExoPlayerImpl ( 3120): Release' > "$TMP/none.txt"
     echo '09-15 09:40:11.000 W/Twouich ( 3120): proxy indisponible : repli sur la requete directe'
 } > "$TMP/proxy.txt"
 
+# 6. sentinelle : marqueur pub inconnu → verdict 🚨 (prioritaire sur tous les autres)
+{
+    echo "$ZERO"
+    echo '09-15 09:40:12.200 W/Twouich ( 3120): marqueur pub inconnu : #EXT-X-CUE-CONTINUE'
+} > "$TMP/unknown.txt"
+
 echo "== verdicts =="
 check "pubs retirées + lecture propre → FONCTIONNEL" "$TMP/clean.txt" '✅ ANTI-PUB FONCTIONNEL : 7 segments publicitaires retirés'
 check "comptage : playlists nettoyées = 3"          "$TMP/clean.txt" 'playlists nettoyées          : 3'
 check "comptage : playlists avec pubs = 2"          "$TMP/clean.txt" 'playlists avec pubs retirées : 2'
 check "comptage : max sur une playlist = 4"         "$TMP/clean.txt" 'max sur une playlist         : 4'
-check "filtre actif, rien retiré → avertissement"   "$TMP/nocut.txt" "Le filtre tourne mais n'a rien retiré."
+check "contenu sans pod, sentinelle muette → OK"    "$TMP/nocut.txt"    '✅ CONTENU TRAVERSÉ SANS POD'
+
+# 2b. rien retiré MAIS erreurs de lecture → cas suspect (≠ cas bénin)
+{
+    echo "$ZERO"
+    echo '09-15 09:40:12.400 E/ExoPlayerImplInternal ( 3120): ParserException'
+} > "$TMP/nocut-errors.txt"
 check "pubs retirées + erreur → avertissement"      "$TMP/errors.txt" 'MAIS 1 erreur(s) de lecture'
-check "aucune playlist → filtré absent"             "$TMP/none.txt"  'AUCUNE playlist nettoyée'
-check "repli proxy compté"                          "$TMP/proxy.txt" 'replis proxy → direct        : 1'
+check "aucune playlist → filtré absent"             "$TMP/none.txt"         'AUCUNE playlist nettoyée'
+check "repli proxy compté"                          "$TMP/proxy.txt"        'replis proxy → direct        : 1'
+check "rien retiré + erreurs → cas suspect"         "$TMP/nocut-errors.txt" 'FILTRE ACTIF, RIEN RETIRÉ'
+check "marqueur inconnu → verdict sentinelle"       "$TMP/unknown.txt"      '🚨 MARQUEUR(S) PUB NON RECONNU(S)'
+check "marqueur inconnu compté = 1"                 "$TMP/unknown.txt"      'marqueurs pub inconnus       : 1'
 
 echo
 if [ "$FAIL" -eq 0 ]; then
