@@ -382,80 +382,39 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
 - **Aucun mode arrière-plan** dans cet environnement : une capture se fait dans une seule commande
   synchrone (enchaîner ouverture du flux + `logcat`).
 
-## 8. Reste à faire
+## 8. Reste à faire — tout traité ; la feuille de route prend la suite
 
-1. ~~Prouver le retrait effectif d'une pub~~ — **fait le 15/09/2026** : self-test embarqué vert sur
-   l'appareil (`SELFTEST 18/18`, `623 -> 328 octets, segments pub retires : 3`), donc plus besoin
-   d'attendre une coupure. **Capturé en réel le 18/09/2026** : session live sur une chaîne à forte
-   charge publicitaire, 571 pods retirés / 5974 segments, 0 fuite au rejouage des playlists brutes
-   capturées (détail en §5).
-2. ~~**Publication de la release** `v1.5.10x-twouich1`~~ — **fait le 15/09/2026** : tag exactement
-   égal au `VersionName`, APK `Twouich_beta144_ttv1.apk` (SHA-256 `a80be686…`) + `changelog.html`
-   joints.
-3. ~~**Parcours réel de l'updater**~~ — **fait le 15/09/2026** : release intermédiaire
-   `v1.5.10x-twouich2` (versionCode 146) publiée, app installée en 145 mise à jour **par elle-même**
-   (dialogue ouvert seule, téléchargement, passage à l'installeur système), octets installés
-   identiques au livrable au SHA-256 près (voir §5). Reste, côté produit :
-   - **canal Beta, installation neuve** — ~~toute installation neuve démarrait en Beta~~
-     **corrigé structurellement le 16/09/2026 (v1.0.2, 149)** : `patch.py` étape 3b force
-     `b.a = false`, donc `p()` n'écrit plus `pref_update_channel = "1"` et le défaut de `g()`
-     (« 0 » = Stable) s'applique. Preuve par les octets installés : `base.apk` relu de l'appareil
-     décodé → `a:Z` sans initialisateur (false), upstream `beta_144` → `a:Z = true` (contrôle
-     négatif discriminant) ; garde-fou dans `test_smali_branches.py` (mordance vérifiée).
-   - **canal Beta, installations existantes** — publier aussi une entrée `ReleaseType: 1` dans
-     `update.json`, sinon les appareils hérités de S0undTV restés en Beta (comme celui du test)
-     ne voient aucune de nos releases.
-     **Décision produit (16/09) : pas d'entrée beta sur ce fork** — les installations 147/148
-     restées en canal Beta doivent basculer en Stable dans les réglages (une fois) pour recevoir
-     les mises à jour ; toute installation d'après la v1.0.2 démarre déjà en Stable.
-     **Publication v1.0.2 faite le 16/09 au soir** : release `v1.0.2` (APK + `changelog.html`,
-     tag = VersionName), `update.json` poussé APRÈS la release, README à jour (section + liens),
-     `check-release.sh` vert de bout en bout (assets 200, octets servis = livrable).
-     **Nettoyage GitHub le même soir** : releases de test `v1.5.10x-twouich1/2` supprimées et
-     tags hérités de S0und (`beta`, `v1.4` … `v1.5.10x`) supprimés — ne restent que les
-     `v1.0.0/1/2`. Le tag `beta` supprimé casse l'URL beta gravée dans l'app, cohérent avec
-     l'absence d'entrée beta.
-   - ~~**comparaison de version** — remplacer le plancher figé (144) par la version installée~~ —
-     **fait le 15/09/2026** : la comparaison lit désormais `PackageManager.getPackageInfo()` et ne
-     propose une mise à jour que si la release est plus récente que la version installée
-     (`test_smali_branches.py` le vérifie sur le code compilé) ;
-   - ~~**accent rouge par défaut**~~ — **fait le 16/09/2026** : la famille `theme_red*` est
-     **repeinte aux couleurs de marque** (`patch.py` étape 4b) plutôt que de déplacer l'index par
-     défaut — l'accent 0 reste celui des installations existantes (préférence sauvegardée), il
-     affiche désormais le violet Twouich, et son libellé de réglages devient « Twouich ». Mesuré
-     sur l'appareil : plus aucun pixel des anciens accents (`#a30f2c`/`#db002c`), le violet
-     `#7c22e8` occupe les zones de focus ; le rouge restant à l'écran est du **contenu** des
-     chaînes (miniatures, pochettes), pas de l'interface.
-4. ~~**CI GitHub Actions** : rejouer `patch/build.sh` à chaque push~~ — **fait le 16/09/2026** :
-   `.github/workflows/build.yml` (run vert) rejoue la chaîne **sans signature** (`SKIP_SIGNING=1`
-   sur `build.sh`) : tests sanitizer + branches, `apktool d` → `patch.py` → `apktool b`, contrôle
-   des pages embarquées, APK non signé en artefact de diagnostic. Empreinte du jar apktool figée
-   (vérifiée égale au jar local). Limites assumées : `test_brand.py` (polices Windows non
-   redistribuables) et `test_apk.py` (APK signé requis) restent des contrôles du mainteneur.
-   La CI a d'emblée prouvé sa valeur : 4 divergences local/CI trouvées et corrigées (numpy/Pillow
-   manquants, garde-mot-de-passe avant la définition de SKIP_SIGNING, sonde de version tuée par
-   `pipefail` sans arbre décodé, et surtout **chemin de fabrique `z3.1` vs `z3` selon la
-   plateforme** — `find_factory()` localise désormais au lieu de supposer). Livrable v1.0.3
-   régénéré après refactor : 2 173 entrées identiques au CRC, `dist/` restauré aux octets publiés.
-   **Extension du 16/09 (soir) — CI signante** : le workflow a maintenant deux jobs. Sur branche,
-   le job sans signature (comme avant) ; sur **push de tag `v*`**, un job signé publie l'APK +
-   `changelog.html` sur la release du tag. La clé vit dans 4 secrets GitHub chiffrés
-   (`KEYSTORE_B64`/`KEYSTORE_SHA256`/`KEYSTORE_PASS`/`KEY_ALIAS`), l'empreinte du keystore est
-   vérifiée après restauration, `KEY_PASS` ne transite que par l'env de step, et `update.json`
-   reste **manuel** (poussé après la release — piège 404 documenté) ; `test_apk.py` en CI tourne
-   avec `ALLOW_UPDATE_JSON_LAG=1` pour tolérer ce décalage par design. `build.sh` corrige au
-   passage un vrai bug : `KEY_PASS=""` écrasait la variable d'env (invisible en local,
-   `keystore.properties` masquait le chemin env) — désormais `${KEY_PASS:-}`/`${KEY_ALIAS:-...}`.
-   Garde-fou de publication : le tag poussé doit égaler le `VERSION_NAME` de `build.sh`.
-   Validé par **répétition signée** (`workflow_dispatch` : keystore restauré + vérifié, v1+v2+v3,
-   signature contrôlée, empreinte relevée, publication et contrôle d'octets ignorés, release
-   v1.0.3 intacte). Le dispatch ne publie jamais : c'est le mode répétition.
-5. ~~Rebranding~~ — **fait le 15/09/2026** : nom, écran de démarrage, icônes, bannière TV, icône
-   adaptative, thème par défaut et pages embarquées sont passés à l'identité Twouich (voir §2 et
-   §5). Les **images du tutoriel** (`tut_*.webp`) ont été remappées au lieu d'être recapturées (voir
-   §2) : plus aucune marque d'avant ne subsiste dans l'APK, ni en texte ni en pixel.
-   **Réserve levée le 16/09/2026** : l'**apparence par défaut** est couverte — la famille
-   `theme_red*` (l'accent d'usine) est repeinte aux couleurs de marque (voir §8 point 3).
+**Statut au 19/09/2026 : les cinq chantiers fondateurs sont traités, et l'annexe §5 d'AUDIT.md est intégralement traitée ou assumée.** Le §5 d'AUDIT.md pointe désormais ici. Ce qui reste n'est plus du travail ouvert : ce sont des **assumés** (choix ou limites documentés, aucune action en attente), puis la **feuille de route** (chantiers futurs volontaires, rien d'urgent).
+
+### Assumés — aucune action en attente
+
+- **Limite mainteneur `test_brand.py` + `test_apk.py`** — par construction : polices Windows non redistribuables, APK signé requis. La CI a de toute façon prouvé sa valeur (4 divergences local/CI trouvées et corrigées — journal §9).
+- **Aucune entrée beta dans `update.json`** — décision produit (16/09) : les installations 147/148 restées en canal Beta doivent basculer en Stable dans les réglages (une fois) pour recevoir les mises à jour ; toute installation d'après la v1.0.2 démarre déjà en Stable. Cohérent avec la suppression des tags hérités de S0und (`beta` casse l'URL gravée, assumé).
+- **« INSTALLER » du système = le seul geste humain** du self-update (Freebox, Android 10 : pas d'auto-confirm). Deux filets de secours consignés en TEST-DEVICE.md §0.2 : reboot de la Freebox si l'installeur s'est figé, tap ADB sur INSTALLER si le focus D-pad ne répond pas.
+- **`schedule` CI désactivé par GitHub après 60 jours d'inactivité** du dépôt : le cron radar reste rechargeable en dispatch (`workflow_dispatch`, chaînes surchargeables) — comportement de plateforme, documenté dans le workflow lui-même.
+- **Un run CI peut être vert sans avoir rien vérifié** (pannes réseau ne sont pas des alertes) — l'absence de preuve n'alerte pas, c'est le choix du radar ; la trace reste dans le log.
+- **PlaylistResetException en fin de pod** — effet de bord inhérent au stripping (resync 2–4 s, récupérée seule), non corrigeable sans re-reset de session usher ; toutes les variantes restent en contenu pendant un pod, pas d'atténuation par bascule de variante.
+- **Bruits upstream bénins** (chat) : Glide « load for a destroyed activity » et `NumberFormatException: "Not Found"` (404 7TV par-chaîne pour un compte sans 7TV — attrapé, « 7TV Done » rendu quand même).
+- **Pas de pronouns dans la build upstream** — absent du code, rien à patcher.
+- **Limite documentaire chat** : le rendu **pixel** des emotes/badges (images CDN) n'est pas traçable par logcat — la preuve de rendu repose sur le chat visible et les chargeurs verts.
+
+### Feuille de route
+
+**Chantiers fondateurs — tous traités.** Le détail et les dates sont au journal §9 : retrait de pub prouvé (self-test embarqué, puis 571 pods réels le 18/09 avec 0 fuite), releases et chaîne `check-release.sh` verte (de `v1.5.10x-twouich1` à `v1.0.7`), updater durci (canal Beta corrigé à la source en v1.0.2, comparaison `getPackageInfo` en v1.0.0, table de vérité à trois étages dont le bytecode embarqué 28/28), CI (sans signature à chaque push, signante sur tags, cron radar quotidien), rebranding complet (accent d'usine repeint).
+
+**Horizon 1 — court terme**
+- **Self-update 153→154 sur la Freebox Pop** : c'est le cas d'usage « mises à jour rapprochées » (153 installée la veille) qui doit révéler si l'**installeur figé** découvert au 152→153 se reproduit. Protocole TEST-DEVICE.md §0.2.
+- **Reproduire sur émulateur le scénario « installeur figé »** (installer-sans-écran entre deux releases à moins de 24 h d'intervalle) : le seul scénario d'exploitation non reproduit à la demande.
+
+**Horizon 2 — moyen terme**
+- **Entrée beta** dans `update.json` si un jour des appareils en canal Beta doivent être servis (décision produit actuelle : non — voir assumés).
+- **Radar : prouver l'alerte de bout en bout** en dispatch (`radar.yml`) — run rouge + issue dédoublonnée, jamais déclenché en réel depuis la création du cron.
+- **Mentions légales / politique de confidentialité Twouich** : les pages embarquées portent encore le texte upstream.
+
+**Horizon 3 — long terme / veille**
+- **Rebase upstream** : surveiller une future beta S0und et rejouer la chaîne complète (les vérifications endpoints/obsolescences reviendront avec le nouvel arbre).
+- **Audits périodiques des endpoints tiers** (7TV/BTTV/FFZ/robotty) — le prochain à l'occasion d'une beta upstream ou d'un incident chat.
+- **Vitrine du projet** : README orienté utilisateurs finaux (captures à jour, FAQ), éventuellement un canal de distribution signé au-delà de GitHub Releases.
 
 ## 9. Journal
 
@@ -514,4 +473,6 @@ pixels dont on sait ce qu'ils sont — pas sur une distance calculée au jugé.
 | 2026-09-19 | **Audit emotes/badges/highlighter (§ 5 d'AUDIT.md) clos — aucun défaut fonctionnel, rien à patcher.** Le code vivait dans le package obfusqué `A6/` (les recherches sous `com/s0und/s0undtv/` ne voyaient rien) : 6 endpoints exactement — 7TV **v3** (`7tv.io/v3/emote-sets/global` + `users/twitch/<id>`), BTTV (`betterttv.net/3/cached/emotes/global` + `users/twitch/<id>`), FFZ (`frankerfacez.com/v1/room/__ffz_global` + `room/id/<id>`), replay robotty (`recent-messages.robotty.de`, champ `userBadges`), CDN twitch (`jtvnw.net/emoticons/v2`) — conformes à la passe obsolescence du 18/09. Preuve en direct sur l'émulateur 153 (chat `#niniste`) : les **5 chargeurs verts** (`FFZ Done`, `BTTV Done`, `7TV Done`, `Global emotes Done`, `SubEmote Done`), IRCv3 complet (CAP tags/commands/membership ACK, JOIN, PONG), messages réellement rendus. `highlighted-message` traité dans `g.smali` (préfixe retiré avant rendu), modèle de badges `broadcaster/partner/vip/premium` présent. Deux bruits **upstream bénins**, attribués au niveau octet : Glide « load for a destroyed activity » (pattern connu) et `NumberFormatException: "Not Found"` tombée **pendant le loader 7TV** — un 404 `7tv.io/v3/users/twitch/<id>` (`{"status":"Not Found"}`) parsé en entier pour une compte sans 7TV, erreur attrapée, « 7TV Done » rendu quand même. La passe § 5 est désormais intégralement traitée ou assumée. |
 | 2026-09-19 | **La table de vérité de l'updater entre dans le self-test embarqué : `SELFTEST 18/18 → 28/28`.** Le bloc 8 de `SelfTest.smali` rejoue en bytecode Dalvik la table de `test_update_check.py` via une nouvelle méthode pure `pick(IIII)I` — miroir exact de `UpdateHelper.b()V` (canal inconnu → silence, `-1` = entrée absente **ou** version installée illisible avec sa sémantique fail-loud, stricte supériorité porte le silence, l'autre canal gagne ssi strictement plus récent que tout) : 10 vérifications (« annonce en retard » → silence sur les deux canaux, annonce égale → silence, plus récente → dialogue, préférences de canaux, fail-loud). **La leçon du jour est arrivée en exécutant le probe** : le premier portage donnait `26/28` sur appareil — les cas 8.5 et 8.7 révélaient une divergence entre mon flux de branchements Dalvik et la condition composée de `a.smali` (le cas `c == b` tombait sur le dialogue `b` au lieu du dialogue `c` pour le 8.5) ; le portage structurel conforme (`:cond_1w`/`:cond_2`, jamais d'inversion `if-le`) a verrouillé `28/28`. C'est exactement le scénario que ce test existe pour attraper : la sémantique Dalvik réelle. Le candidat a été validé en probe `app_process` sur les octets du build ; `dist/` restauré aux octets CI (`dadbe5ae…`), à livrer avec la prochaine release. Verdict du § 0.1 actualisé dans `TEST-DEVICE.md` et `AGENTS.md`. |
 | 2026-09-19 | **Release `v1.0.7` (154) publiée — le self-test à 28 vérifications part en production.** Bump conventionnel (`0e7bd97`) : double build local → SHA identiques (`6b54d7c0…`), suites vertes, `test_apk` conforme en mode lag (`update.json` annonce encore 153 — verrou d'annonce volontaire), probe `SELFTEST 28/28` sur les octets du candidat. Tag `v1.0.7` → CI signante verte, release « Twouich v1.0.7 » (APK 11 239 187 o + `changelog.html` « self-test 28 vérifications »), **octets servis = build local Windows** (`6b54d7c0…`) — deuxième release consécutive où le rebuild local reproduit les octets publiés. Acceptation émulateur : `install -r` acceptée par-dessus 153, `versionCode=154 / versionName=v1.0.7`, self-test en app **28/28**, updater silencieux au cold start (154 > 153 annoncé : pas de dialogue ; les 9 lignes « UpdateActivity » de la capture sont la plomberie interne du Play Store — Finsky « SystemUpdateActivity » — sans rapport avec l'app). `update.json` reste à pousser (verrou volontaire, même convention que la v1.0.6). |
+| 2026-09-19 | **Annonce v1.0.7 levée (`update.json` → 154).** `ReleaseDate = 2026-09-19T12:22:16.000Z` (`published_at` exact de la release), commit + push (`d91faf9`), `check-release.sh` vert aux quatre étages (octets servis = `6b54d7c0…`). Péripétie d'exploitation consignée : le CDN de raw.githubusercontent a servi l'ancien `update.json` (~7 min après le push, TTL de cache) pendant que l'API git confirmait déjà 154 en ligne — l'API fait foi pendant la fenêtre, le cache se purge seul. |
+| 2026-09-19 | **§8 clos — assumés explicites + feuille de route.** Les cinq chantiers fondateurs barrés et le §5 d'AUDIT.md intégralement traité ou assumé (vérifié en réel : zéro issue ouverte, CI verte) — le §8 est réécrit en deux parties : **assumés** (neuf limites/choix documentés, aucune action en attente — mainteneur test_brand/test_apk, pas d'entrée beta, INSTALLER humain, schedule CI 60 j, pannes réseau muettes, PlaylistResetException, bruits chat bénins, pas de pronouns, limite pixel chat) et **feuille de route à trois horizons** : H1 = self-update 153→154 sur la Freebox (cas « mises à jour rapprochées » qui doit trancher la récurrence de l'installeur figé) + reproduction à la demande du scénario sur émulateur ; H2 = alerte radar prouvée de bout en bout en dispatch, mentions légales/politique de confidentialité Twouich, entrée beta si un jour nécessaire ; H3 = rebase upstream (future beta S0und), audits périodiques des endpoints tiers, vitrine du projet. L'historique détaillé du §8 vit au journal §9. |
 | 2026-09-18 | **Session d'observation live du soir (~13 min, DDG) — sentinelle et filtre validés ensemble sur l'app publiée (v1.0.5, 152).** Direct ouvert depuis l'historique de l'appareil (navigation D-pad). Verdict `analyze_device_log.sh` : 459 nettoyages, **207 playlists avec pubs retirées, 2539 segments publicitaires supprimés** (max 22/pod — pod de 15:41:54→15:41:58, playlist 62 ko → 3 ko), 0 repli proxy, **0 alerte « marqueur pub inconnu »** : le filtre retirait les pods pendant que la sentinelle, exposée aux mêmes DATERANGE `stitched-ad`, tags `quartile` et titres `Amazon` réels, restait muette. Les 10 « Source error » toutes `m3.l$d` = `PlaylistResetException` de fin de pod, récupérées (dernier nettoyage horodaté après la dernière erreur). Incident d'outillage consigné : premier client logcat mort à 15:37 (capture figée sans prévenir) — relance en append via `nohup … >log 2>&1 &` (un `&` nu dans une commande synchrone bloque la clôture ; `BACKGROUND` n'est pas disponible côté agent) ; capture cumulée 2 420 lignes, `work/device-test/logcat-sentinel-live-18-09.txt`. |
