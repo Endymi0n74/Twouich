@@ -170,6 +170,26 @@ v1.0.1 publiée.
 - **État final propre** : le build instrumenté utilisé pour le diagnostic a été remplacé par la
   v1.0.1 publiée (`install -r`) ; SHA-256 du `base.apk` installé = `469db927…` = release = `dist/`.
 
+### Probe SelfTest 28/28 sur le vrai téléviseur (Freebox Pop, app installée 153/v1.0.6), le 19/09/2026
+
+Le self-test à **28 vérifications** (table de vérité de l'updater en bytecode Dalvik, bloc 8 de
+`SelfTest.smali`) est validé sur le vrai téléviseur **sans toucher à l'app installée** — sonde
+`app_process` sur un push ADB, aucun `install`, aucune session d'installation :
+
+- **candidat** : `dist/Twouich_v1.0.7.apk` (SHA-256 `6b54d7c0…` — les octets exacts servis en
+  release v1.0.7), poussé sur `/data/local/tmp/twouich-selftest.apk` ;
+- **sonde** : `CLASSPATH=/data/local/tmp/twouich-selftest.apk app_process /system/bin
+  com.twouich.adblock.SelfTest` — exit 0, stdout muet (protocole connu : la sonde log en
+  logcat, tag `Twouich`) ; capture par `logcat -v time -T "<date locale de l'appareil>"
+  > /data/local/tmp/probe-154.log` lancée sur l'appareil pendant la sonde, puis filtrage ;
+- **verdict** : `SELFTEST 28/28 verifications, flux filtre : 328 octets` +
+  `playlist nettoyee 623 -> 328 octets, segments pub retires : 3` (le flux e2e est inclus dans
+  les 28) — les 10 vérifications updater (dont « annonce en retard » → silence et fail-loud
+  `i()`) passent en bytecode réel sur Android 10/Freebox, comme sur l'émulateur au 12:07 ;
+- **état d'après** : app intacte en `versionCode=153 versionName=v1.0.6`, 0 processus
+  `app_process` résiduel, 0 session d'installation, trace de sonde supprimée — la sonde ne
+  déclenche pas le self-update 154 en attente (celui-ci n'arrive qu'à l'exécution de l'app).
+
 ### Validé sur le vrai téléviseur du foyer (Freebox Pop, Android 10) : 152 → 153 (v1.0.6), le 19/09/2026
 
 Premier self-update à installer des octets **reproductibles inter-plateformes** (recette canonisée v1.0.6) — et une leçon d'exploitation sur l'installeur :
