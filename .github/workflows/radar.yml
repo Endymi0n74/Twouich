@@ -1,0 +1,104 @@
+name: radar-ads
+
+# Surveillance proactive de la dérive du format SSAI — le pendant serveur de la
+# sentinelle « marqueur pub inconnu » embarquée dans l'app (PlaylistSanitizer.b).
+#
+# Chaque jour :
+#   1. le harnais hors-réseau rejoue la logique anti-fuite (test_radar.py,
+#      mordance vérifiée par mutations) ;
+#   2. le radar (patch/radar_ads.py) sonde 4 chaînes à forte charge
+#      (GQL → usher → variante source) et rejoue CHAQUE playlist capturée
+#      dans le miroir Python du sanitizer (patch/tests/test_sanitizer.py).
+#
+# Verdict 1 = un marqueur ressemblant à une pub n'est pas couvert par les
+# règles (sentinelle du miroir, ou marqueur pub survivant au nettoyage) :
+# le job passe au rouge et UNE issue est ouverte (dédoublonnée sur son titre).
+#
+# Frontières (assumées) :
+#   - les pannes réseau ne sont PAS des alertes : sans réseau ou sans pod
+#     observé, le radar sort 0 (l'absence de preuve n'alerte pas) — un run
+#     peut donc être vert sans avoir rien vérifié ; la trace est dans le log ;
+#   - le PC et l'app voient des états pub différents (SSAI par session de
+#     token) : ce job surveille le format servi côté serveur, il ne remplace
+#     pas la capture appareil (TEST-DEVICE.md § 2) ;
+#   - GitHub désactive les `schedule` après 60 jours d'inactivité du dépôt ;
+#     le workflow reste relançable à la main (workflow_dispatch, chaînes
+#     surchargeables).
+
+on:
+  schedule:
+    - cron: '17 4 * * *'   # quotidienne, 04:17 UTC (évite les heures pleines)
+  workflow_dispatch:
+    inputs:
+      channels:
+        description: 'Chaînes à sonder (séparées par des espaces)'
+        required: false
+        default: 'xqc kaicenat jynxzi ddg'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  radar:
+    name: sondage multi-chaînes + rejeu anti-fuite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Harnais hors-réseau (la logique anti-fuite doit être verte avant de sonder)
+        shell: bash
+        run: |
+          python patch/tests/test_radar.py
+
+      - name: Radar (verdict 1 = marqueur pub non couvert par les règles)
+        id: radar
+        shell: bash
+        run: |
+          CHANNELS="${{ inputs.channels || 'xqc kaicenat jynxzi ddg' }}"
+          echo "chaînes sondées : $CHANNELS"
+          # Le shell par défaut de GitHub Actions est -eo pipefail : un verdict 1
+          # du radar fait bien échouer le step malgré le tee, et le log complet
+          # (stdout + stderr) reste dans /tmp/radar.log pour l'issue.
+          python patch/radar_ads.py --quiet --cycles 5 $CHANNELS 2>&1 | tee /tmp/radar.log
+
+      - name: Ouvrir une issue (une seule à la fois)
+        if: failure() && steps.radar.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TITLE='[radar-ads] marqueur pub non reconnu par le miroir'
+          # Dédoublonnage exact par préfixe de titre (évite une issue par jour
+          # tant que la précédente n'est pas traitée).
+          OPEN="$(gh issue list --state open --json title \
+                    --jq '[.[] | select(.title | startswith("[radar-ads]"))] | length')"
+          if [ "${OPEN:-0}" -gt 0 ]; then
+            echo "une issue [radar-ads] est déjà ouverte — pas de doublon ($OPEN)"
+            exit 0
+          fi
+          {
+            echo "Le radar quotidien a détecté un marqueur publicitaire que les règles du"
+            echo "sanitizer ne couvrent pas (sentinelle du miroir, ou marqueur `stitched-ad`/"
+            echo "`Amazon` ayant survécu au nettoyage)."
+            echo
+            echo "Run : ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo '```'
+            tail -40 /tmp/radar.log
+            echo '```'
+            echo
+            echo "Procédure (AUDIT.md § 4.2 / § 4.4) : capturer la playlist brute (refetch"
+            echo "GQL → usher → variante), ajouter la règle dans"
+            echo "`patch/smali/com/twouich/adblock/PlaylistSanitizer.smali` et un cas figé"
+            echo "dans `patch/tests/test_sanitizer.py`, puis rebuild."
+          } > /tmp/issue.md
+          gh issue create --title "$TITLE" --body-file /tmp/issue.md
