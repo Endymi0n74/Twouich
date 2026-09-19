@@ -26,7 +26,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 REPO = "Endymi0n74/Twouich"
 UPSTREAM = "S0und/S0undTV"
-DEFAULT_APK_NAME = "Twouich_v1.0.7.apk"
+DEFAULT_APK_NAME = "Twouich_v1.0.8.apk"
 
 # ── Étape 1 : greffon anti-pub ────────────────────────────────────────────
 GRAFT_DIR = "com/twouich/adblock"
@@ -650,8 +650,8 @@ def main() -> int:
     here = pathlib.Path(__file__).resolve().parent
     parser = argparse.ArgumentParser()
     parser.add_argument("--decoded", required=True, type=pathlib.Path)
-    parser.add_argument("--version-code", type=int, default=154)
-    parser.add_argument("--version-name", default="v1.0.7")
+    parser.add_argument("--version-code", type=int, default=155)
+    parser.add_argument("--version-name", default="v1.0.8")
     parser.add_argument("--apk-name", default=DEFAULT_APK_NAME)
     parser.add_argument("--release-date", default=None,
                         help="date affichée dans la page Nouveautés (AAA.MM.JJ). "

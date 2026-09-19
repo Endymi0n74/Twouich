@@ -1,5 +1,9 @@
 # Journal des modifications — Twouich
 
+## v1.0.8 — 19 septembre 2026
+
+- **Mentions légales et politique de confidentialité embarquées** : deux nouvelles pages accessibles depuis « À propos », écrites sur ce que l'application fait réellement — aucune donnée collectée, aucun serveur propre, et la vérité documentée sur l'héritage d'origine (composants Firebase toujours configurés, permission micro déclarée mais jamais accédée).
+
 ## v1.0.7 — 19 septembre 2026
 
 - Le self-test embarqué passe à **28 vérifications** : la table de vérité de la mise à jour automatique est désormais rejouée dans le bytecode réel à chaque démarrage (annonce en retard → silence, pas de boucle d'update, sécurité sur version illisible) — le miroir machine de la logique vérifiée hors réseau.
