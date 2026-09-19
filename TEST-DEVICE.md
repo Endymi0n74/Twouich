@@ -9,6 +9,7 @@ Trois scripts font tout le travail :
 |---|---|
 | `patch/test-selftest.sh` | **verdict déterministe** : rejoue des playlists publicitaires Dans le code compilé, sur l'appareil, sans attendre une coupure (§ 0.1) |
 | `patch/test-device.sh` | trouve `adb`, choisit l'appareil, installe l'APK, lance la capture `logcat` filtrée, puis analyse |
+| `patch/test-live.sh` | **observation longue en direct** : enchaîne les étapes mécaniques de la recette du § 2 (capture détachée surveillée + verdict), la navigation restant à la main |
 | `patch/analyze_device_log.sh` | verdict d'une capture existante (utilisable seul) |
 | `patch/check-release.sh` | la release publiée correspond-elle au livrable et à `update.json` (§ 0.2) |
 
@@ -307,6 +308,12 @@ sentinelle « marqueur pub inconnu » reste muette —, la séquence suivante fa
 indépendantes. Recette éprouvée le 18/09/2026 (~13 min de direct : 459 nettoyages, 2539 segments
 retirés, 0 alerte sentinelle — consigné en `AUDIT.md` § 4.4). Pour maximiser les chances de voir
 un pod, choisir une chaîne à forte charge publicitaire (méthode radar de `AUDIT.md` § 4.4).
+
+> **Automatisation** : `bash patch/test-live.sh --duration 600` exécute les étapes 1, 2, 4 et 5
+> (état, capture détachée surveillée avec relance en append, arrêt + verdict) — il ne reste à la main
+> que l'étape 3 (la navigation) et l'observation. Les pièges ci-dessous expliquent *pourquoi* le
+> script fait chaque chose. Options : `--serial`, `--connect`, `--list`, `--no-launch`, `--no-quit`,
+> `--analyze <fichier>` (verdict seul).
 
 **1. État** — un seul binaire `adb` pour toute la session (piège § 1 : BlueStacks → `HD-Adb.exe`),
 transport `emulator-*` (le TCP ne rend pas les verdicts `app_process`), et la version installée :

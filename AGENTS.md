@@ -111,6 +111,7 @@ python patch/tests/test_normalize_apk.py   # 29 vérifications : le normaliseur 
                                            #   et ordre des entrées ZIP sans rien toucher d'autre
 bash   patch/tests/test_analyzer.sh        # 8 verdicts sur captures synthétiques
 bash   patch/test-selftest.sh              # self-test embarqué, sur appareil (voir plus bas)
+bash   patch/test-live.sh                  # observation live longue : capture détachée + verdict (TEST-DEVICE.md § 2)
 bash   patch/check-release.sh              # chaîne update.json → tag → asset → octets servis
 ```
 
@@ -137,6 +138,11 @@ ADB="/c/Users/<vous>/AppData/Local/ScrcpyGUI/scrcpy-bin/adb.exe" \
   bash patch/test-device.sh --serial <serial> --no-install
 bash patch/analyze_device_log.sh work/device-test/logcat-<date>.txt
 ```
+
+Pour une observation **longue** en direct (prouver qu'un pod est retiré pendant que la sentinelle
+reste muette, sans terminal occupé), `bash patch/test-live.sh --duration 600` enchaîne les étapes
+mécaniques — état, capture détachée surveillée, arrêt + verdict `analyze_device_log.sh` ; seules la
+navigation D-pad et l'observation de l'écran restent à la main (détails et pièges : `TEST-DEVICE.md` § 2).
 
 Indices à surveiller dans le logcat (tag `Twouich`) :
 `playlist nettoyee <avant> -> <après> octets, segments pub retires : <n>`.
