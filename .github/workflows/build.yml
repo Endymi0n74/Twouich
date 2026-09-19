@@ -68,6 +68,7 @@ jobs:
         run: |
           python patch/tests/test_sanitizer.py
           python patch/tests/test_smali_branches.py
+          python patch/tests/test_update_check.py
           # test_brand.py exige les polices Windows du mot-symbole (ARLRDBD.TTF,
           # non redistribuables) et test_apk.py exige un APK SIGNÉ : tous deux
           # restent des contrôles du mainteneur. La CI prouve la recette, pas
@@ -145,6 +146,7 @@ jobs:
         run: |
           python patch/tests/test_sanitizer.py
           python patch/tests/test_smali_branches.py
+          python patch/tests/test_update_check.py
 
       - name: Restaurer le keystore depuis les secrets chiffrés
         shell: bash
