@@ -1,5 +1,11 @@
 # Journal des modifications — Twouich
 
+## v1.0.6 — 19 septembre 2026
+
+- Build reproductible inter-plateformes : l'ordre des entrées ZIP est canonisé (tri par nom) — le SHA-256 du livrable est désormais identique quel que soit l'OS de build (Windows ou Linux) ; le hash publié identifie le fichier livré **et** la recette.
+- Surveillance continue du format publicitaire : un radar quotidien en CI rejoue le nettoyage sur des playlists Twitch réelles et ouvre une issue si un marqueur n'était pas reconnu — le pendant serveur de la sentinelle embarquée depuis la v1.0.5.
+- Outillage de test enrichi : observation live automatisée (`test-live.sh`), verdicts d'analyse affinés (contenu traversé sans pod ≠ cas suspect).
+
 ## v1.0.5 — 18 septembre 2026
 
 - Sentinelle intégrée au filtre : toute balise publicitaire non reconnue est consignée en logcat (`marqueur pub inconnu`), pour détecter automatiquement un futur changement de format côté Twitch.
