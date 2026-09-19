@@ -1,5 +1,9 @@
 # Journal des modifications — Twouich
 
+## v1.0.9 — 19 septembre 2026
+
+- **La « Politique de confidentialité » du menu affiche désormais la politique Twouich embarquée** (elle chargeait encore la page en ligne du projet d'origine) ; la page « Mentions légales » embarquée est accessible depuis « À propos ».
+
 ## v1.0.8 — 19 septembre 2026
 
 - **Mentions légales et politique de confidentialité embarquées** : deux nouvelles pages accessibles depuis « À propos », écrites sur ce que l'application fait réellement — aucune donnée collectée, aucun serveur propre, et la vérité documentée sur l'héritage d'origine (composants Firebase toujours configurés, permission micro déclarée mais jamais accédée).

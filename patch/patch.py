@@ -26,7 +26,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 REPO = "Endymi0n74/Twouich"
 UPSTREAM = "S0und/S0undTV"
-DEFAULT_APK_NAME = "Twouich_v1.0.8.apk"
+DEFAULT_APK_NAME = "Twouich_v1.0.9.apk"
 
 # ── Étape 1 : greffon anti-pub ────────────────────────────────────────────
 GRAFT_DIR = "com/twouich/adblock"
@@ -452,6 +452,18 @@ def install_branding(decoded: pathlib.Path, here: pathlib.Path, version_name: st
         log("déjà appliqué : page À propos : liens vers les pages légales")
     about.write_text(about_text.replace("\r\n", "\n"), encoding="utf-8", newline="\n")
 
+    # La « Politique de confidentialité » du menu latéral (MainFragment) ouvre
+    # PrivacyPolicyActivity, qui charge une politique upstream en ligne
+    # (Google Sites de S0undTV) : hors sujet pour ce fork. On la repointe vers
+    # la page locale embarquée — même fenêtre, pas de réseau, contenu Twouich.
+    privacy_act = decoded / "smali/com/s0und/s0undtv/activities/PrivacyPolicyActivity.smali"
+    replace_once(
+        privacy_act,
+        'const-string v0, "https://sites.google.com/view/privacy-policy-for-s0undtv/home"',
+        'const-string v0, "file:///android_asset/twouich_privacy.html"',
+        "PrivacyPolicyActivity : politique Twouich locale au lieu de la page upstream",
+    )
+
     # Injection des pages légales (source = patch/branding/, canonisation LF,
     # cf. plus haut : ces fichiers sont stockés bruts dans l'APK).
     for src_name, dest_rel, what in LEGAL_PAGES:
@@ -650,8 +662,8 @@ def main() -> int:
     here = pathlib.Path(__file__).resolve().parent
     parser = argparse.ArgumentParser()
     parser.add_argument("--decoded", required=True, type=pathlib.Path)
-    parser.add_argument("--version-code", type=int, default=155)
-    parser.add_argument("--version-name", default="v1.0.8")
+    parser.add_argument("--version-code", type=int, default=156)
+    parser.add_argument("--version-name", default="v1.0.9")
     parser.add_argument("--apk-name", default=DEFAULT_APK_NAME)
     parser.add_argument("--release-date", default=None,
                         help="date affichée dans la page Nouveautés (AAA.MM.JJ). "
@@ -699,6 +711,8 @@ def main() -> int:
         ("assets/twouich_legal.html", "Mentions légales"),
         ("assets/twouich_privacy.html", "Politique de confidentialité"),
         ("assets/S0undTV_about.html", "twouich_legal.html"),
+        ("smali/com/s0und/s0undtv/activities/PrivacyPolicyActivity.smali",
+         "twouich_privacy.html"),
     ]:
         if rel_or_marker is None:
             path = find_factory(decoded)
