@@ -38,6 +38,26 @@ un compte Twitch connecté — session de 4 minutes sur une chaîne en direct :
   `S0undTV_AutoUpdateSrv` ne loggue rien (147 = version publiée, rien de plus récent à proposer) ;
   le seul « update » du logcat est la télémétrie Firebase (`update_required:false`, sans rapport).
 
+### Anti-boucle revérifiée (19/09/2026, émulateur v1.0.6 = annonce v1.0.6)
+
+Rejeu du même protocole des 4 lancements sur le cas limite où **l'annonce égale la version
+installée** (émulateur en 153 / v1.0.6, `update.json` publié annonçant 153) :
+
+- 4 cold starts consécutifs (force-stop → relance launcher, ~18 s chacun, capture `logcat`
+  en continu) → à chaque fois `mCurrentFocus` reste
+  `com.s0und.s0undtv/.activities.FireTVMainActivity`, `UpdateActivity` n'apparaît jamais,
+  et `S0undTV_AutoUpdateSrv` ne loggue **aucune ligne** (son silence est le verdict :
+  rien de plus récent à proposer) ;
+- c'est le bras « publiée == installée » de la comparaison corrigée en v1.0.0 (la version
+  installée est lue via `PackageManager.getPackageInfo`, plus le plancher figé 144
+  d'upstream) ; le bras « publiée < installée » — l'« annonce en retard », fenêtre historique
+  entre une release et le push de son annonce — donne le même silence par construction :
+  verrouillé hors réseau par `patch/tests/test_update_check.py` (table de vérité + gardes
+  sur l'arbre décodé, 20 vérifications) ;
+- la preuve complémentaire en production est en § 0.2 : la Freebox en 152 a ouvert le
+  dialogue au cold start suivant l'annonce 153, pendant que l'émulateur en 153 ne rouvrait
+  rien — même logique, observée des deux côtés du seuil.
+
 ### Réglage d'accent vérifié en conditions réelles (16/09/2026, v1.0.1)
 
 Pilotage `uiautomator` sur `emulator-5554` : Réglages → General settings → Accent color —
