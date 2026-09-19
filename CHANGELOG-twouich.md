@@ -1,5 +1,9 @@
 # Journal des modifications — Twouich
 
+## v1.0.7 — 19 septembre 2026
+
+- Le self-test embarqué passe à **28 vérifications** : la table de vérité de la mise à jour automatique est désormais rejouée dans le bytecode réel à chaque démarrage (annonce en retard → silence, pas de boucle d'update, sécurité sur version illisible) — le miroir machine de la logique vérifiée hors réseau.
+
 ## v1.0.6 — 19 septembre 2026
 
 - Build reproductible inter-plateformes : l'ordre des entrées ZIP est canonisé (tri par nom) — le SHA-256 du livrable est désormais identique quel que soit l'OS de build (Windows ou Linux) ; le hash publié identifie le fichier livré **et** la recette.

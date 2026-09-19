@@ -17,7 +17,7 @@ Dernière mise à jour : **18 septembre 2026**.
 | Identité visuelle | piste **C** « dégradé + monogramme », générée par `patch/branding/make_brand.py` |
 | Palette | violet profond `#7c22e8` → `#210849` (dégradé 315°), mot-symbole puffy `#ffffff`, tagline `#e6d8ff` |
 | Base upstream | S0undTV `beta_144.apk`, SHA-256 `578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0` |
-| Version produite | `versionCode 153` / `versionName v1.0.6` |
+| Version produite | `versionCode 154` / `versionName v1.0.7` |
 | Livrable | `dist/Twouich_v1.0.6.apk` (signé par la CI, v1+v2+v3, zipalign vérifié ; le SHA-256 de chaque release est publiable à l'octet près — build reproductible inter-plateformes, voir §3) |
 | Clé de signature | `keys/twouich.keystore`, alias `twouich-dev` — **non versionnée, à sauvegarder hors du dossier** ; mot de passe **hors du dépôt** (`keys/keystore.properties`, ignoré, ou `KEY_PASS`) |
 | Modèle Android minimum | API 23 (Android 6), cible 35 |
