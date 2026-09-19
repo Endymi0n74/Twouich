@@ -170,6 +170,40 @@ v1.0.1 publiée.
 - **État final propre** : le build instrumenté utilisé pour le diagnostic a été remplacé par la
   v1.0.1 publiée (`install -r`) ; SHA-256 du `base.apk` installé = `469db927…` = release = `dist/`.
 
+### Validé sur le vrai téléviseur du foyer (Freebox Pop, Android 10) : 153 → 154 (v1.0.7), le 19/09/2026 — self-update **spontané**, le cas « mises à jour rapprochées »
+
+Le self-update s'est déclenché **tout seul au foyer** (aucun pilotage ADB de l'installeur) — la
+meilleure condition d'observation possible, et précisément le scénario Horizon 1 : 153 installée
+la veille (11:48), annonce 154 levée le jour même (12:37), mise à jour à 15:10.
+
+- **parcours complet dans le tampon logcat de l'appareil** : `UpdateActivity` ouverte par l'app
+  (15:09:47) → « Install update » pressé à la télécommande (15:09:52) → **première tentative
+  rebondie** (voir leçon) → second `InstallStart` (15:10:03) → `InstallStaging` →
+  `PackageInstallerActivity` → `InstallInstalling` → `InstallSuccess` (15:10:19) →
+  `lastUpdateTime=2026-09-19 15:10:12`, app relancée directement en lecture
+  (`PlayerActivity` au focus, filtre actif dès 15:10:32 — playlists nettoyées en production) ;
+- **octets installés identifiés sur l'appareil** : `sha256sum` du `base.apk` installé
+  (`/data/app/com.s0und.s0undtv-…/base.apk`) = `6b54d7c0…` = livrable local Windows = octets
+  servis CI/GitHub — troisième self-update consécutif dont les octets installés sont prouvés
+  identiques à toute la chaîne ;
+- **self-test 28/28 sur les octets installés** : la ligne du démarrage auto a été perdue dans la
+  rotation du tampon main (borne basse 15:10:22 — le flux de lecture fait tourner le journal),
+  remplacée par la sonde `app_process` **directement sur le `base.apk` installé**
+  (`CLASSPATH=/data/app/…/base.apk app_process … SelfTest`) → `SELFTEST 28/28 verifications,
+  flux filtre : 328 octets` à 15:18 — preuve équivalente et plus forte : ce qui tourne au
+  quotidien embarque le self-test complet vert ;
+- **anti-boucle vérifiée** : aucune réouverture d'`UpdateActivity` après l'installation
+  (154 = dernière annoncée) ;
+- **leçon du jour — le « silence » de l'installeur a deux formes** : (a) la **bénigne**, observée
+  ici : le premier appui est routé vers `DeleteStagedFileOnResult` (nettoyage du fichier staged
+  précédent), qui rend la main à l'`UpdateActivity` sans rien installer — l'utilisateur voit
+  « rien ne se passe » et doit **re-presser** (~9 s plus tard ici) ; le second appui passe quand
+  le processus installeur est **frais** (né au boot de 11:39, première session à 15:09) ;
+  (b) la **pathologique** (la veille, 152→153) : un processus installeur **stalé** (en cache
+  depuis la session de la veille au soir) avale **toutes** les tentatives — seul un reboot
+  assainit. Diagnostic discriminant : l'âge du processus (`ps -A -o PID,STIME,NAME | grep
+  packageinstaller`) face au moment du boot.
+
 ### Probe SelfTest 28/28 sur le vrai téléviseur (Freebox Pop, app installée 153/v1.0.6), le 19/09/2026
 
 Le self-test à **28 vérifications** (table de vérité de l'updater en bytecode Dalvik, bloc 8 de
