@@ -204,6 +204,24 @@ la veille (11:48), annonce 154 levée le jour même (12:37), mise à jour à 15:
   assainit. Diagnostic discriminant : l'âge du processus (`ps -A -o PID,STIME,NAME | grep
   packageinstaller`) face au moment du boot.
 
+### Acceptation des pages légales embarquées (v1.0.8 → v1.0.9, émulateur, le 19/09/2026)
+
+Procédure d'acceptation d'une page embarquée (À propos / politique), utile à toute future page :
+
+1. **Ouvrir la page À propos** : `AboutActivity` n'est **pas exportée** (`am start` direct →
+   SecurityException) — passer par l'UI : tap sur « Settings » du dock latéral (ou D-pad),
+   puis grille du panneau → « About » (se fier à l'attribut `selected` du dump
+   `uiautomator`, pas aux bounds : la grille ne défile pas toujours) → `DPAD_CENTER`/tap ;
+2. **La WebView d'À propos** : le contenu se défile au `input swipe` ; les liens ne sont
+   **pas focusables au D-pad** (limite upstream du WebView TV) — la navigation utile est
+   **TAB + ENTER** (`input keyevent 61` puis `66`) : le focus traverse le DOM, ENTER active ;
+3. **Marqueurs de vérification** dans le dump : page À propos (en-tête Twouich, liens
+   « Mentions légales » / « Politique de confidentialité » rendus), page légale (« Éditeur »,
+   « Nature du logiciel », « Garantie »), politique (« En bref », « La vérité sur
+   l'héritage », « Caméra et microphone »). ATTENTION en v1.0.8 : l'entrée « Privacy policy »
+   du menu ouvrait encore la page upstream — corrigé en v1.0.9 (repointage
+   `PrivacyPolicyActivity` vers l'asset local, cf. journal).
+
 ### Probe SelfTest 28/28 sur le vrai téléviseur (Freebox Pop, app installée 153/v1.0.6), le 19/09/2026
 
 Le self-test à **28 vérifications** (table de vérité de l'updater en bytecode Dalvik, bloc 8 de
