@@ -298,6 +298,89 @@ complète**, noter l'heure de la coupure, puis `Ctrl+C`.
 Si `adb install` échoue en flux direct, le script bascule tout seul sur `push` + `pm install`
 (même résultat, transport différent — c'est ce repli qui a fait passer l'installation sur BlueStacks).
 
+### Observation en direct longue — capture détachée, navigation D-pad, sentinelle comprise
+
+`test-device.sh` capture en **synchrone** (`Ctrl+C` ou `--duration`) : la session tient le terminal
+et suppose que quelqu'un lance le direct à la main. Pour une **observation longue sans terminal
+occupé** — typiquement prouver sur un même trafic réel que le filtre retire les pods *et* que la
+sentinelle « marqueur pub inconnu » reste muette —, la séquence suivante fait tout en commandes
+indépendantes. Recette éprouvée le 18/09/2026 (~13 min de direct : 459 nettoyages, 2539 segments
+retirés, 0 alerte sentinelle — consigné en `AUDIT.md` § 4.4). Pour maximiser les chances de voir
+un pod, choisir une chaîne à forte charge publicitaire (méthode radar de `AUDIT.md` § 4.4).
+
+**1. État** — un seul binaire `adb` pour toute la session (piège § 1 : BlueStacks → `HD-Adb.exe`),
+transport `emulator-*` (le TCP ne rend pas les verdicts `app_process`), et la version installée :
+
+```bash
+export MSYS_NO_PATHCONV=1
+ADB="/c/Program Files/BlueStacks_nxt/HD-Adb.exe"
+"$ADB" connect 127.0.0.1:5555 && "$ADB" devices
+"$ADB" -s emulator-5554 shell dumpsys package com.s0und.s0undtv | grep -E 'versionCode|versionName'
+```
+
+**2. Capture détachée** — même filtre que `test-device.sh`, plus `-v time` pour les horodatages.
+Le `nohup … &` se lance **dans sa propre commande** : un `&` en fin de commande synchrone en bloque
+la clôture, et il n'y a pas de mode arrière-plan d'agent. Rediriger stderr **dans le fichier** :
+une ligne `adb: error: closed` explique une capture morte, au lieu de la laisser deviner.
+
+```bash
+L=work/device-test/logcat-live-$(date +%d-%m).txt
+nohup "$ADB" -s emulator-5554 logcat -v time \
+    Twouich:V ExoPlayerImpl:W ExoPlayerImplInternal:W HlsMediaSource:W Loader:W \
+    MediaCodec:W MediaDrm:W AndroidRuntime:E *:S >> "$L" 2>&1 &
+sleep 3 && wc -l "$L"        # la capture vit-elle ?
+```
+
+⚠️ **Une capture logcat peut mourir sans prévenir** (le 18/09 : morte à 15:37, la moitié de la
+session perdue avant le constat). Vérifier à chaque fenêtre d'observation que `$L` grossit ; s'il
+est figé, **relancer la même commande en append (`>>`)** — jamais un fichier neuf : le verdict doit
+couvrir d'un seul tenant les deux fenêtres.
+
+**3. Ouvrir un direct à la télécommande** — l'UI TV se pilote au **D-pad** : les libellés ne
+répondent pas à `input tap`, seul compte l'élément **focusé**. Boucle : dumper, repérer le focus et
+la cible, naviguer, re-dumper, valider. (Les deep-links `twitch://` n'existent pas dans l'app.)
+
+```bash
+"$ADB" -s emulator-5554 shell monkey -p com.s0und.s0undtv -c android.intent.category.LAUNCHER 1
+sleep 6
+"$ADB" -s emulator-5554 shell uiautomator dump /sdcard/ui.xml
+"$ADB" -s emulator-5554 pull /sdcard/ui.xml work/device-test/ui-live.xml
+grep -o '<node[^>]*focused="true"[^>]*>' work/device-test/ui-live.xml
+grep -c 'Live Stream History' work/device-test/ui-live.xml
+"$ADB" -s emulator-5554 shell input keyevent 23     # DPAD_CENTER sur l'entrée focusée
+```
+
+Naviguer (19 haut, 20 bas, 21 gauche, 22 droite, 23 valider) jusqu'à la carte de la chaîne, en
+vérifiant **à chaque dump** que la carte est bien dans le conteneur focusé avant d'appuyer sur 23.
+Le direct est lancé quand :
+
+```bash
+"$ADB" -s emulator-5554 shell dumpsys activity activities | grep mResumedActivity   # → PlayerActivity
+sleep 10 && grep -c 'playlist nettoyee' "$L"        # les nettoyages affluent
+```
+
+**4. Observer** — des fenêtres de quelques minutes (`sleep 240`), en re-vérifiant que `$L` grossit
+(piège du point 2). La checklist de § 4 s'applique sur l'écran pendant ce temps.
+
+**5. Arrêter et rendre le verdict** — tuer **le client logcat, pas le serveur adb** (tuer le
+serveur casse tout adb pour la suite, piège § 1), sortir du direct, puis analyser :
+
+```bash
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.CommandLine -like '*logcat*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }"
+"$ADB" -s emulator-5554 shell input keyevent 4      # BACK : retour à l'accueil
+bash patch/analyze_device_log.sh "$L"
+```
+
+Les compteurs de § 3 et le verdict de § 5 s'appliquent tels quels, plus deux lignes propres à la
+sentinelle :
+
+| Ligne du verdict | Lecture |
+|---|---|
+| `marqueurs pub inconnus : 0` | **la sentinelle est muette sur le vrai trafic** — l'objectif du test est atteint |
+| `marqueurs pub inconnus : n > 0` | le verdict 🚨 s'affiche **en tête** avec la ligne HLS brute : ajouter la règle + un cas figé au miroir (`test_sanitizer.py`), cf. `AUDIT.md` § 4.2 |
+| `Source error` ×n | attendu **en fin de pod uniquement**, chaque occurrence suivie de `Caused by: m3.l$d` = `PlaylistResetException` (resync de 2–4 s, `AUDIT.md` § 4.4) — toute autre cause passe en § 7 |
+| `replis proxy → direct` | 0 attendu (proxy désactivé par défaut) |
+
 ---
 
 ## 3. Ce que la capture doit montrer
