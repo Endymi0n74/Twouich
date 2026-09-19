@@ -18,6 +18,11 @@
 #
 # Les jeux d'essai sont les memes que ceux de patch/tests/test_sanitizer.py :
 # toute divergence entre les deux se voit immediatement.
+#
+# Le bloc 8 rejoue en plus la TABLE DE VERITE DE L'UPDATER (UpdateHelper.b(),
+# v1.0.0 : comparaison a la version installee) via pick(IIII)I — le miroir
+# Dalvik de la table de patch/tests/test_update_check.py : « annonce en
+# retard » -> silence, sur les deux canaux, dans le code compile.
 
 
 # static fields
@@ -163,6 +168,69 @@
 
 
 # Verdict : une ligne. Log.e quand quelque chose casse (plus visible).
+# Miroir Dalvik de la logique de UpdateHelper.b()V (verifiee par
+# patch/tests/test_update_check.py). pick(canal, version installee, entree du
+# canal, entree de l'autre canal) -> 0 silence, 1 dialogue(b), 2 dialogue(autre
+# canal). -1 = entree absente OU version installee illisible (echec de i()I :
+# fail-loud, tout semble plus recent). La stricte superiorite porte le silence
+# (publiee <= installee -> JAMAIS de dialogue) et la preference de l'autre
+# canal (c gagne ssi strictement plus recente que tout).
+.method private static pick(IIII)I
+    .locals 2
+
+    # v0 = verdict ; v1 = registre de travail
+    const/4 v0, 0x0
+
+    # canal stable (0) ?
+    if-eqz p0, :stable
+
+    # canal beta (1) ; tout le reste est un canal non gere -> silence
+    const/4 v1, 0x1
+
+    if-ne p0, v1, :done
+
+    const/4 v1, -0x1
+
+    # cond_1 : l'autre canal (c) gagne ssi c > installee ET (b absente OU c > b)
+    # — structure conforme a a.smali (if-le saute vers cond_2, jamais l'inverse)
+    if-eq p3, v1, :cond_2
+
+    if-le p3, p1, :cond_2
+
+    if-eq p2, v1, :cond_1w
+
+    if-le p3, p2, :cond_2
+
+    :cond_1w
+    const/4 v0, 0x2
+
+    goto :done
+
+    :cond_2
+    # l'entree du canal (b) gagne ssi b > installee (absente ou en retard : silence)
+    if-eq p2, v1, :done
+
+    if-le p2, p1, :done
+
+    const/4 v0, 0x1
+
+    goto :done
+
+    :stable
+    # b absente -> silence ; sinon dialogue ssi b strictement superieure
+    const/4 v1, -0x1
+
+    if-eq p2, v1, :done
+
+    if-le p2, p1, :done
+
+    const/4 v0, 0x1
+
+    :done
+    return v0
+.end method
+
+
 .method private static report(III)V
     .locals 3
 
@@ -690,6 +758,300 @@
     move-result v13
 
     const-string v12, "flux : aucune pub dans ce que lit le lecteur"
+
+    invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
+
+    move-result v12
+
+    add-int/2addr v0, v12
+
+    add-int/lit8 v1, v1, 0x1
+
+    # ── 8. table de vérité de l'updater (miroir Dalvik de test_update_check.py) ──
+    # pick(canal, installée, entrée du canal, autre canal) -> 0 silence,
+    # 1 dialogue(b), 2 dialogue(autre) ; -1 = absente / version illisible.
+
+    # 8.1 stable + annonce en retard -> silence
+    const/4 v9, 0x0
+
+    const/16 v10, 0x99
+
+    const/16 v12, 0x98
+
+    const/4 v13, -0x1
+
+    invoke-static {v9, v10, v12, v13}, Lcom/twouich/adblock/SelfTest;->pick(IIII)I
+
+    move-result v12
+
+    const/4 v13, 0x0
+
+    invoke-static {v12, v13}, Lcom/twouich/adblock/SelfTest;->eq(II)Z
+
+    move-result v13
+
+    const-string v12, "updater : annonce en retard -> silence (canal stable)"
+
+    invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
+
+    move-result v12
+
+    add-int/2addr v0, v12
+
+    add-int/lit8 v1, v1, 0x1
+
+    # 8.2 beta + annonce en retard -> silence
+    const/4 v9, 0x1
+
+    const/16 v10, 0x99
+
+    const/16 v12, 0x98
+
+    const/4 v13, -0x1
+
+    invoke-static {v9, v10, v12, v13}, Lcom/twouich/adblock/SelfTest;->pick(IIII)I
+
+    move-result v12
+
+    const/4 v13, 0x0
+
+    invoke-static {v12, v13}, Lcom/twouich/adblock/SelfTest;->eq(II)Z
+
+    move-result v13
+
+    const-string v12, "updater : annonce en retard -> silence (canal beta)"
+
+    invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
+
+    move-result v12
+
+    add-int/2addr v0, v12
+
+    add-int/lit8 v1, v1, 0x1
+
+    # 8.3 stable + annonce egale -> silence (pas de boucle d'update)
+    const/4 v9, 0x0
+
+    const/16 v10, 0x99
+
+    const/16 v12, 0x99
+
+    const/4 v13, -0x1
+
+    invoke-static {v9, v10, v12, v13}, Lcom/twouich/adblock/SelfTest;->pick(IIII)I
+
+    move-result v12
+
+    const/4 v13, 0x0
+
+    invoke-static {v12, v13}, Lcom/twouich/adblock/SelfTest;->eq(II)Z
+
+    move-result v13
+
+    const-string v12, "updater : annonce egale -> silence (pas de boucle)"
+
+    invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
+
+    move-result v12
+
+    add-int/2addr v0, v12
+
+    add-int/lit8 v1, v1, 0x1
+
+    # 8.4 stable + annonce plus recente -> dialogue
+    const/4 v9, 0x0
+
+    const/16 v10, 0x98
+
+    const/16 v12, 0x99
+
+    const/4 v13, -0x1
+
+    invoke-static {v9, v10, v12, v13}, Lcom/twouich/adblock/SelfTest;->pick(IIII)I
+
+    move-result v12
+
+    const/4 v13, 0x1
+
+    invoke-static {v12, v13}, Lcom/twouich/adblock/SelfTest;->eq(II)Z
+
+    move-result v13
+
+    const-string v12, "updater : annonce plus recente -> dialogue"
+
+    invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
+
+    move-result v12
+
+    add-int/2addr v0, v12
+
+    add-int/lit8 v1, v1, 0x1
+
+    # 8.5 beta + entree stable plus recente -> dialogue sur l'autre canal
+    const/4 v9, 0x1
+
+    const/16 v10, 0x98
+
+    const/16 v12, 0x98
+
+    const/16 v13, 0x99
+
+    invoke-static {v9, v10, v12, v13}, Lcom/twouich/adblock/SelfTest;->pick(IIII)I
+
+    move-result v12
+
+    const/4 v13, 0x2
+
+    invoke-static {v12, v13}, Lcom/twouich/adblock/SelfTest;->eq(II)Z
+
+    move-result v13
+
+    const-string v12, "updater : l'autre canal plus recent gagne"
+
+    invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
+
+    move-result v12
+
+    add-int/2addr v0, v12
+
+    add-int/lit8 v1, v1, 0x1
+
+    # 8.6 beta + les deux entrees en retard -> silence
+    const/4 v9, 0x1
+
+    const/16 v10, 0x99
+
+    const/16 v12, 0x98
+
+    const/16 v13, 0x97
+
+    invoke-static {v9, v10, v12, v13}, Lcom/twouich/adblock/SelfTest;->pick(IIII)I
+
+    move-result v12
+
+    const/4 v13, 0x0
+
+    invoke-static {v12, v13}, Lcom/twouich/adblock/SelfTest;->eq(II)Z
+
+    move-result v13
+
+    const-string v12, "updater : aucune entree plus recente -> silence (beta)"
+
+    invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
+
+    move-result v12
+
+    add-int/2addr v0, v12
+
+    add-int/lit8 v1, v1, 0x1
+
+    # 8.7 beta + entree du canal plus recente que l'autre -> dialogue(b)
+    const/4 v9, 0x1
+
+    const/16 v10, 0x96
+
+    const/16 v12, 0x99
+
+    const/16 v13, 0x98
+
+    invoke-static {v9, v10, v12, v13}, Lcom/twouich/adblock/SelfTest;->pick(IIII)I
+
+    move-result v12
+
+    const/4 v13, 0x1
+
+    invoke-static {v12, v13}, Lcom/twouich/adblock/SelfTest;->eq(II)Z
+
+    move-result v13
+
+    const-string v12, "updater : l'entree du canal gagne si plus recente que l'autre"
+
+    invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
+
+    move-result v12
+
+    add-int/2addr v0, v12
+
+    add-int/lit8 v1, v1, 0x1
+
+    # 8.8 canal inconnu -> silence meme si l'annonce est plus recente
+    const/4 v9, 0x2
+
+    const/16 v10, 0x98
+
+    const/16 v12, 0x99
+
+    const/4 v13, -0x1
+
+    invoke-static {v9, v10, v12, v13}, Lcom/twouich/adblock/SelfTest;->pick(IIII)I
+
+    move-result v12
+
+    const/4 v13, 0x0
+
+    invoke-static {v12, v13}, Lcom/twouich/adblock/SelfTest;->eq(II)Z
+
+    move-result v13
+
+    const-string v12, "updater : canal inconnu -> silence"
+
+    invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
+
+    move-result v12
+
+    add-int/2addr v0, v12
+
+    add-int/lit8 v1, v1, 0x1
+
+    # 8.9 aucune entree candidate -> silence
+    const/4 v9, 0x0
+
+    const/16 v10, 0x96
+
+    const/4 v12, -0x1
+
+    const/4 v13, -0x1
+
+    invoke-static {v9, v10, v12, v13}, Lcom/twouich/adblock/SelfTest;->pick(IIII)I
+
+    move-result v12
+
+    const/4 v13, 0x0
+
+    invoke-static {v12, v13}, Lcom/twouich/adblock/SelfTest;->eq(II)Z
+
+    move-result v13
+
+    const-string v12, "updater : aucune entree candidate -> silence"
+
+    invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
+
+    move-result v12
+
+    add-int/2addr v0, v12
+
+    add-int/lit8 v1, v1, 0x1
+
+    # 8.10 version installee illisible (-1) -> dialogue (fail-loud)
+    const/4 v9, 0x0
+
+    const/4 v10, -0x1
+
+    const/16 v12, 0x99
+
+    const/4 v13, -0x1
+
+    invoke-static {v9, v10, v12, v13}, Lcom/twouich/adblock/SelfTest;->pick(IIII)I
+
+    move-result v12
+
+    const/4 v13, 0x1
+
+    invoke-static {v12, v13}, Lcom/twouich/adblock/SelfTest;->eq(II)Z
+
+    move-result v13
+
+    const-string v12, "updater : version illisible -> dialogue (fail-loud)"
 
     invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
 

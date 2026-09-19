@@ -102,14 +102,14 @@ Le script rend un verdict et un code de sortie (0 = vert). Deux lignes attendues
 
 ```
 I/Twouich: playlist nettoyee 623 -> 328 octets, segments pub retires : 3
-I/Twouich: SELFTEST 18/18 verifications, flux filtre : 328 octets
+I/Twouich: SELFTEST 28/28 verifications, flux filtre : 328 octets
 ```
 
 | Ligne | Signification |
 |---|---|
-| `SELFTEST 18/18 …` | les 18 vérifications passent : le filtre agit, sur l'appareil, dans le bytecode réel |
+| `SELFTEST 28/28 …` | les 28 vérifications passent : le filtre agit, sur l'appareil, dans le bytecode réel |
 | `SELFTEST KO : <vérification>` | une vérification précise a échoué — c'est la ligne à recopier pour corriger |
-| `SELFTEST ECHEC n/18 …` | verdict global en échec (sortie Log.e, donc bien visible dans les captures) |
+| `SELFTEST ECHEC n/28 …` | verdict global en échec (sortie Log.e, donc bien visible dans les captures) |
 | `VerifyError` | le smali assemble mais ne passe pas le vérificateur Dalvik : à corriger avant tout test live |
 
 **Validé le 15/09/2026** (`emulator-5554`, BlueStacks, API 25) : `SELFTEST 18/18`, flux filtré de

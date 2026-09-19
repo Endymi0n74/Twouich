@@ -123,7 +123,9 @@ Le self-test embarqué (`patch/smali/com/twouich/adblock/SelfTest.smali`, exécu
 `MainApp.onCreate`) rejoue des playlists publicitaires Twitch dans le **vrai code compilé** et fait
 traverser `AdBlockDataSource` : c'est la seule preuve qui ne dépend pas d'une coupure réelle, et la
 seule qui parle la sémantique Dalvik (elle a déjà trouvé deux défauts que rien d'autre ne voyait).
-Verdict attendu, une ligne : `I/Twouich: SELFTEST 18/18 verifications, flux filtre : 328 octets`.
+Verdict attendu, une ligne : `I/Twouich: SELFTEST 28/28 verifications, flux filtre : 328 octets`
+(18 vérifications du filtre + 10 de la table de vérité de l'updater, miroir Dalvik de
+`patch/tests/test_update_check.py` — bloc 8 de `SelfTest.smali`, méthode `pick(IIII)I`).
 Toute nouvelle vérification ajoutée là doit passer sur l'appareil avant d'être déclarée bonne.
 
 **Et si tu touches à l'identité visuelle** : `test_brand.py` couvre le générateur et les assets
