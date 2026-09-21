@@ -29,6 +29,114 @@ UPSTREAM = "S0und/S0undTV"
 DEFAULT_APK_NAME = "Twouich_v1.0.9.apk"
 
 # ── Étape 1 : greffon anti-pub ────────────────────────────────────────────
+# Libellés de l'UX smartphone. Le champ de saisie reprend celui de l'interface
+# de référence (Twitch mobile / PurpleTV) plutôt que la formulation d'origine.
+CHAT_HINT = "Envoyer un message"
+CHAT_HINT_LEGACY = "Écrire dans le chat"
+
+# Géométrie du lecteur empilé (téléphone). La vidéo 16:9 se calcule depuis la
+# LARGEUR : au-delà de la hauteur disponible le chat recevait une hauteur
+# négative (mesuré le 20/09 à 1920×899 : vidéo écrasée, chat à 0 px). Deux
+# corrections ont eu lieu — plafonner la vidéo, puis refuser l'empilement quand
+# la place restante ne vaut pas un tiers de la hauteur (paysage) — et les deux
+# formes antérieures sont réparées au passage.
+PHONE_GEO_OLD_TAIL = ("    const/16 v11, 0x70\n"
+                      "    sub-int v7, v9, v10\n"
+                      "    sub-int/2addr v7, v11\n")
+PHONE_GEO_CLAMPED_TAIL = PHONE_GEO_OLD_TAIL.replace(
+    "    const/16 v11, 0x70\n",
+    "    const/16 v11, 0x70\n    sub-int v7, v9, v11\n"
+    "    if-ge v10, v7, :twouich_phone_video_fits\n    move v10, v7\n"
+    ":twouich_phone_video_fits\n",
+)
+# if-lt : on SAUTE le plafond quand la vidéo tient déjà (v10 < v7) ;
+# if-ge : on empile quand il reste au moins un tiers de la hauteur pour le chat.
+PHONE_GEO_ROOM_BLOCK = ("    const/4 v3, 0x3\n"
+                        "    div-int v3, v9, v3\n"
+                        "    if-ge v7, v3, :twouich_phone_room\n"
+                        "    goto :return_phone_layout\n"
+                        ":twouich_phone_room\n")
+PHONE_GEO_TAIL = PHONE_GEO_CLAMPED_TAIL.replace(
+    "    if-ge v10, v7, :twouich_phone_video_fits",
+    "    if-lt v10, v7, :twouich_phone_video_fits",
+) + PHONE_GEO_ROOM_BLOCK
+
+# --- Incrustation (picture-in-picture) ---------------------------------------
+# Le 20/09, l'acceptation PiP sur le téléphone a montré la barre « Envoyer un
+# message » tracée sur le bas de la FENÊTRE D'INCRUSTATION : l'entrée en PiP fait
+# perdre le focus et change la configuration, et chacun de ces rappels
+# réappliquait l'empilement APRÈS le masquage posé par le rappel PiP. La
+# disposition téléphone refuse donc de s'appliquer tant que l'état d'incrustation
+# — un champ d'instance écrit en tête du rappel — est vrai. Ces textes servent à
+# la fois au bloc injecté et à la réparation d'un arbre déjà patché : une seule
+# source, donc pas de dérive entre les deux chemins.
+PHONE_PIP_STATE_WRITE = (
+    "\n"
+    "    # L'état est écrit AVANT tout le reste : les rappels de perte de focus et de\n"
+    "    # changement de configuration qui accompagnent la transition lisent ce champ\n"
+    "    # (garde en tête de twouichPhoneStackedLayout).\n"
+    "    iput-boolean p1, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPipActive:Z\n"
+)
+# Needle exacte : « iput-boolean p1, p0, » tout court apparait déjà dans le code
+# upstream (champ a2 de PlayerActivity), donc un test d'absence sur ce préfixe
+# concluait « déjà écrit » et l'état n'était jamais posé — vu à la compilation du
+# 20/09. Le nom du champ rend le test non ambigu.
+PHONE_PIP_STATE_NEEDLE = ("iput-boolean p1, p0, Lcom/s0und/s0undtv/activities/"
+                          "PlayerActivity;->twouichPipActive:Z")
+# Polarity du garde de twouichPhoneView : « if-nez v0, :no_phone_view » sautait
+# vers le retour nul dès que l'identifiant ETAIT trouve, donc la vue n'etait
+# jamais rendue — le rappel PiP sortait aussitôt sur ses trois `if-eqz` et ne
+# masquait rien (chat et saisie traces sur la video, mesures du 20/09).
+PHONE_PIP_VIEW_OLD = "    if-nez v0, :no_phone_view"
+PHONE_PIP_VIEW_NEW = "    if-eqz v0, :no_phone_view"
+PHONE_PIP_SUPER = ("    invoke-super {p0, p1, p2}, Landroid/app/Activity;"
+                   "->onPictureInPictureModeChanged(ZLandroid/content/res/Configuration;)V\n")
+PHONE_PIP_GUARD = (
+    "\n"
+    "    # Pendant l'incrustation, la fenêtre fait déjà 16:9 et le rappel PiP a posé\n"
+    "    # le masquage du chat et de la saisie. Toute réapplication de l'empilement\n"
+    "    # ici — perte de focus du passage en PiP, changement de configuration —\n"
+    "    # ferait réapparaître la barre de saisie PAR-DESSUS la vidéo : mesuré le\n"
+    "    # 20/09 sur le téléphone (bande « Envoyer un message » tracée sur le bas de\n"
+    "    # la fenêtre d'incrustation). Le champ twouichPipActive est écrit en tête de\n"
+    "    # onPictureInPictureModeChanged, donc posé quel que soit l'ordre des rappels.\n"
+    "    sget v11, Landroid/os/Build$VERSION;->SDK_INT:I\n"
+    "\n"
+    "    const/16 v10, 0x18\n"
+    "\n"
+    "    if-ge v11, v10, :twouich_phone_layout_ok\n"
+    "\n"
+    "    iget-boolean v11, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPipActive:Z\n"
+    "\n"
+    "    if-eqz v11, :twouich_phone_layout_ok\n"
+    "\n"
+    "    const-string v11, \"Twouich\"\n"
+    "\n"
+    "    const-string v10, \"picture-in-picture : empilement ignore (incrustation active)\"\n"
+    "\n"
+    "    invoke-static {v11, v10}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I\n"
+    "\n"
+    "    return-void\n"
+    "\n"
+    "    :twouich_phone_layout_ok\n"
+)
+PHONE_PIP_HIDE_TRACE = (
+    "\n"
+    "    const-string v3, \"Twouich\"\n"
+    "\n"
+    "    const-string v4, \"picture-in-picture : video plein cadre, chat et saisie masques\"\n"
+    "\n"
+    "    invoke-static {v3, v4}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I\n"
+)
+PHONE_PIP_RESTORE_TRACE = (
+    "\n"
+    "    const-string v3, \"Twouich\"\n"
+    "\n"
+    "    const-string v4, \"picture-in-picture : disposition empilee restauree\"\n"
+    "\n"
+    "    invoke-static {v3, v4}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I\n"
+)
+
 GRAFT_DIR = "com/twouich/adblock"
 
 # Méthode remplacée dans z3/u$b (Factory OkHttpDataSource d'ExoPlayer, Lz3/l$a).
@@ -200,6 +308,15 @@ CHANGELOG_NEW = """    <hr>
     <h1>beta_144 (2025.12.28)</h1>"""
 
 
+# Cartes Leanback : la grille (BaseGridView, obfusquee en androidx/leanback/widget/e)
+# est le premier point de passage de toute touche posee sur une rangee. On y
+# branche TapClick, qui traduit un tap en clic (voir patch_smartphone_tap).
+BASE_GRID_CLASS = ".class public abstract Landroidx/leanback/widget/e;"
+TAP_HOOK_CALL = ("    invoke-static {p0, p1}, Lcom/twouich/adblock/TapClick;->"
+                 "touch(Landroid/view/View;Landroid/view/MotionEvent;)Z")
+TAP_HOOK_LABEL = ":twouich_tap_unhandled"
+
+
 def log(msg: str) -> None:
     print(f"  {msg}")
 
@@ -268,6 +385,1056 @@ def install_graft(decoded: pathlib.Path, here: pathlib.Path) -> None:
         fail(f"méthode z3/u$b.a() attendue 1 fois, trouvée {count} fois")
     factory.write_text(new_text, encoding="utf-8")
     log("injecté : z3/u$b.a() renvoie AdBlockDataSource")
+
+
+def neutralize_firebase(decoded: pathlib.Path) -> None:
+    """Désactive les composants Firebase hérités avant tout démarrage Android.
+
+    Les bibliothèques peuvent rester dans le dex (elles font partie du binaire
+    upstream), mais aucun provider/service/receiver Firebase ou Measurement ne
+    doit être déclaré et aucun identifiant du projet S0und ne doit rester dans
+    les ressources. Sans point d'entrée manifeste ni configuration, ces
+    bibliothèques sont inertes et ne peuvent pas ouvrir de connexion réseau.
+    """
+    print("[1b/5] Télémétrie Firebase/Measurement désactivée")
+    manifest = decoded / "AndroidManifest.xml"
+    text = manifest.read_text(encoding="utf-8")
+    text = re.sub(r"(?ms)^        <receiver[^>]*AppMeasurementReceiver[^>]*/>\r?\n", "", text)
+    text = re.sub(r"(?ms)^        <service[^>]*AppMeasurement(?:Service|JobService)[^>]*/>\r?\n", "", text)
+    text = re.sub(r"(?ms)^        <service[^>]*ComponentDiscoveryService[^>]*>.*?</service>\r?\n", "", text)
+    text = re.sub(r"(?ms)^        <provider[^>]*FirebaseInitProvider[^>]*/>\r?\n", "", text)
+    manifest.write_text(text, encoding="utf-8")
+
+    strings = decoded / "res" / "values" / "strings.xml"
+    text = strings.read_text(encoding="utf-8")
+    removed = []
+    dropping = False
+    for line in text.splitlines():
+        if '<string name="' in line and any(
+            key in line for key in (
+                'google_app_id', 'google_api_key', 'google_crash_reporting_api_key',
+                'firebase_database_url', 'com.google.firebase.crashlytics.'
+            )
+        ):
+            dropping = not line.rstrip().endswith('</string>')
+            removed.append('')
+            continue
+        if dropping:
+            if '</string>' in line:
+                dropping = False
+            removed.append('')
+            continue
+        removed.append(line)
+    text = "\n".join(line for line in removed if line != "") + "\n"
+    text, _ = re.subn(
+        r"(?ms)^    <string name=\"(?:google_app_id|google_crash_reporting_api_key|firebase_database_url|com\\.google\\.firebase\\.crashlytics\\.[^\"]+)\">.*?</string>\\n?",
+        "",
+        text,
+    )
+    strings.write_text(text, encoding="utf-8")
+
+    for rel in ("res/raw/firebase_common_keep.xml", "res/raw/firebase_crashlytics_keep.xml"):
+        path = decoded / rel
+        if path.exists():
+            path.unlink()
+    public = decoded / "res/values/public.xml"
+    if public.is_file():
+        text = public.read_text(encoding="utf-8")
+        text = "\n".join(line for line in text.splitlines()
+                         if not any(name in line for name in (
+                             'name="firebase_common_keep"',
+                             'name="firebase_crashlytics_keep"',
+                             'name="com.google.firebase.crashlytics.mapping_file_id"',
+                             'name="com.google.firebase.crashlytics.version_control_info"',
+                             'name="firebase_database_url"',
+                             'name="google_api_key"',
+                             'name="google_app_id"',
+                             'name="google_crash_reporting_api_key"',
+                         ))) + "\n"
+        public.write_text(text, encoding="utf-8")
+
+
+def disable_remote_config_calls(decoded: pathlib.Path) -> None:
+    """Neutralise les appels applicatifs à Firebase Remote Config.
+
+    Le provider manifeste retiré empêche l'initialisation automatique, mais le
+    code upstream appelait encore RemoteConfig au démarrage et dans le lecteur.
+    Ces appels doivent devenir des no-op : sinon l'app peut planter en cherchant
+    un Default FirebaseApp, et aucun trafic ne serait réellement garanti.
+    """
+    targets = [
+        (decoded / "smali/com/s0und/s0undtv/MainApp.smali", "q", "V"),
+        (decoded / "smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "J3", "V"),
+    ]
+    replacement = ".method private {name}()V\n    .locals 0\n    return-void\n.end method"
+    for path, name, ret in targets:
+        if not path.is_file():
+            fail(f"cible Remote Config absente : {path}")
+        text = path.read_text(encoding="utf-8")
+        pattern = rf"(?ms)^\.method private {re.escape(name)}\(\){ret}.*?^\.end method"
+        new, count = re.subn(pattern, replacement.format(name=name), text, count=1)
+        if count == 0:
+            if f".method private {name}(){ret}\n    .locals 0\n    return-void" in text:
+                log(f"déjà appliqué : {path.name}.{name}() sans Remote Config")
+                continue
+            fail(f"méthode Remote Config introuvable : {path.name}.{name}()")
+        path.write_text(new, encoding="utf-8")
+        log(f"désactivé : {path.name}.{name}() (Remote Config)")
+
+
+def disable_crashlytics_facade(decoded: pathlib.Path) -> None:
+    """Rend muet le facade applicatif upstream qui envoyait les erreurs à Crashlytics.
+
+    Retirer seulement le provider ne suffit pas : le code de l'application appelait
+    encore P6/e, dont chaque méthode demandait le singleton Firebase et provoquait
+    une exception quand l'initialisation était désactivée. Les signatures restent
+    intactes pour ne pas modifier les appelants, mais les cinq opérations deviennent
+    des no-op locaux.
+    """
+    path = decoded / "smali_classes2/P6/e.smali"
+    if not path.is_file():
+        fail(f"facade Crashlytics absent : {path}")
+    text = path.read_text(encoding="utf-8")
+    pattern = re.compile(r"(?ms)^(\.method public static [a-e]\([^\n]*\)V\r?\n).*?^\.end method")
+    def noop(match: re.Match[str]) -> str:
+        return match.group(1) + "    .locals 0\n    return-void\n.end method"
+    new, count = pattern.subn(noop, text)
+    if count != 5:
+        fail(f"facade Crashlytics P6/e : 5 méthodes attendues, trouvées {count}")
+    if new != text:
+        path.write_text(new, encoding="utf-8")
+        log("désactivé : P6/e (facade Crashlytics applicative, 5 no-op)")
+    else:
+        log("déjà appliqué : P6/e (facade Crashlytics muette)")
+
+    # Analytics applicatif : même principe, les signatures restent disponibles
+    # mais les événements ne sortent plus de l'application.
+    for rel, method_re, label in (
+        ("smali_classes2/P6/b.smali", r"public static a", "P6/b.a()"),
+        ("smali_classes2/P6/l.smali", r"private static i", "P6/l.i()"),
+    ):
+        target = decoded / rel
+        source = target.read_text(encoding="utf-8")
+        method = re.compile(rf"(?ms)^(\.method [^\r\n]*{method_re}[^\r\n]*\r?\n).*?^\.end method")
+        rewritten, found = method.subn(
+            lambda m: m.group(1) + "    .locals 0\n    return-void\n.end method",
+            source,
+            count=1,
+        )
+        if found != 1:
+            if "    .locals 0\n    return-void\n.end method" in source:
+                log(f"déjà appliqué : {label} (no-op)")
+                continue
+            fail(f"méthode Analytics introuvable : {rel}")
+        target.write_text(rewritten, encoding="utf-8")
+        log(f"désactivé : {label} (Analytics no-op)")
+
+
+def patch_smartphone_features(decoded: pathlib.Path) -> int:
+    """Rend les capacités matérielles optionnelles pour les catalogues smartphone.
+
+    Seul l'attribut android:required des lignes uses-feature est touché : les noms,
+    permissions, activités et tous les autres attributs du manifeste restent
+    inchangés. Une ligne sans attribut required reçoit explicitement false, car
+    l'absence vaut true côté Android.
+    """
+    manifest = decoded / "AndroidManifest.xml"
+    text = manifest.read_text(encoding="utf-8")
+    lines = text.splitlines(keepends=True)
+    feature_count = 0
+    rewritten = []
+    line_re = re.compile(r"^(?P<prefix>\s*<uses-feature\b)(?P<body>.*?)(?P<close>/?>)(?P<eol>\r?\n)?$")
+    for line in lines:
+        match = line_re.match(line)
+        if match is None:
+            rewritten.append(line)
+            continue
+        feature_count += 1
+        body = match.group("body")
+        if re.search(r'\bandroid:required="[^\"]*"', body):
+            body = re.sub(r'android:required="[^\"]*"', 'android:required="false"', body, count=1)
+        else:
+            body = body + ' android:required="false"'
+        rewritten.append(match.group("prefix") + body + match.group("close") + (match.group("eol") or ""))
+    if feature_count == 0:
+        fail("aucune ligne uses-feature dans AndroidManifest.xml — cible smartphone absente")
+    new_text = "".join(rewritten)
+    if new_text != text:
+        manifest.write_text(new_text, encoding="utf-8")
+        log(f"smartphone : {feature_count} uses-feature rendues optionnelles")
+    else:
+        log(f"déjà appliqué : {feature_count} uses-feature sont optionnelles")
+    return feature_count
+
+
+def patch_smartphone_ux(decoded: pathlib.Path) -> None:
+    """Installe une variante tactile du lecteur sans dégrader l'interface TV.
+
+    Android sélectionne `layout/` sur téléphone et `layout-sw600dp/` sur les
+    grands écrans. On conserve donc l'original dans le qualifier TV, puis on
+    rend le chat du layout téléphone large et ancré en bas : il devient visible
+    sans le geste de balayage découvert lors de l'observation du 19/09.
+    """
+    print("[1d/5] UX smartphone (orientation multi-capteur + chat tactile visible)")
+    manifest = decoded / "AndroidManifest.xml"
+    text = manifest.read_text(encoding="utf-8")
+    if "android:screenOrientation=\"sensorLandscape\"" in text:
+        text = text.replace(
+            'android:screenOrientation="sensorLandscape"',
+            'android:screenOrientation="fullSensor"',
+        )
+        manifest.write_text(text, encoding="utf-8")
+        log("smartphone : orientations sensorLandscape → fullSensor")
+    elif "android:screenOrientation=\"fullSensor\"" in text:
+        log("déjà appliqué : manifeste multi-orientation")
+    else:
+        fail("aucune orientation sensorLandscape/fullSensor dans AndroidManifest.xml")
+
+    phone = decoded / "res/layout/activity_player.xml"
+    if not phone.is_file():
+        fail(f"layout lecteur absent : {phone}")
+    tv = decoded / "res/layout-sw600dp/activity_player.xml"
+    tv.parent.mkdir(parents=True, exist_ok=True)
+    if not tv.exists():
+        shutil.copy2(phone, tv)
+        log("layout TV conservé : res/layout-sw600dp/activity_player.xml")
+
+    source = phone.read_text(encoding="utf-8")
+    marker = 'android:id="@id/ChatRecycleView"'
+    if marker not in source:
+        fail("ChatRecycleView absent du layout lecteur")
+    # Ne touche que le premier chat (le chat principal) ; le multiview conserve
+    # ses dimensions upstream et reste disponible sur les grands écrans.
+    match = re.search(r"<com\.s0und\.s0undtv\.chat\.ChatRecyclerView\b(?P<body>[^>]*)/>", source)
+    if match is None:
+        fail("élément ChatRecycleView introuvable dans activity_player.xml")
+    body = match.group("body")
+    body = re.sub(r'android:layout_width="[^"]*"',
+                  'android:layout_width="match_parent"', body, count=1)
+    body = re.sub(r'android:layout_height="[^"]*"',
+                  'android:layout_height="@dimen/twouich_phone_chat_height"', body, count=1)
+    if 'android:layout_alignParentBottom=' not in body:
+        body += ' android:layout_alignParentBottom="true"'
+    if 'android:layout_alignParentStart=' not in body:
+        body += ' android:layout_alignParentStart="true"'
+    rewritten = source[:match.start("body")] + body + source[match.end("body"):]
+    send_new = ('<include android:id="@id/SendMessageWindow" android:visibility="visible"'
+                ' android:layout_width="match_parent" android:layout_height="wrap_content"'
+                ' android:layout_alignParentBottom="true"'
+                ' android:layout_marginBottom="@dimen/twouich_phone_chat_height"'
+                ' android:layout_alignParentStart="true"'
+                ' layout="@layout/include_send_chat_message_window" />')
+    send_pattern = r'<include\s+[^>]*android:id="@id/SendMessageWindow"[^>]*/>'
+    rewritten, send_count = re.subn(send_pattern, send_new, rewritten, count=1)
+    if send_count != 1:
+        fail("SendMessageWindow absent du layout lecteur smartphone")
+    if rewritten != source:
+        phone.write_text(rewritten, encoding="utf-8")
+        log("smartphone : chat principal large, visible et ancré en bas")
+        log("smartphone : champ de saisie affiché au-dessus du chat")
+    else:
+        log("déjà appliqué : layout lecteur smartphone")
+
+    send_layout = decoded / "res/layout/include_send_chat_message_window.xml"
+    if not send_layout.is_file():
+        fail(f"layout de saisie chat absent : {send_layout}")
+    send_text = send_layout.read_text(encoding="utf-8")
+    send_text_new = send_text.replace(f'android:hint="{CHAT_HINT_LEGACY}"',
+                                      f'android:hint="{CHAT_HINT}"')
+    if f'android:hint="{CHAT_HINT}"' not in send_text_new:
+        send_text_new = send_text_new.replace(
+            'android:id="@id/ET_SendMessage"',
+            f'android:imeOptions="actionSend" android:hint="{CHAT_HINT}" android:id="@id/ET_SendMessage"',
+            1,
+        )
+    # Une version antérieure du patch a pu écrire l'attribut deux fois : on
+    # déduplique la paire (apktool ne préserve pas l'ordre d'insertion).
+    send_text_new = re.sub(
+        rf'(android:hint="{re.escape(CHAT_HINT)}"\s+android:imeOptions="actionSend"\s+)'
+        rf'(?:android:hint="{re.escape(CHAT_HINT)}"\s+android:imeOptions="actionSend"\s+)+',
+        r'\1', send_text_new,
+    )
+    if send_text_new != send_text:
+        send_layout.write_text(send_text_new, encoding="utf-8", newline="\n")
+        log(f"smartphone : champ de chat « {CHAT_HINT} » (libellé + touche Envoyer)")
+
+    player_smali = decoded / "smali/com/s0und/s0undtv/activities/PlayerActivity.smali"
+    if not player_smali.is_file():
+        fail(f"activité lecteur absente : {player_smali}")
+    # Fins de ligne normalisées : apktool décode le smali dans les fins de ligne
+    # de la machine, et un motif de réparation écrit en LF ne peut pas atteindre
+    # un bloc injecté en CRLF (le cas de l'arbre déjà patché sur Windows).
+    player_text = player_smali.read_text(encoding="utf-8").replace("\r\n", "\n")
+    player_methods = r'''
+
+.method private twouichPhoneId(Ljava/lang/String;)I
+    .locals 3
+    invoke-virtual {p0}, Landroid/content/Context;->getResources()Landroid/content/res/Resources;
+    move-result-object v0
+    const-string v1, "id"
+    const-string v2, "com.s0und.s0undtv"
+    invoke-virtual {v0, p1, v1, v2}, Landroid/content/res/Resources;->getIdentifier(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)I
+    move-result v0
+    return v0
+.end method
+
+.method private twouichPhoneStackedLayout()V
+    .locals 12
+''' + PHONE_PIP_GUARD + r'''
+    invoke-virtual {p0}, Landroid/content/Context;->getResources()Landroid/content/res/Resources;
+    move-result-object v0
+    invoke-virtual {v0}, Landroid/content/res/Resources;->getConfiguration()Landroid/content/res/Configuration;
+    move-result-object v1
+    iget v1, v1, Landroid/content/res/Configuration;->smallestScreenWidthDp:I
+    const/16 v2, 0x258
+    if-ge v1, v2, :return_phone_layout
+
+    const-string v1, "ExoPlayer"
+    invoke-direct {p0, v1}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneId(Ljava/lang/String;)I
+    move-result v1
+    const-string v2, "ChatRecycleView"
+    invoke-direct {p0, v2}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneId(Ljava/lang/String;)I
+    move-result v2
+    const-string v3, "SendMessageWindow"
+    invoke-direct {p0, v3}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneId(Ljava/lang/String;)I
+    move-result v3
+    invoke-virtual {p0, v1}, Landroid/app/Activity;->findViewById(I)Landroid/view/View;
+    move-result-object v4
+    invoke-virtual {p0, v2}, Landroid/app/Activity;->findViewById(I)Landroid/view/View;
+    move-result-object v5
+    invoke-virtual {p0, v3}, Landroid/app/Activity;->findViewById(I)Landroid/view/View;
+    move-result-object v6
+    if-eqz v4, :return_phone_layout
+    if-eqz v5, :return_phone_layout
+    if-eqz v6, :return_phone_layout
+
+    invoke-virtual {v0}, Landroid/content/res/Resources;->getDisplayMetrics()Landroid/util/DisplayMetrics;
+    move-result-object v7
+    iget v8, v7, Landroid/util/DisplayMetrics;->widthPixels:I
+    iget v9, v7, Landroid/util/DisplayMetrics;->heightPixels:I
+    mul-int/lit8 v10, v8, 0x9
+    div-int/lit8 v10, v10, 0x10
+    # Le 16:9 est calculé depuis la LARGEUR : sur un écran plus large que haut il
+    # dépasse la hauteur et le chat reçoit une hauteur négative. On plafonne donc
+    # la vidéo, puis on refuse l'empilement quand il ne reste pas un tiers de la
+    # hauteur pour le chat : en paysage, le chat en surimpression du layout
+    # d'origine (vidéo plein écran, chat ancré en bas) reste plus utile qu'un
+    # chat de 0 px, et c'est aussi la disposition de l'interface de référence.
+'''
+    player_methods = (player_methods
+                      + PHONE_GEO_TAIL
+                      + r'''
+    new-instance v0, Landroid/widget/RelativeLayout$LayoutParams;
+    const/4 v9, -0x1
+    invoke-direct {v0, v9, v10}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V
+    const/16 v9, 0xa
+    invoke-virtual {v0, v9}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(I)V
+    invoke-virtual {v4, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V
+
+    new-instance v0, Landroid/widget/RelativeLayout$LayoutParams;
+    const/4 v9, -0x1
+    invoke-direct {v0, v9, v7}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V
+    const/4 v9, 0x3
+    invoke-virtual {v0, v9, v1}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(II)V
+    const/16 v9, 0xc
+    invoke-virtual {v0, v9}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(I)V
+    invoke-virtual {v5, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V
+    const/4 v9, 0x0
+    invoke-virtual {v5, v9}, Landroid/view/View;->setVisibility(I)V
+
+    new-instance v0, Landroid/widget/RelativeLayout$LayoutParams;
+    const/4 v9, -0x1
+    invoke-direct {v0, v9, v11}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V
+    const/4 v9, 0x2
+    invoke-virtual {v0, v9, v2}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(II)V
+    const/16 v9, 0xc
+    invoke-virtual {v0, v9}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(I)V
+    invoke-virtual {v6, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V
+    const/4 v9, 0x0
+    invoke-virtual {v6, v9}, Landroid/view/View;->setVisibility(I)V
+:return_phone_layout
+    return-void
+.end method
+
+.method public onWindowFocusChanged(Z)V
+    .locals 1
+    invoke-super {p0, p1}, Landroid/app/Activity;->onWindowFocusChanged(Z)V
+    if-eqz p1, :return_focus
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V
+:return_focus
+    return-void
+.end method
+'''
+    )
+    # Picture-in-picture (API 26) : bouton dans le lecteur téléphone, fenêtre
+    # 16:9, et disparition du chat pendant que la vidéo est en incrustation.
+    # Les trois overrides de callback du framework sont PUBLICS : Activity
+    # implémente Window.Callback, un override plus faible fait rejeter la classe
+    # entière par le lieur ART (voir onWindowFocusChanged, §6 de memory.md).
+    pip_methods = r'''
+
+.method private twouichPhoneView(Ljava/lang/String;)Landroid/view/View;
+    .locals 2
+
+    # On ne cherche la vue que si son identifiant a été résolu : findViewById(0)
+    # n'est pas une erreur inoffensive, et l'appelant doit pouvoir s'abstenir.
+    invoke-direct {p0, p1}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneId(Ljava/lang/String;)I
+
+    move-result v0
+
+    if-eqz v0, :no_phone_view
+
+    invoke-virtual {p0, v0}, Landroid/app/Activity;->findViewById(I)Landroid/view/View;
+
+    move-result-object v1
+
+    return-object v1
+
+    :no_phone_view
+    const/4 v1, 0x0
+
+    return-object v1
+.end method
+
+
+.method public twouichPhonePip(Landroid/view/View;)V
+    .locals 3
+
+    # Sous API 26, PictureInPictureParams n'existe pas : on ne tente rien plutôt
+    # que de laisser la résolution de la classe échouer à l'exécution.
+    sget v0, Landroid/os/Build$VERSION;->SDK_INT:I
+
+    const/16 v1, 0x1a
+
+    if-lt v0, v1, :return_pip
+
+    new-instance v0, Landroid/util/Rational;
+
+    const/16 v1, 0x10
+
+    const/16 v2, 0x9
+
+    invoke-direct {v0, v1, v2}, Landroid/util/Rational;-><init>(II)V
+
+    new-instance v1, Landroid/app/PictureInPictureParams$Builder;
+
+    invoke-direct {v1}, Landroid/app/PictureInPictureParams$Builder;-><init>()V
+
+    invoke-virtual {v1, v0}, Landroid/app/PictureInPictureParams$Builder;->setAspectRatio(Landroid/util/Rational;)Landroid/app/PictureInPictureParams$Builder;
+
+    move-result-object v1
+
+    invoke-virtual {v1}, Landroid/app/PictureInPictureParams$Builder;->build()Landroid/app/PictureInPictureParams;
+
+    move-result-object v1
+
+    invoke-virtual {p0, v1}, Landroid/app/Activity;->enterPictureInPictureMode(Landroid/app/PictureInPictureParams;)Z
+
+    :return_pip
+    return-void
+.end method
+
+
+.method public onConfigurationChanged(Landroid/content/res/Configuration;)V
+    .locals 2
+
+    invoke-super {p0, p1}, Landroid/app/Activity;->onConfigurationChanged(Landroid/content/res/Configuration;)V
+
+    # L'activité déclare désormais screenSize/orientation : elle n'est plus
+    # recréée à la rotation ni à l'entrée en PiP, donc c'est ici que la
+    # disposition est réappliquée avec les nouvelles dimensions.
+    sget v0, Landroid/os/Build$VERSION;->SDK_INT:I
+
+    const/16 v1, 0x18
+
+    if-lt v0, v1, :pip_check_on_config
+
+    goto :apply_layout_on_config
+
+    :pip_check_on_config
+    invoke-virtual {p0}, Landroid/app/Activity;->isInPictureInPictureMode()Z
+
+    move-result v0
+
+    if-eqz v0, :return_config
+
+    :apply_layout_on_config
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V
+
+    :return_config
+    return-void
+.end method
+
+
+.method public onPictureInPictureModeChanged(ZLandroid/content/res/Configuration;)V
+    .locals 5
+
+    invoke-super {p0, p1, p2}, Landroid/app/Activity;->onPictureInPictureModeChanged(ZLandroid/content/res/Configuration;)V
+''' + PHONE_PIP_STATE_WRITE + r'''
+
+    # Télévision : rien n'est empilé, et masquer le chat TV ici le laisserait
+    # masqué à la sortie du PiP.
+    invoke-virtual {p0}, Landroid/content/Context;->getResources()Landroid/content/res/Resources;
+
+    move-result-object v0
+
+    invoke-virtual {v0}, Landroid/content/res/Resources;->getConfiguration()Landroid/content/res/Configuration;
+
+    move-result-object v0
+
+    iget v0, v0, Landroid/content/res/Configuration;->smallestScreenWidthDp:I
+
+    const/16 v1, 0x258
+
+    if-ge v0, v1, :return_pip_mode
+
+    const-string v0, "ExoPlayer"
+
+    invoke-direct {p0, v0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneView(Ljava/lang/String;)Landroid/view/View;
+
+    move-result-object v0
+
+    const-string v1, "ChatRecycleView"
+
+    invoke-direct {p0, v1}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneView(Ljava/lang/String;)Landroid/view/View;
+
+    move-result-object v1
+
+    const-string v2, "SendMessageWindow"
+
+    invoke-direct {p0, v2}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneView(Ljava/lang/String;)Landroid/view/View;
+
+    move-result-object v2
+
+    if-eqz v0, :return_pip_mode
+
+    if-eqz v1, :return_pip_mode
+
+    if-eqz v2, :return_pip_mode
+
+    # Sortie de l'incrustation : on réapplique l'empilement validé (vidéo 16:9,
+    # chat, saisie) au lieu de deviner des visibilités intermédiaires.
+    if-eqz p1, :restore_pip_layout
+
+    # Entrée en incrustation : la fenêtre prend le rapport 16:9, donc la vidéo
+    # remplit tout le cadre et le chat plus la saisie sont masqués.
+    new-instance v3, Landroid/widget/RelativeLayout$LayoutParams;
+
+    const/4 v4, -0x1
+
+    invoke-direct {v3, v4, v4}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V
+
+    invoke-virtual {v0, v3}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V
+
+    const/16 v3, 0x8
+
+    invoke-virtual {v1, v3}, Landroid/view/View;->setVisibility(I)V
+
+    invoke-virtual {v2, v3}, Landroid/view/View;->setVisibility(I)V
+''' + PHONE_PIP_HIDE_TRACE + r'''
+
+    goto :return_pip_mode
+
+    :restore_pip_layout
+''' + PHONE_PIP_RESTORE_TRACE + r'''
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V
+
+    :return_pip_mode
+    return-void
+.end method
+'''
+    player_fixed = player_text.replace(
+        'invoke-direct {v0, -1, v10}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V',
+        'const/4 v9, -0x1\n    invoke-direct {v0, v9, v10}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V',
+    ).replace(
+        'invoke-direct {v0, -1, v7}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V',
+        'const/4 v9, -0x1\n    invoke-direct {v0, v9, v7}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V',
+    ).replace(
+        'invoke-direct {v0, -1, v11}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V',
+        'const/4 v9, -0x1\n    invoke-direct {v0, v9, v11}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V',
+    # Bug corrigé : setVisibility recevait un LayoutParams (objet) au lieu d'un int,
+    # ce qui faisait échouer la vérification Dalvik à l'ouverture du lecteur.
+    ).replace(
+        # Bug corrigé : l'override était déclaré « protected ». Activity
+        # implémente Window.Callback, dont onWindowFocusChanged(boolean) est
+        # public : un override plus faible fait rejeter la CLASSE ENTIÈRE par le
+        # lieur ART (« implementing interface method is not public » de
+        # Window$Callback). PlayerActivity devenait alors introuvable
+        # (ClassNotFoundException puis NoClassDefFoundError) et l'ouverture d'un
+        # direct plantait l'application — reproduit le 20/09 sur BlueStacks
+        # (API 25), invisible sur l'appareil précédent.
+        ".method protected onWindowFocusChanged(Z)V",
+        ".method public onWindowFocusChanged(Z)V",
+    ).replace(
+        'invoke-virtual {v5, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V\n    const/4 v0, 0x0\n    invoke-virtual {v5, v0}, Landroid/view/View;->setVisibility(I)V',
+        'invoke-virtual {v5, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V\n    const/4 v9, 0x0\n    invoke-virtual {v5, v9}, Landroid/view/View;->setVisibility(I)V',
+    ).replace(
+        'invoke-virtual {v6, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V\n    invoke-virtual {v6, v0}, Landroid/view/View;->setVisibility(I)V',
+        'invoke-virtual {v6, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V\n    const/4 v9, 0x0\n    invoke-virtual {v6, v9}, Landroid/view/View;->setVisibility(I)V',
+    # Bugs corrigés dans la géométrie du lecteur empilé : vidéo 16:9 calculée
+    # depuis la largeur sans plafond, puis empilement tenté en paysage faute de
+    # place pour le chat.
+    ).replace(
+        PHONE_GEO_CLAMPED_TAIL, PHONE_GEO_TAIL,
+    ).replace(
+        PHONE_GEO_OLD_TAIL, PHONE_GEO_TAIL,
+    # Polarité des deux tests de place : ils ont déjà été écrits à l'envers une
+    # fois (la vidéo qui tenait était plafonnée, et l'empilement se faisait
+    # exactement quand il n'y avait pas la place). Même famille que §6.
+    ).replace(
+        "    if-ge v10, v7, :twouich_phone_video_fits",
+        "    if-lt v10, v7, :twouich_phone_video_fits",
+    ).replace(
+        "    if-lt v7, v3, :twouich_phone_room",
+        "    if-ge v7, v3, :twouich_phone_room",
+    # Un arbre qui portait déjà le bloc de place voit la réparation ci-dessus en
+    # insérer un second : on recolle les doublons, sinon apktool refuse le fichier
+    # (« There is already a label with that name »).
+    ).replace(
+        PHONE_GEO_ROOM_BLOCK + PHONE_GEO_ROOM_BLOCK, PHONE_GEO_ROOM_BLOCK,
+    )
+    # Incrustation : un arbre déjà patché avant le 20/09 porte la disposition
+    # empilée sans garde d'incrustation — c'est le cas de tout arbre de travail
+    # mis à jour sur place. On repose le garde et ses traces ici (une seule
+    # source de texte : les constantes PHONE_PIP_*).
+    if (".method private twouichPhoneStackedLayout()V" in player_fixed
+            and "twouich_phone_layout_ok" not in player_fixed):
+        head = ".method private twouichPhoneStackedLayout()V\n    .locals 12\n"
+        player_fixed = player_fixed.replace(head, head + PHONE_PIP_GUARD + "\n", 1)
+    if PHONE_PIP_VIEW_OLD in player_fixed:
+        player_fixed = player_fixed.replace(
+            PHONE_PIP_VIEW_OLD, PHONE_PIP_VIEW_NEW, 1,
+        )
+    if (".method public onPictureInPictureModeChanged" in player_fixed
+            and PHONE_PIP_STATE_NEEDLE not in player_fixed):
+        player_fixed = player_fixed.replace(
+            PHONE_PIP_SUPER, PHONE_PIP_SUPER + PHONE_PIP_STATE_WRITE + "\n", 1,
+        )
+    if (".method public onPictureInPictureModeChanged" in player_fixed
+            and "picture-in-picture : video plein cadre" not in player_fixed):
+        player_fixed = player_fixed.replace(
+            "    invoke-virtual {v2, v3}, Landroid/view/View;->setVisibility(I)V\n",
+            "    invoke-virtual {v2, v3}, Landroid/view/View;->setVisibility(I)V\n"
+            + PHONE_PIP_HIDE_TRACE + "\n", 1,
+        )
+    if (".method public onPictureInPictureModeChanged" in player_fixed
+            and "picture-in-picture : disposition empilee restauree" not in player_fixed):
+        player_fixed = player_fixed.replace(
+            "    :restore_pip_layout\n",
+            "    :restore_pip_layout\n" + PHONE_PIP_RESTORE_TRACE + "\n", 1,
+        )
+    # Champ d'état d'incrustation : la disposition téléphone le lit pour ne pas
+    # réappliquer l'empilement pendant que la vidéo est en incrustation.
+    if "twouichPipActive" not in player_text:
+        player_fixed = player_fixed.replace(
+            ".super Landroid/app/Activity;",
+            ".super Landroid/app/Activity;\n\n.field private twouichPipActive:Z",
+            1,
+        )
+    if "twouichPhoneStackedLayout" not in player_text:
+        player_smali.write_text(player_fixed.rstrip() + "\n"
+                               + player_methods.replace("\r\n", "\n").rstrip() + "\n"
+                               + pip_methods.replace("\r\n", "\n").rstrip() + "\n",
+                               encoding="utf-8", newline="\n")
+        log("smartphone : lecteur empilé vidéo en haut, chat puis saisie en bas")
+        log("smartphone : picture-in-picture branché sur le lecteur")
+    elif "twouichPhonePip" not in player_fixed:
+        player_smali.write_text(player_fixed.rstrip() + "\n"
+                               + pip_methods.replace("\r\n", "\n").rstrip() + "\n",
+                               encoding="utf-8", newline="\n")
+        log("smartphone : picture-in-picture branché sur le lecteur")
+    elif player_fixed != player_text:
+        player_smali.write_text(player_fixed, encoding="utf-8", newline="\n")
+        log("smartphone : correction des paramètres du lecteur empilé")
+    else:
+        log("déjà appliqué : lecteur empilé smartphone")
+
+    values = decoded / "res/values/dimens.xml"
+    if not values.is_file():
+        fail(f"ressources dimens absentes : {values}")
+    dims = values.read_text(encoding="utf-8")
+    dim = '<dimen name="twouich_phone_chat_height">280dp</dimen>'
+    if dim not in dims:
+        insertion = "\n    " + dim
+        anchor = "</resources>"
+        if anchor not in dims:
+            fail("fin de res/values/dimens.xml introuvable")
+        values.write_text(dims.replace(anchor, insertion + "\n" + anchor, 1), encoding="utf-8")
+        log("smartphone : hauteur de chat tactile 280dp")
+    else:
+        log("déjà appliqué : dimension du chat smartphone")
+
+
+def patch_smartphone_headers(decoded: pathlib.Path) -> None:
+    """Sur téléphone, replie le panneau latéral Leanback au profit des rangées.
+
+    `MainFragment` force HEADERS_ENABLED : sur un téléphone, la colonne de navigation
+    du BrowseSupportFragment occupe alors ~70 % de la largeur (mesuré : `[0,0][852,2504]`
+    sur un écran de 1220 px), ne laissant aux cartes qu'une bande de 362 px — un tap y
+    déplace la mise en page (repli du panneau) au lieu d'ouvrir la carte. HEADERS_HIDDEN
+    rend la même navigation accessible par la touche retour, mais laisse les rangées
+    occuper toute la largeur : elles deviennent utilisables au doigt.
+
+    Le seuil 600dp est celui d'Android : au-delà (TV, grande tablette) le comportement
+    d'origine est conservé à l'identique.
+    """
+    path = decoded / "smali_classes2/com/s0und/s0undtv/fragments/MainFragment.smali"
+    if not path.is_file():
+        fail(f"fragment principal absent : {path}")
+    text = path.read_text(encoding="utf-8")
+    # Un Fragment n'est pas un Context : ses accesseurs sont obfusqués par R8 et un
+    # appel littéral à getResources() sur la classe parente lève un NoSuchMethodError
+    # au démarrage (crash observé sur appareil). On passe donc par B1(), qui est
+    # requireContext() dans l'arbre décodé, puis par le Context obtenu.
+    context_lookup = (
+        "    invoke-virtual {p0}, Landroidx/fragment/app/f;->B1()Landroid/content/Context;\n"
+        "    move-result-object v0\n"
+        "    invoke-virtual {v0}, Landroid/content/Context;->getResources()"
+        "Landroid/content/res/Resources;\n"
+        "    move-result-object v0\n"
+    )
+    broken_lookup = (
+        "    invoke-virtual {p0}, Landroidx/fragment/app/f;->getResources()"
+        "Landroid/content/res/Resources;\n"
+        "    move-result-object v0\n"
+    )
+    # États de setHeadersState dans le Leanback embarqué (mesurés le 19/09 dans la
+    # table de branchement de BrowseSupportFragment.N2) : 1 (DISABLED) et 2
+    # (ENABLED) laissent le panneau VISIBLE — 2 est l'état TV d'origine — et seul
+    # 3 (HIDDEN) le met en GONE. Passer 1 sur téléphone laissait donc le panneau
+    # déployé sur 852 px et écrasait les rangées dans une bande de 362 px.
+    helper = (
+        "\n\n.method private twouichPhoneHeadersState()I\n"
+        "    .locals 3\n"
+        + context_lookup +
+        "    invoke-virtual {v0}, Landroid/content/res/Resources;->getConfiguration()"
+        "Landroid/content/res/Configuration;\n"
+        "    move-result-object v0\n"
+        "    iget v0, v0, Landroid/content/res/Configuration;->smallestScreenWidthDp:I\n"
+        "    const/16 v1, 0x258\n"
+        "    const/4 v2, 0x2\n"
+        "    if-ge v0, v1, :cond_twouich_tv_headers\n"
+        "    const/4 v2, 0x3\n"
+        ":cond_twouich_tv_headers\n"
+        "    return v2\n"
+        ".end method\n"
+    )
+    broken_state = (
+        "    if-ge v0, v1, :cond_twouich_tv_headers\n"
+        "    const/4 v2, 0x1\n"
+    )
+    fixed_state = (
+        "    if-ge v0, v1, :cond_twouich_tv_headers\n"
+        "    const/4 v2, 0x3\n"
+    )
+    call_old = "    invoke-virtual {p0, v3}, Landroidx/leanback/app/f;->N2(I)V"
+    # Dalvik refuse invoke-virtual sur une méthode privée de la même classe : il
+    # faut invoke-direct, sinon la classe entière est rejetée par le vérificateur
+    # (VerifyError au démarrage). Le move-result doit rester collé à l'appel.
+    call_direct = "    invoke-direct {p0}, Lcom/s0und/s0undtv/fragments/MainFragment;"
+    call_new = (call_direct + "->twouichPhoneHeadersState()I\n\n    move-result v0\n\n"
+                "    invoke-virtual {p0, v0}, Landroidx/leanback/app/f;->N2(I)V")
+    # Réparation d'une version antérieure fautive (invoke-virtual + comparaison
+    # inversée), pour que « relancer patch.py » suffise à assainir un arbre déjà patché.
+    text = text.replace(
+        "    invoke-virtual {p0}, Lcom/s0und/s0undtv/fragments/MainFragment;"
+        "->twouichPhoneHeadersState()I",
+        call_direct + "->twouichPhoneHeadersState()I",
+    ).replace(
+        "if-lt v0, v1, :cond_twouich_tv_headers",
+        "if-ge v0, v1, :cond_twouich_tv_headers",
+    )
+    # Réparation du helper écrit dans une version antérieure, dont l'accès aux
+    # ressources faisait planter l'application au démarrage, et dont l'état 1
+    # (DISABLED) laissait le panneau TV déployé sur téléphone.
+    if broken_lookup in text:
+        text = text.replace(broken_lookup, context_lookup)
+    if broken_state in text:
+        text = text.replace(broken_state, fixed_state, 1)
+    if "twouichPhoneHeadersState" in text:
+        if call_old in text:
+            text = text.replace(call_old, call_new, 1)
+            path.write_text(text, encoding="utf-8", newline="\n")
+            log("smartphone : appel du calcul d'état du panneau corrigé")
+        elif text != path.read_text(encoding="utf-8"):
+            path.write_text(text, encoding="utf-8", newline="\n")
+            log("smartphone : panneau latéral assaini (invoke-direct)")
+        else:
+            log("déjà appliqué : état du panneau latéral selon la taille d'écran")
+        return
+    if call_old not in text:
+        fail("appel setHeadersState introuvable dans MainFragment — cible changée")
+    text = text.replace(call_old, call_new, 1)
+    text = text.rstrip() + "\n" + helper + "\n"
+    path.write_text(text, encoding="utf-8", newline="\n")
+    log("smartphone : panneau latéral replié au profit des rangées (HEADERS_HIDDEN)")
+
+
+def find_base_grid(decoded: pathlib.Path) -> pathlib.Path:
+    """Retrouve le fichier smali de BaseGridView (nom obfusqué, numéroté par apktool).
+
+    Le nom de fichier dépend des collisions de casse (e.smali / e.1.smali) : on
+    identifie donc le fichier par sa déclaration de classe, jamais par son nom.
+    """
+    directory = decoded / "smali/androidx/leanback/widget"
+    for candidate in sorted(directory.glob("*.smali")):
+        if BASE_GRID_CLASS in candidate.read_text(encoding="utf-8")[:200]:
+            return candidate
+    fail(f"BaseGridView ({BASE_GRID_CLASS}) absent de {directory} — cible changée")
+    raise AssertionError("inatteignable")
+
+
+def patch_smartphone_tap(decoded: pathlib.Path) -> None:
+    """Traduit un tap sur une carte Leanback en clic, sur téléphone seulement.
+
+    Constat sur appareil (19/09, 1220×2712) : le premier appui sur une carte ne
+    fait que déplacer la sélection — la carte n'est activée qu'au second appui,
+    ce qui rend les rangées inutilisables au doigt. On branche donc TapClick à
+    l'entrée de BaseGridView.dispatchTouchEvent : un tap déclenche le même clic
+    que la touche OK du D-pad.
+
+    Le D-pad n'émet aucun MotionEvent, et TapClick laisse tout passer au-delà de
+    600 dp de plus petit côté : la télévision garde le comportement d'origine.
+    """
+    print("[1f/5] UX smartphone (tap → clic sur les cartes Leanback)")
+    path = find_base_grid(decoded)
+    text = path.read_text(encoding="utf-8")
+    head_old = ".method public dispatchTouchEvent(Landroid/view/MotionEvent;)Z\n    .locals 1\n"
+    head_new = (".method public dispatchTouchEvent(Landroid/view/MotionEvent;)Z\n"
+                "    .locals 3\n"
+                "\n"
+                "    # Twouich : un tap vaut un clic (téléphone uniquement).\n"
+                + TAP_HOOK_CALL + "\n"
+                "\n"
+                "    move-result v0\n"
+                "\n"
+                f"    if-eqz v0, {TAP_HOOK_LABEL}\n"
+                "\n"
+                "    const/4 v0, 0x1\n"
+                "\n"
+                "    return v0\n"
+                "\n"
+                f"{TAP_HOOK_LABEL}\n")
+    if TAP_HOOK_CALL in text:
+        log(f"déjà appliqué : tap → clic dans {path.name} (dispatchTouchEvent)")
+        return
+    if head_old not in text:
+        fail(f"en-tête de dispatchTouchEvent introuvable dans {path.name} — cible changée")
+    text = text.replace(head_old, head_new, 1)
+    path.write_text(text, encoding="utf-8", newline="\n")
+    log(f"injecté : tap → clic en tête de dispatchTouchEvent ({path.name})")
+
+
+def install_phone_assets(decoded: pathlib.Path, here: pathlib.Path) -> None:
+    """Pose les ressources propres au téléphone : icônes de la barre basse + teinte inactive.
+
+    Le thème upstream ne fournit pas d'icône d'onglet « Accueil » : la barre
+    basse reste donc plate et sans repère visuel. Les vectoriels sont dédiés
+    (ils ne remplacent aucune ressource existante) et la teinte inactive est une
+    couleur, pour qu'un changement de thème reste possible.
+    """
+    print("[1g/5] UX smartphone (icônes de la barre basse)")
+    src = here / "res" / "drawable"
+    dst = decoded / "res" / "drawable"
+    if not src.is_dir():
+        fail(f"icônes smartphone absentes : {src}")
+    dst.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for f in sorted(src.glob("*.xml")):
+        target = dst / f.name
+        if not target.exists() or target.read_bytes() != f.read_bytes():
+            shutil.copy2(f, target)
+            copied += 1
+    log(f"{copied} icône(s) smartphone posée(s) dans res/drawable")
+
+    colors = decoded / "res" / "values" / "colors.xml"
+    if not colors.is_file():
+        fail(f"ressources de couleurs absentes : {colors}")
+    text = colors.read_text(encoding="utf-8")
+    if "twouich_phone_nav_inactive" not in text:
+        anchor = "</resources>"
+        if anchor not in text:
+            fail("fin de res/values/colors.xml introuvable")
+        color = '<color name="twouich_phone_nav_inactive">#ffd9d9d9</color>'
+        colors.write_text(text.replace(anchor, "    " + color + "\n" + anchor, 1),
+                          encoding="utf-8")
+        log("smartphone : teinte des onglets inactifs")
+    else:
+        log("déjà appliqué : teinte des onglets inactifs")
+
+
+def patch_smartphone_pip(decoded: pathlib.Path) -> None:
+    """Branche le picture-in-picture sur le lecteur téléphone.
+
+    Trois choses, et rien de plus : l'activité se déclare compatible PiP, elle
+    annonce qu'elle gère elle-même les changements de taille — sans quoi Android
+    la recrée à chaque entrée en incrustation, donc le direct repart de zéro —,
+    et le lecteur téléphone reçoit un bouton dédié. Le layout TV n'est pas
+    touché : son lecteur garde ses contrôles d'origine.
+    """
+    print("[1h/5] UX smartphone (picture-in-picture)")
+    manifest = decoded / "AndroidManifest.xml"
+    text = manifest.read_text(encoding="utf-8")
+    activity = re.search(r'<activity[^>]*PlayerActivity[^>]*>', text)
+    if activity is None:
+        fail("activité lecteur introuvable dans AndroidManifest.xml")
+    element = activity.group(0)
+    new_element = element
+    if "android:supportsPictureInPicture" not in new_element:
+        new_element = new_element.replace(
+            'android:name="com.s0und.s0undtv.activities.PlayerActivity"',
+            'android:name="com.s0und.s0undtv.activities.PlayerActivity"'
+            ' android:supportsPictureInPicture="true"',
+            1,
+        )
+    if "android:configChanges=" not in new_element:
+        fail("PlayerActivity sans android:configChanges — cible changée")
+    for change in ("screenSize", "smallestScreenSize", "screenLayout", "orientation"):
+        new_element = re.sub(
+            r'android:configChanges="([^"]*)"',
+            lambda m: m.group(0) if change in m.group(1).split("|")
+            else f'android:configChanges="{m.group(1)}|{change}"',
+            new_element, count=1,
+        )
+    if new_element != element:
+        manifest.write_text(text.replace(element, new_element, 1), encoding="utf-8")
+        log("smartphone : lecteur déclaré compatible picture-in-picture")
+    else:
+        log("déjà appliqué : picture-in-picture déclaré")
+
+    phone = decoded / "res/layout/activity_player.xml"
+    if not phone.is_file():
+        fail(f"layout lecteur absent : {phone}")
+    source = phone.read_text(encoding="utf-8")
+    if "twouich_phone_pip" in source:
+        log("déjà appliqué : bouton picture-in-picture")
+        return
+    anchor = ('(<ImageView android:id="@id/BackgroundCardImage"[^>]*/>\s*'
+              '</com\.google\.android\.exoplayer2\.ui\.StyledPlayerView>)')
+    button = ('\n    <ImageButton android:id="@+id/twouich_phone_pip"\n'
+              '        android:layout_width="48dp" android:layout_height="48dp"\n'
+              '        android:layout_alignTop="@id/ExoPlayer" android:layout_alignEnd="@id/ExoPlayer"\n'
+              '        android:layout_marginTop="8dp" android:layout_marginEnd="8dp"\n'
+              '        android:padding="12dp" android:scaleType="fitCenter"\n'
+              '        android:background="#66000000" android:src="@drawable/twouich_ic_pip"\n'
+              '        android:contentDescription="Picture-in-picture"\n'
+              '        android:onClick="twouichPhonePip" />')
+    new, count = re.subn(anchor, lambda m: m.group(1) + button, source, count=1)
+    if count != 1:
+        fail("lecteur vidéo principal introuvable dans activity_player.xml — cible changée")
+    phone.write_text(new, encoding="utf-8")
+    log("smartphone : bouton picture-in-picture posé sur la vidéo")
+
+
+def patch_smartphone_navigation(decoded: pathlib.Path) -> None:
+    """Ajoute une navigation tactile au shell téléphone, sans modifier le shell TV."""
+    print("[1e/5] UX smartphone (navigation tactile)")
+    phone = decoded / "res/layout/activity_main.xml"
+    if not phone.is_file():
+        fail(f"layout principal absent : {phone}")
+    tv = decoded / "res/layout-sw600dp/activity_main.xml"
+    tv.parent.mkdir(parents=True, exist_ok=True)
+    if not tv.exists():
+        shutil.copy2(phone, tv)
+        log("layout principal TV conservé : res/layout-sw600dp/activity_main.xml")
+
+    # Barre basse sobre : fond opaque de la marque, hairline de séparation et trois
+    # libellés — plus aucune « bouton Android » grise par défaut, qui jurait avec le
+    # thème sombre du lecteur et de l'accueil.
+    layout = """<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/black">
+    <fragment android:name="com.s0und.s0undtv.fragments.MainFragment"
+        android:id="@id/main_browse_fragment" android:layout_width="match_parent"
+        android:layout_height="match_parent" android:layout_marginBottom="64dp" />
+    <LinearLayout android:id="@+id/twouich_phone_nav_bar"
+        android:layout_width="match_parent" android:layout_height="58dp"
+        android:layout_gravity="bottom" android:orientation="vertical"
+        android:background="#0e0e10" android:elevation="16dp">
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#2a2a2e" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
+            android:orientation="horizontal" android:baselineAligned="false">
+            <TextView android:id="@+id/twouich_phone_nav_home"
+                android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                android:gravity="center" android:text="Accueil" android:textSize="11sp"
+                android:drawableTop="@drawable/twouich_ic_home" android:drawablePadding="4dp"
+                android:drawableTint="@color/theme_purple_bright"
+                android:textColor="@color/theme_purple_bright" android:ellipsize="end" android:maxLines="1"
+                android:background="?android:attr/selectableItemBackground"
+                android:clickable="true" android:focusable="true"
+                android:contentDescription="Accueil" android:onClick="twouichPhoneHome" />
+            <TextView android:id="@+id/twouich_phone_nav_search"
+                android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                android:gravity="center" android:text="Parcourir" android:textSize="11sp"
+                android:drawableTop="@drawable/twouich_ic_search" android:drawablePadding="4dp"
+                android:drawableTint="@color/twouich_phone_nav_inactive"
+                android:textColor="@color/twouich_phone_nav_inactive" android:ellipsize="end" android:maxLines="1"
+                android:background="?android:attr/selectableItemBackground"
+                android:clickable="true" android:focusable="true"
+                android:contentDescription="Parcourir" android:onClick="twouichPhoneSearch" />
+            <TextView android:id="@+id/twouich_phone_nav_settings"
+                android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                android:gravity="center" android:text="Reglages" android:textSize="11sp"
+                android:drawableTop="@drawable/twouich_ic_settings" android:drawablePadding="4dp"
+                android:drawableTint="@color/twouich_phone_nav_inactive"
+                android:textColor="@color/twouich_phone_nav_inactive" android:ellipsize="end" android:maxLines="1"
+                android:background="?android:attr/selectableItemBackground"
+                android:clickable="true" android:focusable="true"
+                android:contentDescription="Reglages" android:onClick="twouichPhoneSettings" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>
+"""
+    if phone.read_text(encoding="utf-8") != layout:
+        phone.write_text(layout, encoding="utf-8", newline="\n")
+        log("smartphone : shell tactile avec navigation basse")
+    else:
+        log("déjà appliqué : shell tactile smartphone")
+
+    main = decoded / "smali/com/s0und/s0undtv/activities/MainActivity.smali"
+    if not main.is_file():
+        fail(f"activité principale absente : {main}")
+    source = main.read_text(encoding="utf-8")
+    methods = """\n.method public twouichPhoneHome(Landroid/view/View;)V
+    .locals 0
+    return-void
+.end method
+
+.method public twouichPhoneSearch(Landroid/view/View;)V
+    .locals 3
+    new-instance v0, Landroid/content/Intent;
+    invoke-direct {v0}, Landroid/content/Intent;-><init>()V
+    const-string v1, "com.s0und.s0undtv"
+    const-string v2, "com.s0und.s0undtv.activities.SearchActivity"
+    invoke-virtual {v0, v1, v2}, Landroid/content/Intent;->setClassName(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;
+    invoke-virtual {p0, v0}, Landroid/app/Activity;->startActivity(Landroid/content/Intent;)V
+    return-void
+.end method
+
+.method public twouichPhoneSettings(Landroid/view/View;)V
+    .locals 3
+    new-instance v0, Landroid/content/Intent;
+    invoke-direct {v0}, Landroid/content/Intent;-><init>()V
+    const-string v1, "com.s0und.s0undtv"
+    const-string v2, "com.s0und.s0undtv.activities.SettingsActivity"
+    invoke-virtual {v0, v1, v2}, Landroid/content/Intent;->setClassName(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;
+    invoke-virtual {p0, v0}, Landroid/app/Activity;->startActivity(Landroid/content/Intent;)V
+    return-void
+.end method
+"""
+    legacy = "invoke-virtual {v0, p0, v1, v2}, Landroid/content/Intent;->setClassName(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;"
+    current = "invoke-virtual {v0, v1, v2}, Landroid/content/Intent;->setClassName(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;"
+    source = source.replace(legacy, current)
+    if "twouichPhoneSearch" not in source:
+        main.write_text(source.rstrip() + methods + "\n", encoding="utf-8", newline="\n")
+        log("smartphone : actions Recherche/Réglages branchées")
+    elif source != main.read_text(encoding="utf-8"):
+        main.write_text(source, encoding="utf-8", newline="\n")
+        log("smartphone : appels de navigation corrigés")
+    else:
+        log("déjà appliqué : actions de navigation smartphone")
 
 
 def install_selftest(decoded: pathlib.Path) -> None:
@@ -683,6 +1850,16 @@ def main() -> int:
 
     install_graft(decoded, here)
     brand = install_branding(decoded, here, args.version_name, args.release_date)
+    neutralize_firebase(decoded)
+    disable_remote_config_calls(decoded)
+    disable_crashlytics_facade(decoded)
+    patch_smartphone_features(decoded)
+    install_phone_assets(decoded, here)
+    patch_smartphone_ux(decoded)
+    patch_smartphone_headers(decoded)
+    patch_smartphone_tap(decoded)
+    patch_smartphone_navigation(decoded)
+    patch_smartphone_pip(decoded)
     install_selftest(decoded)
     repoint_updater(decoded, args.apk_name)
     bump_version(decoded, args.version_code, args.version_name)
@@ -713,14 +1890,185 @@ def main() -> int:
         ("assets/S0undTV_about.html", "twouich_legal.html"),
         ("smali/com/s0und/s0undtv/activities/PrivacyPolicyActivity.smali",
          "twouich_privacy.html"),
+        ("smali_classes2/P6/e.smali", "return-void"),
+        ("smali_classes2/P6/b.smali", "return-void"),
+        ("smali_classes2/P6/l.smali", "return-void"),
+        ("res/layout/activity_player.xml", "twouich_phone_chat_height"),
+        ("res/layout/activity_player.xml", "SendMessageWindow"),
+        ("res/layout/include_send_chat_message_window.xml", "ET_SendMessage"),
+        ("res/layout-sw600dp/activity_player.xml", "ChatRecycleView"),
+        ("res/layout/activity_main.xml", "twouich_phone_nav_search"),
+        ("res/layout-sw600dp/activity_main.xml", "main_browse_fragment"),
+        ("smali/com/s0und/s0undtv/activities/MainActivity.smali", "twouichPhoneSearch"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhoneStackedLayout"),
+        ("smali_classes2/com/s0und/s0undtv/fragments/MainFragment.smali",
+         "invoke-direct {p0}, Lcom/s0und/s0undtv/fragments/MainFragment;->twouichPhoneHeadersState()I"),
+        ("res/values/dimens.xml", "twouich_phone_chat_height"),
+        ("smali_classes2/com/twouich/adblock/TapClick.smali",
+         ".method public static touch(Landroid/view/View;Landroid/view/MotionEvent;)Z"),
+        # UX smartphone : barre basse avec icônes, bouton d'incrustation, et
+        # l'activité lecteur déclarée compatible picture-in-picture.
+        ("res/drawable/twouich_ic_home.xml", "<vector"),
+        ("res/drawable/twouich_ic_search.xml", "<vector"),
+        ("res/drawable/twouich_ic_settings.xml", "<vector"),
+        ("res/drawable/twouich_ic_pip.xml", "<vector"),
+        ("res/values/colors.xml", "twouich_phone_nav_inactive"),
+        ("res/layout/activity_main.xml", "twouich_ic_home"),
+        ("res/layout/activity_player.xml", "twouich_phone_pip"),
+        ("AndroidManifest.xml", 'android:supportsPictureInPicture="true"'),
+        ("AndroidManifest.xml", "smallestScreenSize"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhonePip"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "onPictureInPictureModeChanged"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".field private twouichPipActive:Z"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         "if-eqz v11, :twouich_phone_layout_ok"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         PHONE_PIP_STATE_NEEDLE),
     ]:
         if rel_or_marker is None:
             path = find_factory(decoded)
         else:
             path = decoded / rel_or_marker
-        if not path.is_file() or needle not in path.read_text(encoding="utf-8"):
+        if rel_or_marker == "AndroidManifest.xml" and needle == "com.google.firebase":
+            if not path.is_file() or needle in path.read_text(encoding="utf-8"):
+                fail(f"contrôle échoué : télémétrie Firebase encore déclarée dans {path.relative_to(decoded)}")
+        elif not path.is_file() or needle not in path.read_text(encoding="utf-8"):
             fail(f"contrôle échoué : {needle!r} absent de {path.relative_to(decoded)}")
         checks += 1
+    # Garde-fou : setVisibility(int) recevait un objet LayoutParams — erreur de
+    # vérification Dalvik qui faisait planter le lecteur à l'ouverture.
+    player_check = decoded / "smali/com/s0und/s0undtv/activities/PlayerActivity.smali"
+    player_src = player_check.read_text(encoding="utf-8")
+    for reg in ("v5", "v6"):
+        if f"invoke-virtual {{{reg}, v0}}, Landroid/view/View;->setVisibility(I)V" in player_src:
+            fail(f"contrôle échoué : setVisibility({reg}) reçoit un LayoutParams au lieu d'un int")
+        if f"invoke-virtual {{{reg}, v9}}, Landroid/view/View;->setVisibility(I)V" not in player_src:
+            fail(f"contrôle échoué : setVisibility({reg}) attendu avec un registre entier")
+    checks += 2
+    # Garde-fou : un override d'un callback public de Window.Callback doit rester
+    # public. En « protected », le lieur ART rejette la classe entière
+    # (IllegalAccessError « implementing interface method is not public ») :
+    # PlayerActivity devient introuvable et l'ouverture d'un direct plante
+    # l'application (reproduit sur BlueStacks/API 25 le 20/09).
+    if ".method protected onWindowFocusChanged(Z)V" in player_src:
+        fail("contrôle échoué : onWindowFocusChanged est protected — ART rejetterait PlayerActivity")
+    if ".method public onWindowFocusChanged(Z)V" not in player_src:
+        fail("contrôle échoué : onWindowFocusChanged public absent de PlayerActivity")
+    checks += 2
+    # Garde-fou : la vidéo 16:9 est calculée depuis la largeur ; sans plafond,
+    # le chat reçoit une hauteur négative sur un écran plus large que haut
+    # (mesuré le 20/09 : chat à 0 px, disposition inutilisable en paysage).
+    for marker in (":twouich_phone_video_fits", ":twouich_phone_room", PHONE_GEO_TAIL):
+        if marker not in player_src:
+            fail(f"contrôle échoué : géométrie du lecteur téléphone incomplète ({marker!r})")
+        checks += 1
+    # Les deux formes fautives (sans plafond, puis sans test de place) sont des
+    # préfixes de la forme corrigée : les chercher dans une copie élaguée.
+    pruned = player_src.replace(PHONE_GEO_TAIL, "")
+    for faulty in (PHONE_GEO_OLD_TAIL, PHONE_GEO_CLAMPED_TAIL):
+        if faulty in pruned:
+            fail("contrôle échoué : une géométrie fautive du lecteur est revenue")
+        checks += 1
+    # Polarité des deux tests de place : c'est la faute qui a coûté le plus cher
+    # à ce projet (§6 de memory.md), et elle se relit ici en une ligne.
+    for expected, what in (
+        ("    if-lt v10, v7, :twouich_phone_video_fits",
+         "le plafond vidéo doit être sauté quand la vidéo tient"),
+        ("    if-ge v7, v3, :twouich_phone_room",
+         "l'empilement doit se faire quand le chat a un tiers de l'écran"),
+    ):
+        if expected not in player_src:
+            fail(f"contrôle échoué : {what}")
+        checks += 1
+    # Un label en double fait échouer apktool tard, sur un message qui ne dit pas
+    # quelle méthode est en cause : on le refuse ici, à la source.
+    for label in (":twouich_phone_video_fits", ":twouich_phone_room"):
+        if player_src.count(label) != 2:
+            fail(f"contrôle échoué : label {label} attendu 1 fois "
+                 f"(déclaration + saut), trouvé {player_src.count(label)}")
+        checks += 1
+    # Garde-fou : l'entrée/sortie d'incrustation doit avoir ses propres overrides
+    # publics, et l'activité doit continuer d'appliquer sa disposition quand elle
+    # est redimensionnée (rotation, incrustation) sans être recréée.
+    for signature in (
+        ".method public onPictureInPictureModeChanged(ZLandroid/content/res/Configuration;)V",
+        ".method public onConfigurationChanged(Landroid/content/res/Configuration;)V",
+        ".method public twouichPhonePip(Landroid/view/View;)V",
+    ):
+        if signature not in player_src:
+            fail(f"contrôle échoué : {signature} absent de PlayerActivity")
+        checks += 1
+    for weak in (".method protected onPictureInPictureModeChanged",
+                 ".method private onPictureInPictureModeChanged",
+                 ".method protected onConfigurationChanged",
+                 ".method private onConfigurationChanged"):
+        if weak in player_src:
+            fail(f"contrôle échoué : {weak} — ART rejetterait PlayerActivity")
+        checks += 1
+    # Garde-fou : pendant l'incrustation, la disposition téléphone ne doit PLUS
+    # s'appliquer. Le rappel PiP masque chat et saisie ; une réapplication
+    # tardive (perte de focus du passage en PiP, changement de configuration)
+    # remet la barre « Envoyer un message » par-dessus la vidéo — défaut mesuré
+    # le 20/09 sur le téléphone, dans la fenêtre d'incrustation elle-même.
+    pip_field = ".field private twouichPipActive:Z"
+    pip_read = ("iget-boolean v11, p0, Lcom/s0und/s0undtv/activities/"
+                "PlayerActivity;->twouichPipActive:Z")
+    pip_write = PHONE_PIP_STATE_NEEDLE
+    if pip_field not in player_src:
+        fail("contrôle échoué : champ d'état d'incrustation absent de PlayerActivity")
+    if pip_read not in player_src or "if-eqz v11, :twouich_phone_layout_ok" not in player_src:
+        fail("contrôle échoué : garde d'incrustation absent de twouichPhoneStackedLayout")
+    if "if-nez v11, :twouich_phone_layout_ok" in player_src:
+        fail("contrôle échoué : garde d'incrustation inversé (if-nez) — "
+             "l'empilement s'appliquerait exactement pendant l'incrustation")
+    if pip_write not in player_src:
+        fail("contrôle échoué : l'état d'incrustation n'est pas écrit par le rappel")
+    # Le garde de twouichPhoneView a été écrit à l'envers : il rendait null dès
+    # que l'identifiant était trouvé, donc le rappel PiP sortait aussitôt.
+    if f"    {PHONE_PIP_VIEW_OLD.strip()}" in player_src:
+        fail("contrôle échoué : twouichPhoneView est inversé — le rappel PiP "
+             "sortirait sans rien masquer")
+    if PHONE_PIP_VIEW_NEW not in player_src:
+        fail("contrôle échoué : garde d'identifiant absent de twouichPhoneView")
+    checks += 5
+    # Ordre : le garde précède la mise en place de l'empilement, et l'écriture de
+    # l'état précède la restauration appelée à la sortie d'incrustation.
+    stacked_at = player_src.find(".method private twouichPhoneStackedLayout()V")
+    guard_at = player_src.find("if-eqz v11, :twouich_phone_layout_ok", stacked_at)
+    exo_at = player_src.find('const-string v1, "ExoPlayer"', stacked_at)
+    pip_at = player_src.find(".method public onPictureInPictureModeChanged")
+    write_at = player_src.find(pip_write)
+    restore_at = player_src.find(":restore_pip_layout", pip_at)
+    if not (stacked_at != -1 and guard_at != -1 and exo_at != -1 and guard_at < exo_at):
+        fail("contrôle échoué : le garde d'incrustation arrive après la mise en "
+             "place de l'empilement")
+    if not (pip_at != -1 and write_at != -1 and restore_at != -1 and pip_at < write_at < restore_at):
+        fail("contrôle échoué : l'état d'incrustation est écrit trop tard — "
+             "la sortie d'incrustation ne restaurerait pas l'empilement")
+    checks += 2
+    # Garde-fou : le tap → clic doit être branché AVANT la logique d'origine de
+    # BaseGridView, sinon la grille consomme le premier appui et la carte reste
+    # activable au seul second appui (le défaut constaté au doigt).
+    grid_src = find_base_grid(decoded).read_text(encoding="utf-8")
+    if TAP_HOOK_CALL not in grid_src or TAP_HOOK_LABEL not in grid_src:
+        fail("contrôle échoué : tap → clic absent de BaseGridView.dispatchTouchEvent")
+    if grid_src.index(TAP_HOOK_CALL) > grid_src.index("iget-object v0, p0, Landroidx/leanback/widget/e;->g1"):
+        fail("contrôle échoué : tap → clic branché après la logique de la grille")
+    checks += 2
+    manifest_path = decoded / "AndroidManifest.xml"
+    manifest_text = manifest_path.read_text(encoding="utf-8")
+    if "android:screenOrientation=\"sensorLandscape\"" in manifest_text:
+        fail("contrôle échoué : une activité reste forcée en sensorLandscape")
+    if "android:screenOrientation=\"fullSensor\"" not in manifest_text:
+        fail("contrôle échoué : aucune activité multi-orientation fullSensor")
+    checks += 1
+    manifest_features = manifest_path
+    feature_lines = [line for line in manifest_features.read_text(encoding="utf-8").splitlines()
+                     if "<uses-feature" in line]
+    if not feature_lines or any('android:required="false"' not in line for line in feature_lines):
+        fail("contrôle échoué : chaque uses-feature doit porter android:required=\"false\"")
+    checks += len(feature_lines)
     assets = check_brand_assets(decoded, here)
     checks += assets
     logos = scan_dead_red(decoded)

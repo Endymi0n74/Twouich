@@ -55,6 +55,11 @@ DEFAULT_APK = ROOT / "dist" / "Twouich_v1.0.9.apk"
 # volontairement la référence d'origine — ce ne sont pas des marques affichées.
 DEAD_NAMES = ("S0undTV",)
 REBRANDED = ("Twouich",)
+
+# Libellé du champ de saisie du chat, aligné sur l'interface de référence
+# (Twitch mobile). Volontairement recopié de CHAT_HINT (patch/patch.py) : si le
+# générateur change le texte, ce test échoue et force à traiter les deux côtés.
+CHAT_HINT = "Envoyer un message"
 PAGES = ("assets/S0undTV_about.html", "assets/S0undTV_changelog.html")
 
 
@@ -150,6 +155,80 @@ def manifest_version(axml: bytes) -> tuple[int | None, str | None]:
     return None, None
 
 
+def manifest_orientations(axml: bytes) -> dict[str, int]:
+    """Lit la valeur enum android:screenOrientation des activités signées."""
+    strings: list[str] = []
+    orientations: dict[str, int] = {}
+    pos = 8
+    while pos + 8 <= len(axml):
+        ctype, _hsz, csize = struct.unpack_from("<HHI", axml, pos)
+        if csize <= 0:
+            break
+        if ctype == 0x0001:
+            strings = _axml_strings(axml, pos)
+        elif ctype == 0x0102 and strings:
+            name_idx = struct.unpack_from("<I", axml, pos + 20)[0]
+            if name_idx < len(strings) and strings[name_idx] == "activity":
+                attr_start, attr_size, attr_count = struct.unpack_from("<HHH", axml, pos + 24)
+                activity = None
+                orientation = None
+                for i in range(attr_count):
+                    off = pos + 16 + attr_start + i * attr_size
+                    a_name, a_raw, _sz, _res, a_type, a_data = struct.unpack_from(
+                        "<IIHBBI", axml, off + 4
+                    )
+                    if a_name >= len(strings):
+                        continue
+                    key = strings[a_name]
+                    if key == "name":
+                        value_idx = a_raw if a_type == 0x03 else a_data
+                        if value_idx < len(strings):
+                            activity = strings[value_idx]
+                    elif key == "screenOrientation":
+                        orientation = a_data
+                if activity is not None and orientation is not None:
+                    orientations[activity] = orientation
+        pos += csize
+    return orientations
+
+
+def manifest_features(axml: bytes) -> dict[str, bool]:
+    """Lit android:name/android:required des uses-feature dans l'AXML signé."""
+    strings: list[str] = []
+    features: dict[str, bool] = {}
+    pos = 8
+    while pos + 8 <= len(axml):
+        ctype, _hsz, csize = struct.unpack_from("<HHI", axml, pos)
+        if csize <= 0:
+            break
+        if ctype == 0x0001:
+            strings = _axml_strings(axml, pos)
+        elif ctype == 0x0102 and strings:
+            name_idx = struct.unpack_from("<I", axml, pos + 20)[0]
+            if name_idx < len(strings) and strings[name_idx] == "uses-feature":
+                attr_start, attr_size, attr_count = struct.unpack_from("<HHH", axml, pos + 24)
+                name = None
+                required = True
+                for i in range(attr_count):
+                    off = pos + 16 + attr_start + i * attr_size
+                    a_name, a_raw, _sz, _res, a_type, a_data = struct.unpack_from(
+                        "<IIHBBI", axml, off + 4
+                    )
+                    if a_name >= len(strings):
+                        continue
+                    key = strings[a_name]
+                    if key == "name":
+                        value_idx = a_raw if a_type == 0x03 else a_data
+                        if value_idx < len(strings):
+                            name = strings[value_idx]
+                    elif key == "required":
+                        required = not (a_type == 0x12 and a_data == 0)
+                if name is not None:
+                    features[name] = required
+        pos += csize
+    return features
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Vérifie l'APK livré")
     parser.add_argument("--apk", type=pathlib.Path, default=DEFAULT_APK)
@@ -209,6 +288,58 @@ def main() -> int:
                     not holds(arsc, "Red (default)"))
 
         manifest = z.read("AndroidManifest.xml")
+        features = manifest_features(manifest)
+        ok &= check("uses-feature smartphone optionnelles",
+                    bool(features) and all(not required for required in features.values()),
+                    ", ".join(name for name, required in features.items() if required))
+        ok &= check("uses-feature leanback conservée mais optionnelle",
+                    features.get("android.software.leanback") is False)
+        orientations = manifest_orientations(manifest)
+        ok &= check("orientation smartphone multi-capteur",
+                    bool(orientations) and all(value == 10 for value in orientations.values()),
+                    ", ".join(f"{name}={value}" for name, value in orientations.items() if value != 10))
+        phone_player = "res/layout/activity_player.xml"
+        tv_player = "res/layout-sw600dp/activity_player.xml"
+        ok &= check("layout lecteur smartphone présent",
+                    phone_player in names)
+        ok &= check("layout lecteur TV conservé",
+                    tv_player in names)
+        ok &= check("dimension chat smartphone compilée",
+                    holds(arsc, "twouich_phone_chat_height"))
+        ok &= check("saisie chat smartphone compilée",
+                    holds(arsc, "ET_SendMessage"))
+        dex_blob = b"".join(z.read(name) for name in names if name.endswith(".dex"))
+        ok &= check("navigation smartphone compilée",
+                    holds(arsc, "twouich_phone_nav_search")
+                    and holds(dex_blob, "twouichPhoneSearch"))
+        # Le traducteur tap → clic : sans lui, une carte Leanback ne s'ouvre qu'au
+        # second appui au doigt (défaut constaté sur appareil le 19/09).
+        ok &= check("tap → clic Leanback compilé",
+                    holds(dex_blob, "TapClick") and holds(dex_blob, "TWOUICH-TAP"),
+                    "TapClick absent du dex : les cartes resteraient au second appui")
+        # La barre basse porte des icônes et un libellé actif : sans les
+        # vectoriels, la barre retombe en trois libellés gris sans repère.
+        ok &= check("barre basse smartphone : icônes compilées",
+                    holds(arsc, "twouich_ic_home")
+                    and holds(arsc, "twouich_ic_search")
+                    and holds(arsc, "twouich_ic_settings")
+                    and holds(arsc, "twouich_phone_nav_inactive"),
+                    "icônes ou teinte d'onglet absentes des ressources")
+        # Le picture-in-picture : bouton dans le lecteur téléphone, overrides
+        # dans le dex, et la référence à l'API 26 qui n'existe pas avant.
+        ok &= check("picture-in-picture smartphone compilé",
+                    holds(arsc, "twouich_phone_pip")
+                    and holds(arsc, "twouich_ic_pip")
+                    and holds(dex_blob, "twouichPhonePip")
+                    and holds(dex_blob, "onPictureInPictureModeChanged")
+                    and holds(dex_blob, "Landroid/app/PictureInPictureParams;"),
+                    "sans bouton ni override, l'incrustation ne peut pas être demandée")
+        # Le libellé du champ vit dans le layout compilé (AXML), pas dans
+        # resources.arsc : aapt2 le laisse dans l'entrée du layout.
+        hint_layout = "res/layout/include_send_chat_message_window.xml"
+        ok &= check("champ de chat : libellé de saisie",
+                    hint_layout in names and holds(z.read(hint_layout), CHAT_HINT),
+                    f"attendu : « {CHAT_HINT} » dans {hint_layout}")
         leaked_m = [s for s in DEAD_NAMES if holds(manifest, s)]
         ok &= check("libellé du manifeste Twouich",
                     not leaked_m and holds(manifest, "Twouich"), ", ".join(leaked_m))
@@ -240,6 +371,27 @@ def main() -> int:
         ok &= check("À propos pointe vers les pages légales",
                     holds(about_body, "twouich_legal.html")
                     and holds(about_body, "twouich_privacy.html"))
+
+        # 4c. La télémétrie Firebase héritée doit être inerte : les bibliothèques
+        # peuvent rester dans le dex upstream, mais aucun composant de démarrage
+        # ni identifiant de projet ne doit être présent dans le livrable.
+        firebase_manifest = (
+            b"com.google.firebase" in manifest
+            or b"AppMeasurementReceiver" in manifest
+            or b"FirebaseInitProvider" in manifest
+        )
+        ok &= check("aucun composant Firebase/Measurement dans le manifeste",
+                    not firebase_manifest)
+        firebase_config = any(
+            holds(arsc, needle)
+            for needle in (
+                "1:815622240528:android:70f4256c944a5bc4354d95",
+                "AIzaSyD-iYJlLhav5IHOMBATLZGqf1BgO_QkW6I",
+                "https://s0undtv.firebaseio.com",
+            )
+        )
+        ok &= check("aucun identifiant Firebase dans les ressources",
+                    not firebase_config)
 
         # 5. Un paquet sans signature ne s'installe pas : l'apk porte bien les
         #    blocs v1/v2/v3 (les .SF/.RSA du schéma v1, l'APK Signing Block sinon).

@@ -112,6 +112,7 @@ python patch/tests/test_apk.py             # 18 verdicts sur l'APK LIVRÉ (pas s
 python patch/tests/test_normalize_apk.py   # 29 vérifications : le normaliseur canonise horodatage
                                            #   et ordre des entrées ZIP sans rien toucher d'autre
 bash   patch/tests/test_analyzer.sh        # 11 verdicts sur captures synthétiques
+bash   patch/tests/test_device_ui.sh       # 61 vérifications : décisions de device-ui.sh (double d'adb, hors appareil)
 python patch/tests/test_radar.py           # 10 vérifications : rejeu anti-fuite du radar (hors réseau)
 python patch/radar_ads.py                  # radar multi-chaînes + rejeu anti-fuite (méthode AUDIT.md § 4.4)
 bash   patch/test-selftest.sh              # self-test embarqué, sur appareil (voir plus bas)
@@ -149,6 +150,13 @@ Pour une observation **longue** en direct (prouver qu'un pod est retiré pendant
 reste muette, sans terminal occupé), `bash patch/test-live.sh --duration 600` enchaîne les étapes
 mécaniques — état, capture détachée surveillée, arrêt + verdict `analyze_device_log.sh` ; seules la
 navigation D-pad et l'observation de l'écran restent à la main (détails et pièges : `TEST-DEVICE.md` § 2).
+
+La navigation elle-même est outillée par `bash patch/device-ui.sh` (`probe` → mesurer le canal,
+`nav` + `press` → amener le focus et activer, `texts` → signature d'écran), et `step` enchaîne une
+vérification complète **en une ligne** — écran attendu, action, écran obtenu — ce qui permet de
+scripter une recette de bout en bout (`TEST-DEVICE.md` § 8.7). Sur la Freebox et sur le téléphone,
+l'injection tactile est absorbée : c'est le D-pad qui passe. **Ne jamais supposer le canal** —
+`probe` le mesure (`TEST-DEVICE.md` § 8).
 
 Indices à surveiller dans le logcat (tag `Twouich`) :
 `playlist nettoyee <avant> -> <après> octets, segments pub retires : <n>`.

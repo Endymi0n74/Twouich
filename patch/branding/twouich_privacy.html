@@ -95,14 +95,13 @@
 
     <h3>La vérité sur l'héritage (à connaître)</h3>
     <p class="spacing">
-    La base d'origine embarque des composants <b>Google Firebase (Crashlytics, Analytics)</b>,
-    <b>compilés et toujours configurés</b> avec les identifiants du projet d'origine :
-    des rapports de plantage et des mesures d'usage <b>peuvent</b> être envoyés vers
-    l'infrastructure Google du projet d'origine, selon ses règles. Twouich n'y ajoute aucun
-    événement, n'y a pas accès et n'en tire aucune donnée ; la <b>neutralisation complète</b>
-    de cette télémétrie est un chantier suivi du projet. La permission « identifiant
-    publicitaire » (AD_ID) déclarée par le manifeste provient également de la base d'origine ;
-    Twouich ne diffuse aucune publicité.
+    La base d'origine embarquait des composants <b>Google Firebase (Crashlytics, Analytics)</b>.
+    Twouich les neutralise dans le build : aucun provider, service ou receiver Firebase/Measurement
+    n'est déclaré au démarrage et les identifiants du projet d'origine sont retirés des ressources.
+    Les bibliothèques peuvent rester dans le binaire pour préserver la compatibilité de l'APK,
+    mais elles sont inertes. Une observation réseau sur appareil complète cette preuve pour chaque
+    release. La permission « identifiant publicitaire » (AD_ID) déclarée par le manifeste provient
+    également de la base d'origine ; Twouich ne diffuse aucune publicité.
     </p>
 
     <hr>
