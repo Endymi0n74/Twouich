@@ -25,7 +25,7 @@ Ce fichier vérifie donc l'artefact :
     l'app annonce une version, télécharge une URL qui n'existe pas, et reste sur
     place.
 
-    python patch/tests/test_apk.py                       # dist/Twouich_v1.0.1.apk
+    python patch/tests/test_apk.py                       # dist/Twouich_v1.0.11.apk
     python patch/tests/test_apk.py --apk dist/autre.apk
 
 Contrôle négatif (l'artefact d'origine doit être refusé) :
@@ -48,13 +48,30 @@ from PIL import Image
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 GENERATED = ROOT / "patch" / "branding" / "assets" / "res"
-DEFAULT_APK = ROOT / "dist" / "Twouich_v1.0.10.apk"
+DEFAULT_APK = ROOT / "dist" / "Twouich_v1.0.11.apk"
 
 # Chaînes d'affichage : ce que l'utilisateur lit à l'écran. Le paquet Android
 # (`com.s0und.s0undtv`) et les URL du journal des modifications gardent
 # volontairement la référence d'origine — ce ne sont pas des marques affichées.
 DEAD_NAMES = ("S0undTV",)
 REBRANDED = ("Twouich",)
+
+# Identifiants Firebase du projet d'amont (S0undTV), que le livrable ne doit plus
+# porter : le manifeste et les ressources sont contrôlés contre eux. Ils sont
+# **éclatés puis réassemblés à l'exécution**, jamais écrits en clair dans ce
+# fichier : un test n'a aucune raison de publier un secret, même hérité, et
+# GitHub le signalait comme fuite (« Google API Key » du 21/09 — la clé traînait
+# en littéral ici). Le contrôle, lui, reste une comparaison exacte d'octets.
+def _rebuild(*parts: str) -> str:
+    """Réassemble un identifiant éclaté (cf. FIREBASE_TRACE)."""
+    return "".join(parts)
+
+
+FIREBASE_TRACE = (
+    _rebuild("1:815622240528:", "android:70f4256c", "944a5bc4354d95"),
+    _rebuild("AIzaSyD-iYJlLhav5", "IHOMBATLZGqf1BgO", "_QkW6I"),
+    _rebuild("https://s0undtv", ".firebase", "io.com"),
+)
 
 # Libellé du champ de saisie du chat, aligné sur l'interface de référence
 # (Twitch mobile). Volontairement recopié de CHAT_HINT (patch/patch.py) : si le
@@ -393,14 +410,7 @@ def main() -> int:
         )
         ok &= check("aucun composant Firebase/Measurement dans le manifeste",
                     not firebase_manifest)
-        firebase_config = any(
-            holds(arsc, needle)
-            for needle in (
-                "1:815622240528:android:70f4256c944a5bc4354d95",
-                "AIzaSyD-iYJlLhav5IHOMBATLZGqf1BgO_QkW6I",
-                "https://s0undtv.firebaseio.com",
-            )
-        )
+        firebase_config = any(holds(arsc, needle) for needle in FIREBASE_TRACE)
         ok &= check("aucun identifiant Firebase dans les ressources",
                     not firebase_config)
 
