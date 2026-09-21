@@ -1195,3 +1195,76 @@ Trois précautions, chacune payée :
   diagnostique au bout de **trois** crans ; sans cela il brûlait 30 crans de D-pad pendant 87 s sur un
   direct en cours avant de rendre le même verdict, sans la cause. Essayer `UI_KEY=19|21|22` : une
   grille se parcourt dans l'axe de ses rangées, pas toujours verticalement.
+
+### 8.8 Lire l'arbre des vues réellement appliqué — `dumpsys activity top`
+
+`uiautomator dump` ne dit pas tout : il **omet les vues `GONE`** et il arrive qu'il
+escamote une vue entièrement recouverte par une voisine. Deux conséquences vécues le
+21/09/2026 : un chat masqué et un chat **absent** se ressemblaient trait pour trait, et
+un bouton déclaré mort (introuvable dans le dump) était en fait présent, simplement
+sous le bouton d'incrustation. L'arbre du framework, lui, ne cache rien :
+
+```bash
+ADB=/chemin/vers/adb ; S=127.0.0.1:5555
+"$ADB" -s $S shell "dumpsys activity top" > etat.txt
+grep -E "app:id/(ExoPlayer|ChatRecycleView|SendMessageWindow|twouich_phone_chat|twouich_phone_pip)\}" etat.txt
+```
+
+Lecture d'une ligne :
+
+```
+com.s0und.s0undtv.chat.ChatRecyclerView{b99dd8 VFED..... ........ 0,405-720,1280 #7f0b0023 app:id/ChatRecycleView}
+                                          └─ drapeaux                    └─ bornes        └─ identifiant résolu
+```
+
+- **drapeaux** : `V` visible, `I` invisible, `G` *gone* (`GFED.....` = `GONE`) ;
+- **bornes** : `x1,y1-x2,y2` — c'est la géométrie **après** disposition, donc la preuve
+  qu'une disposition a réellement été appliquée (et pas seulement appelée) ;
+- **identifiant** : `#7f0b0023 app:id/ChatRecycleView` — le nom résolu, celui que
+  `Resources.getIdentifier` doit trouver (un nom nu qui n'apparaît pas ici n'existera pas
+  au moment de l'exécution).
+
+**Ce que l'outil a tranché, et qu'aucun `uiautomator dump` ne pouvait dire** : un repli du
+chat qui donnait l'écran entier à la vidéo (`[0,0][720,1280]`) au lieu de garder le 16:9,
+un chat `GONE` là où la disposition empilée le voulait visible — donc une disposition
+téléphone qui ne s'appliquait plus du tout. La cause était un garde à polarité inversée
+(`if-nez` au lieu de `if-eqz`), silencieux par construction.
+
+### 8.9 Recette d'acceptation du chat repliable (téléphone ou émulateur < 600 dp)
+
+Cinq vérifications, chacune avec sa preuve dans l'arbre des vues (§ 8.8) : l'état empilé,
+le repli, le dépli, la reprise d'activité et l'incrustation.
+
+```bash
+S=127.0.0.1:5555                       # ou l'IP du téléphone
+"$ADB" -s $S install -r dist/Twouich_v1.0.9.apk
+"$ADB" -s $S shell "am start -a android.intent.action.VIEW -d 's0undtv://stream/ddg'"
+sleep 12 ; "$ADB" -s $S shell "dumpsys activity top" > e1.txt      # 1. empilé
+"$ADB" -s $S shell "input tap 588 48"
+sleep 3  ; "$ADB" -s $S shell "dumpsys activity top" > e2.txt      # 2. replié
+"$ADB" -s $S shell "input tap 588 48"
+sleep 3  ; "$ADB" -s $S shell "dumpsys activity top" > e3.txt      # 3. déplié
+"$ADB" -s $S shell "input keyevent 3" ; sleep 3
+"$ADB" -s $S shell "am start -a android.intent.action.VIEW -d 's0undtv://stream/ddg'"
+sleep 8  ; "$ADB" -s $S shell "dumpsys activity top" > e4.txt      # 4. reprise
+```
+
+Mesures obtenues sur l'émulateur (720×1280, 240 dpi = 480 dp), le 21/09/2026 :
+
+| Étape | Vidéo | Chat | Saisie | Bouton chat |
+|---|---|---|---|---|
+| 1. empilé | `[0,0][720,405]` | `0,405-720,1280` **V** | `0,1168-720,1280` **V** | `552,12-624,84` **V** |
+| 2. replié | `[0,0][720,1280]` | `0,405-720,1280` **G** | `0,1168-720,1280` **G** | `552,12-624,84` **V** |
+| 3. déplié | `[0,0][720,405]` | `0,405-720,1280` **V** | `0,1168-720,1280` **V** | `552,12-624,84` **V** |
+| 4. reprise (replié au départ) | `[0,0][720,1280]` | **G** | **G** | `552,12-624,84` **V** |
+
+Trois invariants à vérifier sur chaque ligne : **le bouton ne bouge jamais** (mêmes bornes
+dans les quatre états — il doit rester hors du rectangle `636,12-708,84` du bouton
+d'incrustation), **la vidéo prend l'écran au repli** (`720,1280`, pas un 16:9 qui laisse un
+tiers noir), et **la reprise ne ressuscite pas le chat** replié.
+
+Cinquième vérification, l'incrustation : `input tap 672 48` (bouton PiP) puis
+`dumpsys activity activities | grep mode=pinned` — la fenêtre doit être en 16:9
+(`mBounds=Rect(403, 1091 - 696, 1256)` sur cet écran, soit 293×165) et `logcat` doit porter
+`picture-in-picture : video plein cadre, chat et saisie masques`, puis, au retour,
+`picture-in-picture : disposition empilee restauree`.

@@ -334,6 +334,17 @@ def main() -> int:
                     and holds(dex_blob, "onPictureInPictureModeChanged")
                     and holds(dex_blob, "Landroid/app/PictureInPictureParams;"),
                     "sans bouton ni override, l'incrustation ne peut pas être demandée")
+        # Le bouton masquer/afficher le chat : sans lui, le chat occupe la
+        # moitié basse du lecteur portrait sans aucun moyen de le replier.
+        # Le drawable ET le layout compilé portent la preuve : le dex contient
+        # les méthodes du toggle même si le bouton n'existe pas (fonction
+        # callback jamais référencée par le layout).
+        chat_layout = "res/layout/activity_player.xml"
+        ok &= check("toggle chat smartphone compilé",
+                    holds(arsc, "twouich_ic_chat")
+                    and chat_layout in names
+                    and holds(z.read(chat_layout), "twouichPhoneChatToggle"),
+                    "bouton chat absent des ressources ou du layout compilé")
         # Le libellé du champ vit dans le layout compilé (AXML), pas dans
         # resources.arsc : aapt2 le laisse dans l'entrée du layout.
         hint_layout = "res/layout/include_send_chat_message_window.xml"

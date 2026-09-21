@@ -137,6 +137,184 @@ PHONE_PIP_RESTORE_TRACE = (
     "    invoke-static {v3, v4}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I\n"
 )
 
+# Chat replié dans la disposition empilée : twouichPhoneStackedLayout est
+# rappelée à chaque reprise d'activité (onWindowFocusChanged,
+# onConfigurationChanged) et remettait le chat VISIBLE — le chat replié
+# revenait tout seul alors que l'état (twouichChatHidden) disait toujours
+# « replié » (mesuré le 21/09). Le garde est réapposé aux arbres déjà patchés
+# par la même mécanique que PHONE_PIP_GUARD : une seule source de texte.
+PHONE_CHAT_GATE_ANCHOR = ("    const/16 v2, 0x258\n"
+                          "    if-ge v1, v2, :return_phone_layout\n")
+PHONE_CHAT_GATE = (PHONE_CHAT_GATE_ANCHOR
+                   + "\n"
+                   + "    # Chat replié par le bouton : c'est la disposition repliée\n"
+                   + "    # (vidéo plein écran) qui est réappliquée, jamais l'empilement.\n"
+                   + "    iget-boolean v1, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatHidden:Z\n"
+                   # if-eqz : on GARDE l'empilement quand le drapeau est faux (chat
+                   # affiché). Écrit if-nez le 21/09, le garde renvoyait dans la branche
+                   # repliée à chaque appel sur un processus neuf — la disposition
+                   # téléphone ne s'appliquait plus jamais, sans le moindre journal.
+                   + "    if-eqz v1, :stacked_chat_shown\n"
+                   + "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatCollapse()V\n"
+                   + "    return-void\n"
+                   + "    :stacked_chat_shown\n")
+
+
+CHAT_METHODS = r"""
+.method private twouichChatTraces()Ljava/lang/String;
+    .locals 2
+
+    # Libellé d'état, d'après le champ twouichChatHidden : une seule source de
+    # vérité, lue par le toggle comme par l'analyseur logcat.
+    # IGET (champ d'instance sur p0) — un sget-boolean compile mais lève une
+    # IncompatibleClassChangeError au tap (attrapé sur BlueStacks le 21/09).
+    iget-boolean v0, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatHidden:Z
+
+    if-eqz v0, :chat_traces_shown
+
+    const-string v0, "chat masque"
+
+    goto :chat_traces_done
+
+    :chat_traces_shown
+    const-string v0, "chat affiche"
+
+    :chat_traces_done
+    return-object v0
+.end method
+
+.method private twouichChatCollapse()V
+    .locals 3
+
+    # Chat replié : le bloc chat et la saisie disparaissent et la vidéo prend
+    # tout l'écran. Replier n'a d'intérêt que si l'image en profite : mesuré le
+    # 21/09, le repli laissait la vidéo en 16:9 et deux tiers d'écran noirs.
+    # Téléphone seulement : même garde que twouichPhoneStackedLayout, dont
+    # cette méthode est le pendant replié.
+    invoke-virtual {p0}, Landroid/content/Context;->getResources()Landroid/content/res/Resources;
+
+    move-result-object v0
+
+    invoke-virtual {v0}, Landroid/content/res/Resources;->getConfiguration()Landroid/content/res/Configuration;
+
+    move-result-object v0
+
+    iget v0, v0, Landroid/content/res/Configuration;->smallestScreenWidthDp:I
+
+    const/16 v1, 0x258
+
+    if-ge v0, v1, :return_chat_collapse
+
+    # Vidéo plein écran : de NOUVEAUX paramètres, sans aucune règle — une
+    # instance fraîche n'en porte pas, la vue remplit donc le parent.
+    # L'empilement est rétabli au dépli par twouichPhoneStackedLayout : la
+    # géométrie empilée n'existe qu'à un seul endroit.
+    const-string v0, "ExoPlayer"
+
+    invoke-direct {p0, v0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneView(Ljava/lang/String;)Landroid/view/View;
+
+    move-result-object v0
+
+    if-eqz v0, :return_chat_collapse
+
+    const/4 v1, -0x1
+
+    new-instance v2, Landroid/widget/RelativeLayout$LayoutParams;
+
+    invoke-direct {v2, v1, v1}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V
+
+    invoke-virtual {v0, v2}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V
+
+    # Le chat et la saisie sont RETIRÉS (GONE), pas seulement transparents :
+    # c'est tout l'intérêt du repli sur un écran de téléphone.
+    const-string v0, "ChatRecycleView"
+
+    invoke-direct {p0, v0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneView(Ljava/lang/String;)Landroid/view/View;
+
+    move-result-object v0
+
+    if-eqz v0, :chat_collapse_input
+
+    const/16 v1, 0x8
+
+    invoke-virtual {v0, v1}, Landroid/view/View;->setVisibility(I)V
+
+    :chat_collapse_input
+    const-string v0, "SendMessageWindow"
+
+    invoke-direct {p0, v0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneView(Ljava/lang/String;)Landroid/view/View;
+
+    move-result-object v0
+
+    if-eqz v0, :return_chat_collapse
+
+    const/16 v1, 0x8
+
+    invoke-virtual {v0, v1}, Landroid/view/View;->setVisibility(I)V
+
+    :return_chat_collapse
+    return-void
+.end method
+
+.method private twouichChatApply(Z)V
+    .locals 2
+
+    # Une seule source de vérité : le champ est écrit ici, puis lu par
+    # twouichChatTraces (trace logcat) et par twouichPhoneStackedLayout (qui
+    # refuse de ressusciter un chat replié à chaque reprise d'activité).
+    # IGET/IPUT (champ d'instance) : un sget compile mais lève une
+    # IncompatibleClassChangeError au tap (attrapé sur BlueStacks le 21/09).
+    iput-boolean p1, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatHidden:Z
+
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatTraces()Ljava/lang/String;
+
+    move-result-object v0
+
+    const-string v1, "Twouich"
+
+    invoke-static {v1, v0}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I
+
+    # Le champ est écrit AVANT de choisir la disposition : les deux chemins
+    # lisent l'état pour se garder eux-mêmes.
+    if-eqz p1, :chat_apply_stacked
+
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatCollapse()V
+
+    return-void
+
+    :chat_apply_stacked
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V
+
+    return-void
+.end method
+
+.method public twouichPhoneChatToggle(Landroid/view/View;)V
+    .locals 2
+
+    # Le tap ne fait que basculer l'état, puis délègue : twouichChatHidden reste
+    # la seule source de vérité, et la disposition suit l'état (replié : vidéo
+    # plein écran ; affiché : empilement). Le bouton ne bouge jamais de la
+    # vidéo : ancré ailleurs, il finissait dans le même rectangle que le bouton
+    # d'incrustation, donc sous lui, donc intappable (mesuré le 21/09).
+    const/4 v0, 0x1
+
+    iget-boolean v1, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatHidden:Z
+
+    if-eqz v1, :chat_toggle_hide
+
+    const/4 v0, 0x0
+
+    :chat_toggle_hide
+    invoke-direct {p0, v0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatApply(Z)V
+
+    return-void
+.end method
+"""
+
+# Méthode exacte qui prouve la présence des greffons chat — jamais un nom nu,
+# les commentaires des méthodes citent leurs voisines (piège du 21/09).
+CHAT_REPAIR_ANCHOR = ".method private twouichChatCollapse()V"
+
 GRAFT_DIR = "com/twouich/adblock"
 
 # Méthode remplacée dans z3/u$b (Factory OkHttpDataSource d'ExoPlayer, Lz3/l$a).
@@ -764,9 +942,18 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
 :return_focus
     return-void
 .end method
+
 '''
     )
-    # Picture-in-picture (API 26) : bouton dans le lecteur téléphone, fenêtre
+    # Le garde du chat replié fait partie de la disposition empilée : posé dans
+    # la source unique (player_methods), donc présent à l'identique sur un arbre
+    # vierge et sur un arbre réparé.
+    if PHONE_CHAT_GATE_ANCHOR not in player_methods:
+        fail("garde du chat replié absent du gabarit de twouichPhoneStackedLayout")
+    player_methods = player_methods.replace(PHONE_CHAT_GATE_ANCHOR, PHONE_CHAT_GATE, 1)
+    if ":stacked_chat_shown" not in player_methods:
+        fail("garde du chat replié non posé dans le gabarit")
+        # Picture-in-picture (API 26) : bouton dans le lecteur téléphone, fenêtre
     # 16:9, et disparition du chat pendant que la vidéo est en incrustation.
     # Les trois overrides de callback du framework sont PUBLICS : Activity
     # implémente Window.Callback, un override plus faible fait rejeter la classe
@@ -1001,6 +1188,17 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
             and "twouich_phone_layout_ok" not in player_fixed):
         head = ".method private twouichPhoneStackedLayout()V\n    .locals 12\n"
         player_fixed = player_fixed.replace(head, head + PHONE_PIP_GUARD + "\n", 1)
+    if (".method private twouichPhoneStackedLayout()V" in player_fixed
+            and ":stacked_chat_shown" not in player_fixed):
+        player_fixed = player_fixed.replace(PHONE_CHAT_GATE_ANCHOR, PHONE_CHAT_GATE, 1)
+    # Garde à polarité inversée (if-nez) : l'arbre de travail écrit avant la
+    # correction se repliait lui-même à chaque reprise d'activité. On le remet
+    # dans le bon sens sur place — l'ancrage ci-dessus ne le verrait pas, le
+    # label étant déjà présent.
+    if "    if-nez v1, :stacked_chat_shown\n" in player_fixed:
+        player_fixed = player_fixed.replace(
+            "    if-nez v1, :stacked_chat_shown\n",
+            "    if-eqz v1, :stacked_chat_shown\n", 1)
     if PHONE_PIP_VIEW_OLD in player_fixed:
         player_fixed = player_fixed.replace(
             PHONE_PIP_VIEW_OLD, PHONE_PIP_VIEW_NEW, 1,
@@ -1025,24 +1223,87 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
         )
     # Champ d'état d'incrustation : la disposition téléphone le lit pour ne pas
     # réappliquer l'empilement pendant que la vidéo est en incrustation.
-    if "twouichPipActive" not in player_text:
+    # Champs d'état (incrustation + toggle chat) : écrits dans TOUS les cas
+    # où ils manquent — même quand les méthodes sont déjà présentes, sinon un
+    # arbre déjà patché garde des méthodes qui lisent un champ inexistant.
+    # (Bug corrigé le 21/09 : la version précédente n'écrivait le champ que
+    # dans la branche « arbre vierge », et un arbre déjà patché par la version
+    # sans toggle se retrouvait avec 2 méthodes et 0 champ.)
+    fields_block = ("\n\n.field private twouichPipActive:Z"
+                    "\n.field private twouichChatHidden:Z")
+    if ".field private twouichPipActive:Z" not in player_fixed:
         player_fixed = player_fixed.replace(
             ".super Landroid/app/Activity;",
-            ".super Landroid/app/Activity;\n\n.field private twouichPipActive:Z",
+            ".super Landroid/app/Activity;" + fields_block,
             1,
         )
-    if "twouichPhoneStackedLayout" not in player_text:
+    if ".field private twouichChatHidden:Z" not in player_fixed:
+        player_fixed = player_fixed.replace(
+            ".field private twouichPipActive:Z",
+            ".field private twouichPipActive:Z\n.field private twouichChatHidden:Z",
+            1,
+        )
+    # Toggle du chat : un arbre déjà patché par la version précédente ne
+    # connaît pas le champ d'état — on retire alors les méthodes chat (elles
+    # lisent ce champ, elles rejetteraient la classe) pour les repose ensuite.
+    # Les regex sont ANCRÉES À LA FIN DU FICHIER (dernière occurrence = la
+    # méthode ajoutée par nous, jamais une autre) : un .*? non ancré traversait
+    # les frontières de méthodes et avalait les blocs voisins (constaté le
+    # 21/09 : stacked et PiP disparus après un second passage).
+    # Marqueur de version du câblage chat : la méthode repliée n'existe que
+    # dans la version courante. Le test porte sur le texte LU DU DISQUE, jamais
+    # sur la copie de travail — les champs et les méthodes y sont ajoutés juste
+    # avant, et un test sur la copie conclurait « déjà fait » (piège du 21/09).
+    chat_current = CHAT_REPAIR_ANCHOR in player_text
+    if not chat_current:
+        for sig in (
+            ".method private twouichChatTraces()Ljava/lang/String;",
+            ".method private twouichChatCollapse()V",
+            ".method private twouichChatApply(Z)V",
+            ".method public twouichPhoneChatToggle(Landroid/view/View;)V",
+        ):
+            k = player_fixed.rfind(sig)
+            if k < 0:
+                continue
+            e = player_fixed.find(".end method", k)
+            if e > k:
+                player_fixed = player_fixed[:k].rstrip() + "\n" + player_fixed[e + len(".end method"):]
+    repaired_chat = False
+    if not chat_current:
+        player_fixed = player_fixed.rstrip() + "\n" + CHAT_METHODS.replace("\r\n", "\n").rstrip() + "\n"
+        repaired_chat = True
+    # Puis les méthodes lecteur/PiP si elles manquent encore (le test lit
+    # player_fixed, donc APRÈS l'ajout des méthodes chat) — un seul ordre
+    # possible : chat d'abord, lecteur ensuite, sinon le bloc lecteur écrit
+    # sans les méthodes chat et la réparation les rejoue après (doublon).
+    # Le toggle est déjà dans player_methods (une seule source) : la seule
+    # décision d'écriture est celle du bloc lecteur — le if ci-dessous —, et
+    # repaired_chat ne déclenche jamais une écriture qui doublerait la méthode.
+    # Tests de présence par SIGNATURE de méthode, jamais par nom nu : les
+    # commentaires des méthodes injectées citent leurs voisines, et un nom nu
+    # dans un commentaire fait passer une méthode pour présente (constaté le
+    # 21/09 : CHAT_METHODS mentionne la disposition empilée, le bloc lecteur
+    # n'était plus jamais écrit, onPictureInPictureModeChanged disparaissait).
+    if ".method private twouichPhoneStackedLayout()V" not in player_fixed:
         player_smali.write_text(player_fixed.rstrip() + "\n"
                                + player_methods.replace("\r\n", "\n").rstrip() + "\n"
                                + pip_methods.replace("\r\n", "\n").rstrip() + "\n",
                                encoding="utf-8", newline="\n")
         log("smartphone : lecteur empilé vidéo en haut, chat puis saisie en bas")
         log("smartphone : picture-in-picture branché sur le lecteur")
-    elif "twouichPhonePip" not in player_fixed:
+    # PiP absent du fichier : on l'ajoute, et rien d'autre — les méthodes chat
+    # sont déjà dans player_fixed (nettoyage puis ajout ci-dessus), les
+    # réécrire ici les dupliquerait et apktool refuserait le fichier.
+    elif ".method public twouichPhonePip(Landroid/view/View;)V" not in player_fixed:
         player_smali.write_text(player_fixed.rstrip() + "\n"
                                + pip_methods.replace("\r\n", "\n").rstrip() + "\n",
                                encoding="utf-8", newline="\n")
         log("smartphone : picture-in-picture branché sur le lecteur")
+    elif repaired_chat:
+        # Arbre écrit par la version précédente : méthodes chat retirées puis
+        # reposées, garde du chat replié ajouté — on écrit l'état corrigé.
+        player_smali.write_text(player_fixed, encoding="utf-8", newline="\n")
+        log("smartphone : chat repliable rebranché sur le lecteur (réparation)")
     elif player_fixed != player_text:
         player_smali.write_text(player_fixed, encoding="utf-8", newline="\n")
         log("smartphone : correction des paramètres du lecteur empilé")
@@ -1183,6 +1444,48 @@ def find_base_grid(decoded: pathlib.Path) -> pathlib.Path:
     fail(f"BaseGridView ({BASE_GRID_CLASS}) absent de {directory} — cible changée")
     raise AssertionError("inatteignable")
 
+
+def patch_smartphone_chat_toggle(decoded: pathlib.Path) -> None:
+    """Bouton masquer/afficher le chat du lecteur téléphone.
+
+    Depuis le 20/09 le chat est visible en bas du lecteur portrait (empilement),
+    mais rien ne permettait de le replier : il occupait la moitié basse de
+    l'écran sans contrôle pour le retirer. Le bouton vit sur la vidéo et n'en
+    bouge jamais — ancré au coin bas droit, il tombait dans le même rectangle
+    que le bouton d'incrustation, donc dessous, donc intappable (repli mesuré
+    sur BlueStacks le 21/09). Le repli donne l'écran entier à la vidéo ; l'état
+    (twouichChatHidden) et l'application (twouichChatApply) vivent dans
+    PlayerActivity, le layout ici.
+    TV intacte : le bouton n'existe que dans res/layout/activity_player.xml et
+    les méthodes sortent avant tout effet au-dessus de 600 dp.
+    """
+    print("[1i/5] UX smartphone (bouton masquer/afficher le chat)")
+    phone = decoded / "res/layout/activity_player.xml"
+    if not phone.is_file():
+        fail(f"layout lecteur absent : {phone}")
+    source = phone.read_text(encoding="utf-8")
+    # Signature exacte : "twouich_phone_chat" matche aussi le dimen
+    # twouich_phone_chat_height posé avant — le bouton n'était jamais inséré
+    # (même famille que les tests de présence par nom nu, corrigés plus haut).
+    if "twouich_phone_chat\"" in source:
+        log("déjà appliqué : bouton masquer/afficher le chat")
+        return
+    anchor = '<ImageButton android:id="@+id/twouich_phone_pip"'
+    if anchor not in source:
+        fail("bouton picture-in-picture introuvable dans activity_player.xml - cible changée")
+    button = ('<ImageButton android:id="@+id/twouich_phone_chat"\n'
+              '        android:layout_width="48dp" android:layout_height="48dp"\n'
+              '        android:layout_alignTop="@id/ExoPlayer" android:layout_alignEnd="@id/ExoPlayer"\n'
+              '        android:layout_marginTop="8dp" android:layout_marginEnd="64dp"\n'
+              '        android:padding="12dp" android:scaleType="fitCenter"\n'
+              '        android:background="#66000000" android:src="@drawable/twouich_ic_chat"\n'
+              '        android:contentDescription="Masquer ou afficher le chat"\n'
+              '        android:onClick="twouichPhoneChatToggle" />')
+    new = source.replace(anchor, "    " + button + "\n    " + anchor, 1)
+    if new == source:
+        fail("insertion du bouton chat impossible dans activity_player.xml")
+    phone.write_text(new, encoding="utf-8")
+    log("smartphone : bouton masquer/afficher le chat posé sur la vidéo")
 
 def patch_smartphone_tap(decoded: pathlib.Path) -> None:
     """Traduit un tap sur une carte Leanback en clic, sur téléphone seulement.
@@ -1860,6 +2163,7 @@ def main() -> int:
     patch_smartphone_tap(decoded)
     patch_smartphone_navigation(decoded)
     patch_smartphone_pip(decoded)
+    patch_smartphone_chat_toggle(decoded)
     install_selftest(decoded)
     repoint_updater(decoded, args.apk_name)
     bump_version(decoded, args.version_code, args.version_name)
@@ -1918,6 +2222,17 @@ def main() -> int:
         ("AndroidManifest.xml", 'android:supportsPictureInPicture="true"'),
         ("AndroidManifest.xml", "smallestScreenSize"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhonePip"),
+        ("res/layout/activity_player.xml", "twouich_phone_chat\""),
+        ("res/layout/activity_player.xml", 'android:onClick="twouichPhoneChatToggle"'),
+        ("res/drawable/twouich_ic_chat.xml", "<vector"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhoneChatToggle"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", ".field private twouichChatHidden:Z"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".method private twouichChatCollapse()V"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ":stacked_chat_shown"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         "if-eqz v1, :stacked_chat_shown"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "onPictureInPictureModeChanged"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
          ".field private twouichPipActive:Z"),
@@ -2047,6 +2362,18 @@ def main() -> int:
         fail("contrôle échoué : l'état d'incrustation est écrit trop tard — "
              "la sortie d'incrustation ne restaurerait pas l'empilement")
     checks += 2
+    # Garde-fou : nos champs d'état sont des champs D'INSTANCE — tout accès
+    # statique (sget-boolean/sput-boolean) compile puis lève une
+    # IncompatibleClassChangeError au premier tap (crash mesuré sur
+    # BlueStacks le 21/09 : twouichChatHidden lu par sget dans le toggle).
+    for opcode in ("sget-boolean", "sput-boolean"):
+        for field in ("twouichPipActive", "twouichChatHidden"):
+            bad = re.compile(
+                rf"{opcode}\s+\w+,\s*Lcom/s0und/s0undtv/activities/PlayerActivity;->{field}:Z")
+            if bad.search(player_src):
+                fail(f"contrôle échoué : {field} accédé en statique ({opcode}) — "
+                     "c'est un champ d'instance, ART lèvera IncompatibleClassChangeError")
+            checks += 1
     # Garde-fou : le tap → clic doit être branché AVANT la logique d'origine de
     # BaseGridView, sinon la grille consomme le premier appui et la carte reste
     # activable au seul second appui (le défaut constaté au doigt).
