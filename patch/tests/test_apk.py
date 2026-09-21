@@ -48,7 +48,7 @@ from PIL import Image
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 GENERATED = ROOT / "patch" / "branding" / "assets" / "res"
-DEFAULT_APK = ROOT / "dist" / "Twouich_v1.0.9.apk"
+DEFAULT_APK = ROOT / "dist" / "Twouich_v1.0.10.apk"
 
 # Chaînes d'affichage : ce que l'utilisateur lit à l'écran. Le paquet Android
 # (`com.s0und.s0undtv`) et les URL du journal des modifications gardent

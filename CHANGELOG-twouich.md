@@ -1,5 +1,11 @@
 # Journal des modifications — Twouich
 
+## v1.0.10 — 21 septembre 2026
+
+- **Le chat du lecteur garde l'état choisi sur téléphone** : replié ou affiché, le choix survit à la fermeture de l'application et est relu au démarrage du lecteur — un chat replié ne se rouvre plus tout seul au lancement suivant (le choix vit dans les préférences de l'app, une seule relecture par instance).
+- **Les derniers messages du chat ne passent plus sous la barre de saisie** : le chat s'arrête désormais au-dessus de la saisie, qui reste collée au bas de l'écran (112 px de messages étaient cachés en permanence) ; les dispositions empilée, repliée et en incrustation restent inchangées.
+- **La recette d'acceptation du chat par téléphone devient un script** (`patch/test-chat-toggle.sh`) : six états vérifiés dans l'arbre des vues réellement appliqué, sortie 1 au premier écart, rejouable hors appareil sur des arbres capturés.
+
 ## v1.0.9 — 19 septembre 2026
 
 - **La « Politique de confidentialité » du menu affiche désormais la politique Twouich embarquée** (elle chargeait encore la page en ligne du projet d'origine) ; la page « Mentions légales » embarquée est accessible depuis « À propos ».

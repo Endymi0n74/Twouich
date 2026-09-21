@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import pathlib
 import re
@@ -26,7 +27,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 REPO = "Endymi0n74/Twouich"
 UPSTREAM = "S0und/S0undTV"
-DEFAULT_APK_NAME = "Twouich_v1.0.9.apk"
+DEFAULT_APK_NAME = "Twouich_v1.0.10.apk"
 
 # ── Étape 1 : greffon anti-pub ────────────────────────────────────────────
 # Libellés de l'UX smartphone. Le champ de saisie reprend celui de l'interface
@@ -159,6 +160,109 @@ PHONE_CHAT_GATE = (PHONE_CHAT_GATE_ANCHOR
                    + "    return-void\n"
                    + "    :stacked_chat_shown\n")
 
+# Le chat doit s'arrêter AU-DESSUS de la barre de saisie. Ancré au bas du parent
+# (règle 12), il s'étirait jusque SOUS la saisie : les derniers messages étaient
+# cachés par la barre (mesuré le 21/09 : chat `[0,405][720,1280]`, saisie
+# `[0,1168][720,1280]` — 112 px de chat perdus).
+#
+# On ne peut PAS le borner par la règle 2 (AU-DESSUS de la saisie) : la saisie
+# porte déjà `addRule(2, chat)` (elle est au-dessus du chat), donc la règle
+# inverse ferme le cycle et RelativeLayout refuse de mesurer —
+# `IllegalStateException: Circular dependencies cannot exist in RelativeLayout`,
+# attrapée par l'acceptation au premier passage de mesure (21/09). On réserve
+# donc la hauteur de la saisie par une marge basse, prise dans le MÊME registre
+# (v11 = 0x70 = 112 px) que la hauteur donnée à la saisie : les deux valeurs ne
+# peuvent pas diverger.
+#
+# Les deux textes vivent ici (source unique) et servent au gabarit comme à la
+# réparation d'un arbre déjà patché. Le nouveau texte contient le même préfixe
+# que l'ancien PLUS une ligne : le test de réparation ne peut donc pas boucler
+# (il porte sur le bloc entier, ligne `setLayoutParams` comprise).
+PHONE_CHAT_BELOW_OLD = (
+    "    const/4 v9, 0x3\n"
+    "    invoke-virtual {v0, v9, v1}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(II)V\n"
+    "    const/16 v9, 0xc\n"
+    "    invoke-virtual {v0, v9}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(I)V\n"
+    "    invoke-virtual {v5, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V\n"
+)
+PHONE_CHAT_BELOW_NEW = (
+    "    const/4 v9, 0x3\n"
+    "    invoke-virtual {v0, v9, v1}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(II)V\n"
+    "    const/16 v9, 0xc\n"
+    "    invoke-virtual {v0, v9}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(I)V\n"
+    "    iput v11, v0, Landroid/view/ViewGroup$MarginLayoutParams;->bottomMargin:I\n"
+    "    invoke-virtual {v5, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V\n"
+)
+# État intermédiaire du même jour : le chat borné par la règle 2 (AU-DESSUS de la
+# saisie), qui ferme le cycle et fait planter la passe de mesure. Conservé pour
+# qu'un arbre de travail ayant vu cette version soit réparé, jamais livré.
+PHONE_CHAT_ABOVE_OLD = (
+    "    const/4 v9, 0x3\n"
+    "    invoke-virtual {v0, v9, v1}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(II)V\n"
+    "    const-string v3, \"SendMessageWindow\"\n"
+    "    invoke-direct {p0, v3}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneId(Ljava/lang/String;)I\n"
+    "    move-result v3\n"
+    "    const/4 v9, 0x2\n"
+    "    invoke-virtual {v0, v9, v3}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(II)V\n"
+    "    invoke-virtual {v5, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V\n"
+)
+
+
+# L'état du chat est relu au démarrage du lecteur AVANT la première application
+# de la disposition : sans cela, la première image part de l'état par défaut et
+# le choix de l'utilisateur n'arrive qu'après. Le rappel de focus est le seul
+# point d'entrée du démarrage qui précède l'empilement — la relecture s'y glisse.
+PHONE_CHAT_RESTORE_ANCHOR = (
+    "    if-eqz p1, :return_focus\n"
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V\n"
+)
+PHONE_CHAT_RESTORE_CALL = (
+    "    if-eqz p1, :return_focus\n"
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatRestore()V\n"
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V\n"
+)
+
+# Le rappel de focus n'est PAS un point d'entrée fiable du démarrage : mesuré le
+# 21/09 sur BlueStacks (Android 13), `onWindowFocusChanged` n'est jamais
+# dispatché — l'état du chat n'était donc relu nulle part et un chat replié se
+# rouvrait à chaque lancement de l'application. `onResume`, lui, est journalisé
+# par l'app elle-même (« onResume() was called ») et précède la première image :
+# c'est là que la préférence est relue. Une seule lecture par instance (le champ
+# twouichChatRestored garde l'entrée), donc un retour depuis le fond ne relit pas.
+# La géométrie empilée vient des DisplayMetrics, pas d'une vue mesurée :
+# l'appeler depuis onResume (avant la première passe de disposition) est sûr.
+PHONE_CHAT_RESUME_ANCHOR = (
+    "    invoke-super {p0}, Landroid/app/Activity;->onResume()V\n"
+)
+PHONE_CHAT_RESUME_CALL = (
+    PHONE_CHAT_RESUME_ANCHOR
+    + "\n    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatRestore()V\n"
+)
+# L'appel lui-même, sans indentation imposée : sert aux contrôles du livrable.
+CHAT_RESTORE_CALL_LINE = (
+    "invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatRestore()V"
+)
+# Garde de la relecture : un arbre patché le 21/09 avant la correction porte la
+# polarité inversée (if-eqz sur un champ faux = sortie immédiate, sans journal).
+PHONE_CHAT_RESTORE_GUARD_OLD = "if-eqz v0, :restore_done"
+PHONE_CHAT_RESTORE_GUARD_NEW = "if-nez v0, :restore_done"
+
+# Empreinte des greffes du lecteur, écrite À CÔTÉ de l'arbre décodé (jamais
+# dedans : apktool empaquette les fichiers inconnus dans l'APK).
+#
+# Pourquoi : `build.sh` RÉUTILISE l'arbre décodé d'un build à l'autre (seul un
+# bump de version le fait redésassembler). Un gabarit modifié — méthode ajoutée,
+# garde corrigée — ne s'applique donc PAS à un arbre déjà patché : le build
+# repart de l'ancien texte et livre l'ancien comportement, sans le moindre
+# message. Le 21/09, une sonde ajoutée à CHAT_METHODS n'est jamais arrivée dans
+# le livrable pour cette raison (et l'absence de trace a été cherchée dans le
+# mauvais code pendant une heure). Une empreinte qui ne correspond plus fait
+# échouer le patch, à charge de désassembler à neuf.
+STAMP_SUFFIX = ".twouich-greffes"
+# Renseignée par patch_smartphone_ux (les gabarits du lecteur y sont assemblés),
+# vérifiée par main : une empreinte vide = le pas de greffe n'a pas tourné.
+GREFFE_FINGERPRINT = ""
+
 
 CHAT_METHODS = r"""
 .method private twouichChatTraces()Ljava/lang/String;
@@ -274,6 +378,29 @@ CHAT_METHODS = r"""
 
     invoke-static {v1, v0}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I
 
+    # Persistance : le choix survit à la fermeture de l'application (relu par
+    # twouichChatRestore au démarrage du lecteur). Le contrat, ce sont le
+    # fichier et la clé — ils doivent rester les mêmes des deux côtés.
+    const-string v0, "twouich"
+
+    const/4 v1, 0x0
+
+    invoke-virtual {p0, v0, v1}, Landroid/content/Context;->getSharedPreferences(Ljava/lang/String;I)Landroid/content/SharedPreferences;
+
+    move-result-object v0
+
+    invoke-interface {v0}, Landroid/content/SharedPreferences;->edit()Landroid/content/SharedPreferences$Editor;
+
+    move-result-object v0
+
+    const-string v1, "chat_hidden"
+
+    invoke-interface {v0, v1, p1}, Landroid/content/SharedPreferences$Editor;->putBoolean(Ljava/lang/String;Z)Landroid/content/SharedPreferences$Editor;
+
+    move-result-object v0
+
+    invoke-interface {v0}, Landroid/content/SharedPreferences$Editor;->apply()V
+
     # Le champ est écrit AVANT de choisir la disposition : les deux chemins
     # lisent l'état pour se garder eux-mêmes.
     if-eqz p1, :chat_apply_stacked
@@ -285,6 +412,68 @@ CHAT_METHODS = r"""
     :chat_apply_stacked
     invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V
 
+    return-void
+.end method
+
+.method private twouichChatRestore()V
+    .locals 3
+
+    # État du chat relu au démarrage du lecteur : le choix de l'utilisateur
+    # survit à la fermeture de l'application. Une seule lecture par instance —
+    # ensuite le champ est la seule source de vérité, écrit par
+    # twouichChatApply (et la préférence n'est écrite qu'au même endroit).
+    # IGET sur un champ d'instance (cf. twouichChatTraces pour la leçon).
+    iget-boolean v0, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatRestored:Z
+
+    # if-nez : on saute quand la relecture a DÉJÀ eu lieu (v0 = 1). Écrit
+    # if-eqz le 21/09, le garde sautait sur un processus neuf (v0 = 0) et la
+    # méthode sortait aussitôt : la préférence n'était jamais lue, sans le
+    # moindre journal — le chat replié se rouvrait à chaque lancement. Sonde
+    # posée en tête de la méthode pour trancher ("restauration : entrée"
+    # journalisée, trace d'état absente).
+    if-nez v0, :restore_done
+
+    const/4 v0, 0x1
+
+    iput-boolean v0, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatRestored:Z
+
+    const-string v0, "twouich"
+
+    const/4 v1, 0x0
+
+    invoke-virtual {p0, v0, v1}, Landroid/content/Context;->getSharedPreferences(Ljava/lang/String;I)Landroid/content/SharedPreferences;
+
+    move-result-object v0
+
+    const-string v1, "chat_hidden"
+
+    const/4 v2, 0x0
+
+    invoke-interface {v0, v1, v2}, Landroid/content/SharedPreferences;->getBoolean(Ljava/lang/String;Z)Z
+
+    move-result v1
+
+    iput-boolean v1, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatHidden:Z
+
+    # Trace distincte de celle du toggle : « état relu » n'est pas « tap ».
+    if-eqz v1, :restore_shown
+
+    const-string v2, "chat restaure masque"
+
+    goto :restore_log
+
+    :restore_shown
+    const-string v2, "chat restaure affiche"
+
+    :restore_log
+    const-string v0, "Twouich"
+
+    invoke-static {v0, v2}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I
+
+    # La disposition suit l'état relu, par le même chemin que le toggle.
+    invoke-direct {p0, v1}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatApply(Z)V
+
+    :restore_done
     return-void
 .end method
 
@@ -312,8 +501,11 @@ CHAT_METHODS = r"""
 """
 
 # Méthode exacte qui prouve la présence des greffons chat — jamais un nom nu,
-# les commentaires des méthodes citent leurs voisines (piège du 21/09).
-CHAT_REPAIR_ANCHOR = ".method private twouichChatCollapse()V"
+# les commentaires des méthodes citent leurs voisines (piège du 21/09). C'est
+# aussi le MARQUEUR DE VERSION du câblage : elle doit rester la plus récente des
+# méthodes chat, pour qu'un arbre écrit par une version antérieure soit nettoyé
+# puis reposé (l'état persisté ajouté le 21/09 a coûté ce changement).
+CHAT_REPAIR_ANCHOR = ".method private twouichChatRestore()V"
 
 GRAFT_DIR = "com/twouich/adblock"
 
@@ -953,6 +1145,15 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
     player_methods = player_methods.replace(PHONE_CHAT_GATE_ANCHOR, PHONE_CHAT_GATE, 1)
     if ":stacked_chat_shown" not in player_methods:
         fail("garde du chat replié non posé dans le gabarit")
+    # Le chat s'arrête au-dessus de la saisie, jamais au bas du parent : la
+    # géométrie du gabarit est réécrite ici (même idiome que PHONE_GEO_TAIL).
+    if PHONE_CHAT_BELOW_OLD not in player_methods:
+        fail("géométrie du chat introuvable dans le gabarit de twouichPhoneStackedLayout")
+    player_methods = player_methods.replace(PHONE_CHAT_BELOW_OLD, PHONE_CHAT_BELOW_NEW, 1)
+    # Relecture de l'état au démarrage, avant la première disposition.
+    if PHONE_CHAT_RESTORE_ANCHOR not in player_methods:
+        fail("rappel de focus introuvable dans le gabarit — état du chat non relu au démarrage")
+    player_methods = player_methods.replace(PHONE_CHAT_RESTORE_ANCHOR, PHONE_CHAT_RESTORE_CALL, 1)
         # Picture-in-picture (API 26) : bouton dans le lecteur téléphone, fenêtre
     # 16:9, et disparition du chat pendant que la vidéo est en incrustation.
     # Les trois overrides de callback du framework sont PUBLICS : Activity
@@ -1199,6 +1400,32 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
         player_fixed = player_fixed.replace(
             "    if-nez v1, :stacked_chat_shown\n",
             "    if-eqz v1, :stacked_chat_shown\n", 1)
+    # Chat étiré sous la barre de saisie (arbre de travail écrit avant le 21/09), et
+    # l'état intermédiaire qui bornait le chat par la règle 2 — cycle de dépendances,
+    # plantage à la mesure. Les deux sont ramenés à la marge basse.
+    for chat_old in (PHONE_CHAT_BELOW_OLD, PHONE_CHAT_ABOVE_OLD):
+        if chat_old in player_fixed:
+            player_fixed = player_fixed.replace(chat_old, PHONE_CHAT_BELOW_NEW, 1)
+    # Relecture de l'état au démarrage : un arbre patché avant le 21/09 appelle
+    # l'empilement depuis le rappel de focus sans jamais relire la préférence.
+    if PHONE_CHAT_RESTORE_ANCHOR in player_fixed:
+        player_fixed = player_fixed.replace(PHONE_CHAT_RESTORE_ANCHOR, PHONE_CHAT_RESTORE_CALL, 1)
+    # Point d'entrée RÉEL de la relecture : onResume. Posé ici (et pas dans le
+    # gabarit) parce que onResume appartient au fichier d'origine, donc présent
+    # à l'identique sur un arbre vierge et sur un arbre déjà patché.
+    # Idempotence : le test porte sur le texte AVEC l'appel — l'ancre, elle,
+    # reste présente après l'insertion, donc un test sur l'ancre seule serait
+    # toujours vrai et empilerait les appels à chaque passage.
+    if PHONE_CHAT_RESUME_CALL not in player_fixed:
+        if player_fixed.count(PHONE_CHAT_RESUME_ANCHOR) != 1:
+            fail("onResume introuvable (ou ambigu) dans PlayerActivity "
+                 "— état du chat impossible à relire au démarrage")
+        player_fixed = player_fixed.replace(PHONE_CHAT_RESUME_ANCHOR, PHONE_CHAT_RESUME_CALL, 1)
+    # Polarité du garde de relecture : l'arbre de travail du 21/09 porte
+    # `if-eqz` (le corps sortait aussitôt) — ramené à `if-nez`.
+    if PHONE_CHAT_RESTORE_GUARD_OLD in player_fixed:
+        player_fixed = player_fixed.replace(
+            PHONE_CHAT_RESTORE_GUARD_OLD, PHONE_CHAT_RESTORE_GUARD_NEW, 1)
     if PHONE_PIP_VIEW_OLD in player_fixed:
         player_fixed = player_fixed.replace(
             PHONE_PIP_VIEW_OLD, PHONE_PIP_VIEW_NEW, 1,
@@ -1230,7 +1457,8 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
     # dans la branche « arbre vierge », et un arbre déjà patché par la version
     # sans toggle se retrouvait avec 2 méthodes et 0 champ.)
     fields_block = ("\n\n.field private twouichPipActive:Z"
-                    "\n.field private twouichChatHidden:Z")
+                    "\n.field private twouichChatHidden:Z"
+                    "\n.field private twouichChatRestored:Z")
     if ".field private twouichPipActive:Z" not in player_fixed:
         player_fixed = player_fixed.replace(
             ".super Landroid/app/Activity;",
@@ -1240,7 +1468,16 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
     if ".field private twouichChatHidden:Z" not in player_fixed:
         player_fixed = player_fixed.replace(
             ".field private twouichPipActive:Z",
-            ".field private twouichPipActive:Z\n.field private twouichChatHidden:Z",
+            ".field private twouichPipActive:Z\n.field private twouichChatHidden:Z\n.field private twouichChatRestored:Z",
+            1,
+        )
+    # Arbre déjà patché par la version qui n'avait que le champ d'état : le champ
+    # de la relecture lui manque, et les méthodes qui le lisent rejetteraient la
+    # classe entière (mieux vaut le poser que le découvrir à l'exécution).
+    if ".field private twouichChatRestored:Z" not in player_fixed:
+        player_fixed = player_fixed.replace(
+            ".field private twouichChatHidden:Z",
+            ".field private twouichChatHidden:Z\n.field private twouichChatRestored:Z",
             1,
         )
     # Toggle du chat : un arbre déjà patché par la version précédente ne
@@ -1257,6 +1494,7 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
     chat_current = CHAT_REPAIR_ANCHOR in player_text
     if not chat_current:
         for sig in (
+            ".method private twouichChatRestore()V",
             ".method private twouichChatTraces()Ljava/lang/String;",
             ".method private twouichChatCollapse()V",
             ".method private twouichChatApply(Z)V",
@@ -1309,6 +1547,14 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
         log("smartphone : correction des paramètres du lecteur empilé")
     else:
         log("déjà appliqué : lecteur empilé smartphone")
+
+    # Empreinte des greffes écrites dans ce lecteur (cf. STAMP_SUFFIX) : le texte
+    # des gabarits, jamais le fichier — réparer un arbre ancien ne la change pas,
+    # modifier un gabarit si.
+    global GREFFE_FINGERPRINT
+    GREFFE_FINGERPRINT = hashlib.sha256(
+        "\n".join((CHAT_METHODS, player_methods, pip_methods)).encode("utf-8")
+    ).hexdigest()
 
     values = decoded / "res/values/dimens.xml"
     if not values.is_file():
@@ -2132,8 +2378,8 @@ def main() -> int:
     here = pathlib.Path(__file__).resolve().parent
     parser = argparse.ArgumentParser()
     parser.add_argument("--decoded", required=True, type=pathlib.Path)
-    parser.add_argument("--version-code", type=int, default=156)
-    parser.add_argument("--version-name", default="v1.0.9")
+    parser.add_argument("--version-code", type=int, default=157)
+    parser.add_argument("--version-name", default="v1.0.10")
     parser.add_argument("--apk-name", default=DEFAULT_APK_NAME)
     parser.add_argument("--release-date", default=None,
                         help="date affichée dans la page Nouveautés (AAA.MM.JJ). "
@@ -2232,6 +2478,18 @@ def main() -> int:
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
          ":stacked_chat_shown"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".method private twouichChatRestore()V"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".field private twouichChatRestored:Z"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         "chat restaure masque"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         CHAT_RESTORE_CALL_LINE),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         '"chat_hidden"'),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         "SharedPreferences$Editor;->putBoolean"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
          "if-eqz v1, :stacked_chat_shown"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "onPictureInPictureModeChanged"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
@@ -2271,6 +2529,32 @@ def main() -> int:
     if ".method public onWindowFocusChanged(Z)V" not in player_src:
         fail("contrôle échoué : onWindowFocusChanged public absent de PlayerActivity")
     checks += 2
+    # L'état du chat est relu au DÉMARRAGE du lecteur : le point d'entrée est
+    # onResume, pas le rappel de focus (jamais dispatché sur BlueStacks/API 33,
+    # mesuré le 21/09). Le contrôle lit le CORPS de onResume, pas le fichier.
+    resume_head = player_src.find(".method protected onResume()V")
+    if resume_head < 0:
+        fail("contrôle échoué : onResume absent de PlayerActivity — état du chat non relu")
+    resume_body = player_src[resume_head:player_src.find(".end method", resume_head)]
+    if CHAT_RESTORE_CALL_LINE not in resume_body:
+        fail("contrôle échoué : onResume ne relit pas l'état du chat au démarrage")
+    checks += 1
+    # Polarité du garde de relecture : la faute qui a coûté une session (le
+    # corps ne s'exécutait jamais, sans le moindre journal — 21/09).
+    if PHONE_CHAT_RESTORE_GUARD_NEW not in player_src:
+        fail("contrôle échoué : garde de la relecture du chat absent — l'état ne serait jamais relu")
+    if PHONE_CHAT_RESTORE_GUARD_OLD in player_src:
+        fail("contrôle échoué : garde de la relecture du chat à polarité inversée (if-eqz)")
+    checks += 1
+    # Contrat de la persistance : le fichier et la clé sont écrits par
+    # twouichChatApply et relus par twouichChatRestore — deux littéraux
+    # divergents donneraient un état qui ne survit à rien, sans la moindre
+    # erreur à l'exécution. Les deux littéraux doivent donc être présents
+    # au moins deux fois (une écriture, une lecture).
+    for literal in ('"chat_hidden"', '"twouich"'):
+        if player_src.count(literal) < 2:
+            fail(f"contrôle échoué : contrat de la préférence du chat incomplet ({literal})")
+    checks += 1
     # Garde-fou : la vidéo 16:9 est calculée depuis la largeur ; sans plafond,
     # le chat reçoit une hauteur négative sur un écran plus large que haut
     # (mesuré le 20/09 : chat à 0 px, disposition inutilisable en paysage).
@@ -2402,6 +2686,20 @@ def main() -> int:
     if logos:
         fail("le rouge de S0und subsiste sur : " + ", ".join(logos))
     checks += 1
+    # ── Empreinte des greffes (cf. STAMP_SUFFIX) ──────────────────────────────
+    # Écrite seulement après des contrôles verts : un arbre estampillé est un
+    # arbre dont les greffes sont celles de ce patch.py.
+    stamp_now = GREFFE_FINGERPRINT
+    if not stamp_now:
+        fail("empreinte des greffes absente : le lecteur n'a pas été greffé par ce patch")
+    stamp_file = decoded.with_name(decoded.name + STAMP_SUFFIX)
+    if stamp_file.is_file():
+        stamp_seen = stamp_file.read_text(encoding="utf-8").strip()
+        if stamp_seen and stamp_seen != stamp_now:
+            fail("arbre décodé périmé : les greffes du lecteur ont changé depuis son "
+                 "patchage, et un arbre réutilisé garde l'ancien texte "
+                 "(désassembler à neuf : rm -rf " + str(decoded) + ")")
+    stamp_file.write_text(stamp_now + "\n", encoding="utf-8")
     log(f"{checks} contrôles OK ({assets} assets de marque + 1 balayage du rouge)")
     print("\n✅ patch.py terminé")
     return 0

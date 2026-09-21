@@ -1232,8 +1232,52 @@ téléphone qui ne s'appliquait plus du tout. La cause était un garde à polari
 
 ### 8.9 Recette d'acceptation du chat repliable (téléphone ou émulateur < 600 dp)
 
-Cinq vérifications, chacune avec sa preuve dans l'arbre des vues (§ 8.8) : l'état empilé,
-le repli, le dépli, la reprise d'activité et l'incrustation.
+Six vérifications, chacune avec sa preuve dans l'arbre des vues (§ 8.8) : l'état empilé,
+le repli, le dépli, la reprise d'activité, la **mémoire du repli** à la fermeture de
+l'application (5) et celle de l'état affiché (6) — plus l'incrustation, qui demande un
+appareil API ≥ 26.
+
+**En une commande** — `patch/test-chat-toggle.sh` enchaîne les six points seul :
+installation optionnelle, départ à froid, taps relevés dans l'arbre (jamais de coordonnées en
+dur, la recette marche donc sur n'importe quel appareil), assertion sur les bornes, et sortie
+en **1 au premier écart** avec les valeurs mesurées.
+
+```bash
+ADB=/chemin/adb SERIAL=192.168.1.51:5555 bash patch/test-chat-toggle.sh
+ADB=… SERIAL=… bash patch/test-chat-toggle.sh --apk dist/Twouich_v1.0.9.apk --channel ddg
+```
+
+Il se rejoue **hors appareil** sur les arbres capturés le 21/09/2026
+(`patch/tests/fixtures/chat-toggle/`, un fichier par état) : la logique d'assertion est ainsi
+vérifiable sans téléphone.
+
+```bash
+TREE_DIR=patch/tests/fixtures/chat-toggle bash patch/test-chat-toggle.sh   # → exit 0
+```
+
+Les points 5 et 6 sont ceux de la **mémoire de l'état** (21/09/2026) : le chat est replié (5)
+puis déplié (6), l'application est **tuée** (`am force-stop`) entre les deux, et l'état doit
+revenir au lancement suivant — avec un **pid neuf** (sinon c'est la reprise d'activité qui est
+mesurée, pas la préférence) et la trace `chat restaure masque` / `chat restaure affiche`. Le
+script rend aussi l'état de départ déterministe : si la préférence restitue un chat replié au
+départ à froid, il le déplie avant de mesurer le point 1.
+
+Et la preuve qu'il mord vraiment : un arbre faux **doit** faire sortir en 1. Rejoué le
+21/09/2026 avec l'arbre d'avant le correctif de géométrie (`work/etat1.txt`, chat étiré
+jusqu'au bas de l'écran) :
+
+```
+verdict : ÉCART — [1. empilé] le chat ne s'arrête pas au-dessus de la saisie
+          (bas du chat 1280, haut de la saisie 1168)
+```
+
+et avec le bouton d'incrustation déplacé sur le bouton du chat :
+
+```
+verdict : ÉCART — [1. empilé] le bouton du chat (552,12-624,84) recouvre le bouton d'incrustation (…)
+```
+
+La séquence à la main, quand on veut comprendre plutôt que valider :
 
 ```bash
 S=127.0.0.1:5555                       # ou l'IP du téléphone
@@ -1247,24 +1291,86 @@ sleep 3  ; "$ADB" -s $S shell "dumpsys activity top" > e3.txt      # 3. déplié
 "$ADB" -s $S shell "input keyevent 3" ; sleep 3
 "$ADB" -s $S shell "am start -a android.intent.action.VIEW -d 's0undtv://stream/ddg'"
 sleep 8  ; "$ADB" -s $S shell "dumpsys activity top" > e4.txt      # 4. reprise
+# 5. mémoire du repli : fermer l'application, la rouvrir, l'état doit revenir
+"$ADB" -s $S shell "am force-stop com.s0und.s0undtv" ; sleep 2
+"$ADB" -s $S shell "am start -a android.intent.action.VIEW -d 's0undtv://stream/ddg'"
+sleep 12 ; "$ADB" -s $S shell "dumpsys activity top" > e5.txt      # 5. replié restitué
+"$ADB" -s $S shell "input tap 588 48" ; sleep 3
+"$ADB" -s $S shell "am force-stop com.s0und.s0undtv" ; sleep 2
+"$ADB" -s $S shell "am start -a android.intent.action.VIEW -d 's0undtv://stream/ddg'"
+sleep 12 ; "$ADB" -s $S shell "dumpsys activity top" > e6.txt      # 6. affiché restitué
+"$ADB" -s $S shell "logcat -d -s Twouich:I" | grep -E "chat restaure"
 ```
 
 Mesures obtenues sur l'émulateur (720×1280, 240 dpi = 480 dp), le 21/09/2026 :
 
 | Étape | Vidéo | Chat | Saisie | Bouton chat |
 |---|---|---|---|---|
-| 1. empilé | `[0,0][720,405]` | `0,405-720,1280` **V** | `0,1168-720,1280` **V** | `552,12-624,84` **V** |
-| 2. replié | `[0,0][720,1280]` | `0,405-720,1280` **G** | `0,1168-720,1280` **G** | `552,12-624,84` **V** |
-| 3. déplié | `[0,0][720,405]` | `0,405-720,1280` **V** | `0,1168-720,1280` **V** | `552,12-624,84` **V** |
+| 1. empilé | `[0,0][720,405]` | `0,405-720,1168` **V** | `0,1168-720,1280` **V** | `552,12-624,84` **V** |
+| 2. replié | `[0,0][720,1280]` | `0,405-720,1168` **G** | `0,1168-720,1280` **G** | `552,12-624,84` **V** |
+| 3. déplié | `[0,0][720,405]` | `0,405-720,1168` **V** | `0,1168-720,1280` **V** | `552,12-624,84` **V** |
 | 4. reprise (replié au départ) | `[0,0][720,1280]` | **G** | **G** | `552,12-624,84` **V** |
+| 5. persisté replié (fermé puis relancé) | `[0,0][720,1280]` | **G** | **G** | `552,12-624,84` **V** |
+| 6. persisté affiché (fermé puis relancé) | `[0,0][720,405]` | `0,405-720,1168` **V** | `0,1168-720,1280` **V** | `552,12-624,84` **V** |
 
-Trois invariants à vérifier sur chaque ligne : **le bouton ne bouge jamais** (mêmes bornes
+Cinq invariants à vérifier sur chaque ligne : **le bouton ne bouge jamais** (mêmes bornes
 dans les quatre états — il doit rester hors du rectangle `636,12-708,84` du bouton
 d'incrustation), **la vidéo prend l'écran au repli** (`720,1280`, pas un 16:9 qui laisse un
-tiers noir), et **la reprise ne ressuscite pas le chat** replié.
+tiers noir), **la reprise ne ressuscite pas le chat** replié, et **le chat s'arrête au-dessus
+de la barre de saisie** : le bas du chat (`1168`) doit être le haut de la saisie, jamais le
+bas de l'écran — sinon la barre cache les derniers messages (défaut corrigé le 21/09/2026,
+il était ancré au bas du parent et s'étirait sous la saisie), et **la mémoire de l'état** :
+l'état (replié ou affiché) survit à la fermeture de l'application, un pid neuf le prouve.
+
+**Piège vérifié à ses dépens** : ne pas borner le chat par la règle 2 (`AU-DESSUS de la
+saisie`). La saisie porte déjà `addRule(2, chat)` — elle est au-dessus du chat — donc la
+règle inverse ferme le cycle et `RelativeLayout` refuse de mesurer :
+`IllegalStateException: Circular dependencies cannot exist in RelativeLayout`, plantage de
+`PlayerActivity` à la première passe de disposition. La réserve se fait par une **marge
+basse** sur le chat, prise dans le même registre que la hauteur de la saisie (`0x70`), pour
+que les deux valeurs ne puissent pas diverger. Le plantage n'est visible ni dans
+`uiautomator dump` ni dans les traces du filtre : seule la mesure des bornes (§ 8.8) ou la
+ligne `FATAL EXCEPTION` du `logcat` le montrent.
 
 Cinquième vérification, l'incrustation : `input tap 672 48` (bouton PiP) puis
 `dumpsys activity activities | grep mode=pinned` — la fenêtre doit être en 16:9
 (`mBounds=Rect(403, 1091 - 696, 1256)` sur cet écran, soit 293×165) et `logcat` doit porter
 `picture-in-picture : video plein cadre, chat et saisie masques`, puis, au retour,
 `picture-in-picture : disposition empilee restauree`.
+
+#### La mémoire de l'état du chat (21/09/2026) — un garde inversé, et un arbre réutilisé
+
+Le repli/affichage du chat survit désormais à la fermeture de l'application. Le contrat :
+le couple **fichier `twouich` / clé `chat_hidden`** (écrit par `twouichChatApply`, relu par
+`twouichChatRestore`), relu **une fois par instance** — le champ `twouichChatRestored` garde
+l'entrée, donc un retour depuis le fond ne relit pas la préférence et ne réécrit rien.
+
+Deux pièges ont été payés pour arriver là :
+
+1. **Le rappel de focus n'est pas un point d'entrée de démarrage fiable.** La relecture y
+   avait été accrochée (`onWindowFocusChanged`) — sur BlueStacks/API 33 elle ne s'exécutait
+   jamais : la préférence n'était donc relue **nulle part** et le chat replié se rouvrait à
+   chaque lancement. La relecture est maintenant posée sur **`onResume`** (journalisé par
+   l'app elle-même, et qui précède la première image), le rappel de focus restant un second
+   point d'entrée inoffensif. La géométrie empilée vient des `DisplayMetrics`, jamais d'une
+   vue mesurée : l'appeler avant la première passe de disposition est sûr.
+2. **Le garde de relecture était inversé, et silencieux.** Le corps de `twouichChatRestore`
+   commençait par `if-eqz v0, :restore_done` — « si rien n'a encore été relu, sors tout de
+   suite » : sur un processus neuf le champ est faux, la méthode sortait à la première
+   instruction, **sans journal**. C'est une sonde qui a tranché : une trace inconditionnelle
+   placée en tête de la méthode a montré `restauration du chat : entree` à l'écran sans la
+   trace d'état qui suit — la sortie était donc le garde, pas l'appel. Corrigé en `if-nez`,
+   verrouillé par un contrôle de `patch.py` (polarité + présence de l'appel dans le corps de
+   `onResume`), et réparé sur les arbres déjà patchés. **Règle à retenir** : une méthode à
+   garde silencieux se dépanne par une sonde qui journalise **avant** le garde — les bornes
+   de vues, elles, ne disent pas si le code est passé.
+
+Et un piège d'outillage, qui a coûté le plus de temps : **`patch/build.sh` réutilise
+`work/decoded`** (seul un bump de version le fait redésassembler). Un changement de *gabarit*
+(une méthode ajoutée à `CHAT_METHODS`, une garde corrigée) ne s'applique donc pas à un arbre
+déjà patché : le build repart de l'ancien texte et **livre l'ancien comportement sans un mot**.
+Deux builds consécutifs ont ainsi embarqué un lecteur sans sonde avant qu'on pense à
+supprimer l'arbre. `patch.py` estampille désormais l'arbre à côté (`work/decoded.twouich-greffes`,
+jamais dedans : apktool empaquette les fichiers inconnus dans l'APK) avec l'empreinte des
+gabarits de greffe, et **échoue bruyamment** si elle ne correspond plus. La règle reste :
+après avoir touché `patch.py`, `rm -rf work/decoded` avant de builder.
