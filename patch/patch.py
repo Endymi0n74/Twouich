@@ -27,7 +27,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 REPO = "Endymi0n74/Twouich"
 UPSTREAM = "S0und/S0undTV"
-DEFAULT_APK_NAME = "Twouich_v1.0.10.apk"
+DEFAULT_APK_NAME = "Twouich_v1.0.11.apk"
 
 # ── Étape 1 : greffon anti-pub ────────────────────────────────────────────
 # Libellés de l'UX smartphone. Le champ de saisie reprend celui de l'interface
@@ -841,14 +841,21 @@ def disable_remote_config_calls(decoded: pathlib.Path) -> None:
         if not path.is_file():
             fail(f"cible Remote Config absente : {path}")
         text = path.read_text(encoding="utf-8")
+        # Le test d'idempotence porte sur le CORPS déjà remplacé, pas sur le motif :
+        # le motif (méthode … .end method) matche encore après remplacement, donc
+        # re.subn renvoyait toujours 1 et l'arbre déjà patché était réécrit à chaque
+        # passage — avec les fins de ligne de la plateforme (CRLF sous Windows), ce
+        # qui faisait diverger les smali entre le premier et le second passage
+        # (constaté le 21/09 en vérifiant l'idempotence du patch).
+        noop = replacement.format(name=name)
+        if noop in text:
+            log(f"déjà appliqué : {path.name}.{name}() sans Remote Config")
+            continue
         pattern = rf"(?ms)^\.method private {re.escape(name)}\(\){ret}.*?^\.end method"
-        new, count = re.subn(pattern, replacement.format(name=name), text, count=1)
+        new, count = re.subn(pattern, noop, text, count=1)
         if count == 0:
-            if f".method private {name}(){ret}\n    .locals 0\n    return-void" in text:
-                log(f"déjà appliqué : {path.name}.{name}() sans Remote Config")
-                continue
             fail(f"méthode Remote Config introuvable : {path.name}.{name}()")
-        path.write_text(new, encoding="utf-8")
+        path.write_text(new, encoding="utf-8", newline="\n")
         log(f"désactivé : {path.name}.{name}() (Remote Config)")
 
 
@@ -1078,13 +1085,84 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
     if-eqz v5, :return_phone_layout
     if-eqz v6, :return_phone_layout
 
+    # Masquer le BottomBar (info stream) en mode telephone. v10 et v11 sont
+    # reecrits juste apres (16:9 puis hauteur de saisie) : les clobberer ici est
+    # sans effet. v1 et v2 portent les ids des vues et sont donc INTERDITS : les
+    # ecraser par une reference de vue casserait la verification Dalvik de toute
+    # la methode (VerifyError attrape sur le telephone le 21/09).
+    const-string v10, "BottomBar"
+    invoke-direct {p0, v10}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneId(Ljava/lang/String;)I
+    move-result v10
+    invoke-virtual {p0, v10}, Landroid/app/Activity;->findViewById(I)Landroid/view/View;
+    move-result-object v11
+    if-eqz v11, :skip_bottom_bar_hide
+    const/16 v10, 0x8
+    invoke-virtual {v11, v10}, Landroid/view/View;->setVisibility(I)V
+    :skip_bottom_bar_hide
+
     invoke-virtual {v0}, Landroid/content/res/Resources;->getDisplayMetrics()Landroid/util/DisplayMetrics;
     move-result-object v7
     iget v8, v7, Landroid/util/DisplayMetrics;->widthPixels:I
     iget v9, v7, Landroid/util/DisplayMetrics;->heightPixels:I
     mul-int/lit8 v10, v8, 0x9
     div-int/lit8 v10, v10, 0x10
-    # Le 16:9 est calculé depuis la LARGEUR : sur un écran plus large que haut il
+
+    # Orientation : paysage (largeur > hauteur) -> disposition cote a cote
+    if-le v8, v9, :portrait_layout
+
+    # -- Paysage : video a gauche (toute la hauteur), chat et saisie a droite --
+    # v11 = hauteur de la saisie (112 px), v0 = largeur video, v1 = largeur du
+    # chat, v10 = hauteur du chat. La video vise la largeur 16:9 de la HAUTEUR
+    # d'ecran : elle occupe alors tout le bord gauche jusqu'en bas, sans bande
+    # noire (mesure du 21/09 : video 16:9 centree, bandes noires de chaque
+    # cote). Plafond de surete a 85 % de la largeur seulement : sur un ecran
+    # 19,5:9 la largeur 16:9 de la hauteur vaut 80 % et passe donc telle quelle
+    # (aucune bande noire) ; le garde-fou ne mord que sur des ratios extremes,
+    # ou mieux vaut une bande qu'un chat de quelques pixels.
+    const/16 v11, 0x70
+    mul-int/lit8 v0, v9, 0x10
+    div-int/lit8 v0, v0, 0x9
+    mul-int/lit8 v10, v8, 0x55
+    div-int/lit8 v10, v10, 0x64
+    if-le v0, v10, :twouich_phone_landscape_video
+    move v0, v10
+    :twouich_phone_landscape_video
+    sub-int v1, v8, v0
+    sub-int v10, v9, v11
+
+    # Video : largeur v0, hauteur plein cadre, collee au bord gauche
+    new-instance v7, Landroid/widget/RelativeLayout$LayoutParams;
+    const/4 v2, -0x1
+    invoke-direct {v7, v0, v2}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V
+    const/16 v2, 0x9
+    invoke-virtual {v7, v2}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(I)V
+    invoke-virtual {v4, v7}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V
+
+    # Chat : largeur v1, hauteur v10, colle au bord droit
+    new-instance v7, Landroid/widget/RelativeLayout$LayoutParams;
+    invoke-direct {v7, v1, v10}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V
+    const/16 v2, 0xb
+    invoke-virtual {v7, v2}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(I)V
+    const/16 v2, 0xa
+    invoke-virtual {v7, v2}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(I)V
+    invoke-virtual {v5, v7}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V
+    const/4 v2, 0x0
+    invoke-virtual {v5, v2}, Landroid/view/View;->setVisibility(I)V
+
+    # Saisie : largeur v1, hauteur v11, collee en bas a droite
+    new-instance v7, Landroid/widget/RelativeLayout$LayoutParams;
+    invoke-direct {v7, v1, v11}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V
+    const/16 v2, 0xb
+    invoke-virtual {v7, v2}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(I)V
+    const/16 v2, 0xc
+    invoke-virtual {v7, v2}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(I)V
+    invoke-virtual {v6, v7}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V
+    const/4 v2, 0x0
+    invoke-virtual {v6, v2}, Landroid/view/View;->setVisibility(I)V
+    goto :return_phone_layout
+
+    :portrait_layout
+    # Le 16:9 est calcule depuis la LARGEUR : sur un écran plus large que haut il
     # dépasse la hauteur et le chat reçoit une hauteur négative. On plafonne donc
     # la vidéo, puis on refuse l'empilement quand il ne reste pas un tiers de la
     # hauteur pour le chat : en paysage, le chat en surimpression du layout
@@ -2379,7 +2457,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--decoded", required=True, type=pathlib.Path)
     parser.add_argument("--version-code", type=int, default=157)
-    parser.add_argument("--version-name", default="v1.0.10")
+    parser.add_argument("--version-name", default="v1.0.11")
     parser.add_argument("--apk-name", default=DEFAULT_APK_NAME)
     parser.add_argument("--release-date", default=None,
                         help="date affichée dans la page Nouveautés (AAA.MM.JJ). "

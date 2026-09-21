@@ -1374,3 +1374,46 @@ supprimer l'arbre. `patch.py` estampille désormais l'arbre à côté (`work/dec
 jamais dedans : apktool empaquette les fichiers inconnus dans l'APK) avec l'empreinte des
 gabarits de greffe, et **échoue bruyamment** si elle ne correspond plus. La règle reste :
 après avoir touché `patch.py`, `rm -rf work/decoded` avant de builder.
+### 8.10 Mode téléphone : portrait empilé, paysage côte à côte (21/09)
+
+Deux défauts d'UI ont été vus sur le téléphone (captures du 21/09) : en portrait, une
+**barre d'info stream** occupait le bas de l'écran (avatar, pseudo, titre, spectateurs,
+qualité) ; en paysage, le lecteur restait dans la disposition TV — vidéo 16:9 **centrée**
+avec des bandes noires de chaque côté et le chat en surimpression à gauche.
+
+Ce que `twouichPhoneStackedLayout` fait désormais (téléphone seulement — la garde
+`smallestScreenWidthDp < 600` laisse les TV intactes, `layout-sw600dp/` inchangé) :
+
+1. **BottomBar masquée** : la vue `@id/BottomBar` (c'est elle qui porte toute l'info
+   stream) passe en `GONE`.
+2. **Portrait** (hauteur ≥ largeur) : vidéo 16:9 pleine largeur en haut, chat dessous sur
+   toute la largeur, saisie collée en bas.
+3. **Paysage** (largeur > hauteur) : vidéo à **gauche** sur toute la hauteur, **sans bande
+   noire** (largeur visée = `hauteur × 16/9`, plafond de sûreté à 85 % de la largeur),
+   chat à **droite** du haut jusqu'au-dessus de la saisie, saisie en bas à droite.
+
+Bornes relevées (Xiaomi 1220×2712 @520 dpi, `dumpsys activity top`) :
+
+| État | Vidéo | Chat | Saisie | BottomBar |
+|---|---|---|---|---|
+| portrait | `0,0-1220,686` | `0,686-1220,2600` | `0,2600-1220,2712` | **GONE** |
+| paysage (`wm size 2712x1220`) | `0,0-2168,1220` | `2168,0-2712,1108` | `2168,1108-2712,1220` | **GONE** |
+| portrait, chat replié | `0,0-1220,2712` | GONE | GONE | **GONE** |
+
+2168/1220 = 1,777 : la vidéo est exactement en 16:9 sur toute la hauteur — aucune bande.
+
+**Deux pièges payés le 21/09**, tous deux invisibles hors appareil :
+
+- **VerifyError par écrasement de registre.** Le masquage du BottomBar stockait la vue
+  dans `v2`, qui portait déjà l'**id du chat** (entier) réutilisé plus bas par la
+  disposition portrait. La vérification Dalvik a rejeté **toute la classe**
+  (`java.lang.VerifyError: [0xF4] register v2 has type Reference: android.view.View but
+  expected Integer`) et l'ouverture d'un direct plantait l'application. Règle : dans
+  `twouichPhoneStackedLayout`, `v1..v6` portent des **identifiants et des vues** ; n'écrire
+  que dans `v0` et `v7..v11`, réaffectés plus loin.
+- **Rotation logicielle ignorée.** `settings put system user_rotation 1` et
+  `cmd window user-rotation lock 1` ne font **pas** tourner l'affichage sur ce MIUI
+  (`dumpsys display` reste à `mCurrentOrientation=0`). Pour mesurer le paysage sans
+  retourner l'appareil : `wm size 2712x1220` (puis `wm size reset; wm density reset`),
+  ce qui suffit à faire basculer la branche `largeur > hauteur`.
+

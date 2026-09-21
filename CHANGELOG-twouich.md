@@ -1,5 +1,11 @@
 # Journal des modifications — Twouich
 
+## v1.0.11 — 21 septembre 2026
+
+- **En paysage, le direct occupe tout le bord gauche jusqu'en bas** : la vidéo est calée en 16:9 plein écran (plus aucune bande noire) et le chat tient une colonne à droite, avec la saisie sous lui — au lieu de l'image centrée avec le chat en surimpression.
+- **La barre d'informations du direct disparaît sur téléphone** : avatar, pseudo, titre, spectateurs et qualité ne prennent plus le bas de l'écran en double du chat ; en portrait la vidéo garde la pleine largeur et le chat la hauteur restante.
+- **Rien ne change sur TV** : les deux corrections sont réservées aux écrans de moins de 600 dp, la disposition télévision et son panneau restent tels quels.
+
 ## v1.0.10 — 21 septembre 2026
 
 - **Le chat du lecteur garde l'état choisi sur téléphone** : replié ou affiché, le choix survit à la fermeture de l'application et est relu au démarrage du lecteur — un chat replié ne se rouvre plus tout seul au lancement suivant (le choix vit dans les préférences de l'app, une seule relecture par instance).
