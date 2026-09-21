@@ -93,6 +93,13 @@ bash patch/build.sh          # APK upstream → apktool d → patch.py → apkto
   recapturer dégraderait des images 1920×1080 pour une mise en page qui n'a pas changé.
 - Les **identifiants de signature ne sont pas versionnés** : `patch/build.sh` lit `keys/keystore.properties` (ignoré par git) ou `KEY_PASS`, et s'arrête avant de construire s'il ne les trouve pas. Le dépôt est public : une clé dont le mot de passe circule permet à n'importe qui de signer un APK qu'Android acceptera comme une mise à jour.
 - La chaîne est **idempotente** : relancer ne casse rien.
+- **Aucun secret en clair dans le dépôt** : `python patch/check-secrets.py` refuse une clé d'API Google,
+  un identifiant ou une URL de base Firebase, un jeton GitHub/Slack/AWS/Stripe, un bloc PEM, et tout
+  littéral affecté à `api_key`, `client_secret`, `password`… Une valeur qui n'en est pas une se déclare
+  sur place (`secret-scan: ok <raison>`) : l'exception reste lisible dans le diff. Corollaire — quand un
+  test a besoin d'une valeur qui ressemble à un secret, il l'**assemble à l'exécution** (`FIREBASE_TRACE`
+  dans `test_apk.py`) : le scanner ne voit pas les fragments, c'est sa limite assumée, écrite dans son
+  en-tête et vérifiée par son test.
 - `patch/patch.py` **échoue bruyamment** si un motif upstream a changé. Ne « répare » jamais ce
   message en assouplissant le motif : c'est le signal qu'une nouvelle beta upstream demande
   d'adapter le patch.
@@ -114,7 +121,9 @@ python patch/tests/test_normalize_apk.py   # 29 vérifications : le normaliseur 
 bash   patch/tests/test_analyzer.sh        # 11 verdicts sur captures synthétiques
 bash   patch/tests/test_device_ui.sh       # 61 vérifications : décisions de device-ui.sh (double d'adb, hors appareil)
 python patch/tests/test_radar.py           # 10 vérifications : rejeu anti-fuite du radar (hors réseau)
+python patch/tests/test_check_secrets.py   # 32 vérifications : le garde-fou de secrets mord sur chaque règle (hors réseau)
 python patch/radar_ads.py                  # radar multi-chaînes + rejeu anti-fuite (méthode AUDIT.md § 4.4)
+python patch/check-secrets.py              # 10 règles : aucun secret en clair dans le dépôt (valeurs masquées)
 bash   patch/test-selftest.sh              # self-test embarqué, sur appareil (voir plus bas)
 bash   patch/test-live.sh                  # observation live longue : capture détachée + verdict (TEST-DEVICE.md § 2)
 bash   patch/check-release.sh              # chaîne update.json → tag → asset → octets servis
@@ -191,7 +200,8 @@ Les documents sont **en français**, comme le reste du projet.
 ## 7. Définition de « terminé »
 
 - [ ] `bash patch/build.sh` passe jusqu'à `signature verified [v1, v2, v3]` ;
-- [ ] les tests locaux passent (4 suites + `bash patch/check-release.sh` s'il y a une publication) ;
+- [ ] les tests locaux du § 5 passent (dont `python patch/check-secrets.py`), et
+      `bash patch/check-release.sh` s'il y a une publication ;
 - [ ] `python patch/sync-readme.py --check` passe (README et CHANGELOG synchronisés) ;
 - [ ] le self-test embarqué passe sur appareil (`bash patch/test-selftest.sh` → `SELFTEST n/n`) ;
 - [ ] si le chemin de lecture est touché : lecture réelle vérifiée sur appareil (flux qui tourne,

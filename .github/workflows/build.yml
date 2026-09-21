@@ -74,6 +74,15 @@ jobs:
           # restent des contrôles du mainteneur. La CI prouve la recette, pas
           # les visuels ni la signature.
 
+      - name: Aucun secret en clair dans le dépôt
+        shell: bash
+        run: |
+          # Le 21/09, GitHub a signalé une fuite (identifiants Firebase d'amont
+          # écrits en clair dans un fichier de test). Le garde-fou est ici pour
+          # que la correction ne dépende pas de la vigilance du prochain commit.
+          python patch/tests/test_check_secrets.py
+          python patch/check-secrets.py
+
       - name: Vérifier la synchronisation README/CHANGELOG
         shell: bash
         run: |
@@ -147,6 +156,14 @@ jobs:
           python patch/tests/test_sanitizer.py
           python patch/tests/test_smali_branches.py
           python patch/tests/test_update_check.py
+
+      - name: Aucun secret en clair dans le dépôt
+        shell: bash
+        run: |
+          # Un secret qui entre dans un tag part chez tout le monde : ce contrôle
+          # passe avant la signature, pas après.
+          python patch/tests/test_check_secrets.py
+          python patch/check-secrets.py
 
       - name: Restaurer le keystore depuis les secrets chiffrés
         shell: bash
