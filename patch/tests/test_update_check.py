@@ -16,17 +16,30 @@ comparaison lit la version installée via PackageManager, plus le plancher figé
 
     g()I  -> canal       : 0 = stable, 1 = beta (autre = silence)
     i()I  -> versionCode installé, -1 si la lecture échoue
-    b     -> AppRelease  : l'entrée candidate du canal courant
-    c     -> AppRelease  : l'entrée candidate de l'autre canal
+    b     -> AppRelease  : l'entrée `ReleaseType: 0` (stable), absente -> null
+    c     -> AppRelease  : l'entrée `ReleaseType: 1` (beta),   absente -> null
+
+    C'est `UpdateHelper.e(List)` qui remplit b et c : b porte l'entrée stable,
+    c l'entrée beta. Ce ne sont donc pas « le canal courant » et « l'autre
+    canal » — le canal ne choisit pas QUELLE entrée lire, il choisit l'ORDRE
+    dans lequel les regarder.
 
     canal stable : b == null -> silence
                    b.VersionCode > installée -> dialogue(b)
                    sinon                     -> silence   (c est IGNORÉE)
-    canal beta   : c != null && c > installée && c > b -> dialogue(c)
-                   sinon b != null && b > installée    -> dialogue(b)
-                   sinon                               -> silence
+    canal beta   : b == null OU c == null -> silence   (les DEUX sont exigées)
+                   c > installée ET c > b    -> dialogue(c)
+                   b > installée             -> dialogue(b)
+                   sinon                     -> silence
 
-Deux propriétés sont verrouillées ici :
+    Les deux préconditions du canal beta ont été réextraites du smali livré le
+    22/09/2026 (`apktool d` sur `dist/`) : la branche beta charge `b`, rend la
+    main si elle est nulle, charge `c`, rend la main si elle est nulle. Les deux
+    miroirs annonçaient un dialogue là où le bytecode se tait — et c'est
+    exactement la situation d'une publication stable seule face à une
+    installation restée en canal Beta (l'annonce ne la réveille pas).
+
+Trois propriétés sont verrouillées ici :
 
   1. la TABLE DE VÉRITÉ (miroir Python de la logique extraite) : publiée <
      installée ou publiée == installée -> AUCUN dialogue, quel que soit le
@@ -34,7 +47,12 @@ Deux propriétés sont verrouillées ici :
      version installée (-1) déclenche au contraire le dialogue (fail-loud) ;
   2. l'ARBRE DÉCODÉ (work/decoded/, quand il existe) : le patch v1.0.0 y est
      bien posé (i()I lit getPackageInfo/versionCode, le plancher 144 est
-     absent) et les branchements `if-le` qui portent le silence sont en place.
+     absent) et les branchements `if-le` qui portent le silence sont en place ;
+  3. les DEUX PRÉCONDITIONS DU CANAL BETA, dans l'arbre décodé : l'absence de
+     l'entrée stable comme celle de l'entrée beta doit fermer la branche (deux
+     tests distincts, sur `v0` puis sur `v2`). C'est le contrôle qui manquait
+     pour que les miroirs cessent de dériver du bytecode (« une entrée absente
+     qui ouvrait un dialogue que l'app n'ouvre pas »).
 
 Sans arbre décodé (le décodage n'est pas versionné), la section 1 reste
 exécutable : la table de vérité est la mémoire du comportement, l'arbre est sa
@@ -73,10 +91,14 @@ def picked(channel, installed, b_code, c_code):
         if b_code is None:
             return None
         return "b" if b_code > installed else None
-    # canal beta : l'autre canal gagne si strictement plus récent que tout
-    if c_code is not None and c_code > installed and (b_code is None or c_code > b_code):
+    # canal beta : les DEUX entrées doivent exister (b == null -> silence, puis
+    # c == null -> silence, dans cet ordre) ; ensuite la beta gagne si
+    # strictement plus récente que tout, sinon la stable.
+    if b_code is None or c_code is None:
+        return None
+    if c_code > installed and c_code > b_code:
         return "c"
-    if b_code is not None and b_code > installed:
+    if b_code > installed:
         return "b"
     return None
 
@@ -133,6 +155,24 @@ def main():
         picked(0, 150, None, None) is None and picked(1, 150, None, None) is None,
         "b == null (ou c sans b sur beta) ne doit pas déclencher de dialogue",
     )
+    # Les deux préconditions du canal Beta (correction du 22/09/2026). Le
+    # premier cas est notre `update.json` réel : une entrée stable seule, plus
+    # récente que l'appareil — un appareil resté en Beta ne voit donc rien.
+    check(
+        "beta   + aucune entrée beta (stable seule, plus récente) -> silence",
+        picked(1, 152, 153, None) is None,
+        "la branche beta rend la main dès que c == null",
+    )
+    check(
+        "beta   + aucune entrée stable (beta seule, plus récente) -> silence",
+        picked(1, 152, None, 153) is None,
+        "b == null fait taire la branche beta, même si l'entrée beta est plus récente",
+    )
+    check(
+        "stable + entrée beta plus récente -> silence (c est ignorée)",
+        picked(0, 152, None, 153) is None,
+        "sur le canal stable, seule l'entrée ReleaseType: 0 est lue",
+    )
     check(
         "i() en échec (-1) -> dialogue (fail-loud, direction sûre)",
         picked(0, -1, 153, None) == "b" and picked(1, -1, 152, 153) == "c",
@@ -172,6 +212,35 @@ def main():
             ".catch Ljava/lang/Exception;" in text and "const/4 v0, -0x1" in text,
             "l'échec de lecture doit retourner -1 (fail-loud), pas 0 ni une exception",
         )
+        # Les deux préconditions du canal beta (extraites de b()V le
+        # 22/09/2026). Elles se lisent dans le corps de `b()V`, à partir de son
+        # étiquette `:cond_0` (la branche beta) : `b` chargée, nulle -> silence ;
+        # `c` chargée, nulle -> silence. La table de vérité ci-dessus ne décrit
+        # le code que si ces deux sauts sont là.
+        def method_body(signature):
+            start = text.find(".method " + signature)
+            end = text.find(".end method", start)
+            return text[start:end] if start != -1 and end != -1 else ""
+
+        comparator = method_body("b()V")
+        marker = comparator.find(":cond_0")
+        beta = comparator[marker:] if marker != -1 else ""
+        check(
+            "b()V : la branche beta (:cond_0) est extractible",
+            bool(beta) and "iget-object v0" in beta,
+            "l'étiquette :cond_0 de b()V a disparu : relire le comparateur avant de croire la table",
+        )
+        check(
+            "b()V : branche beta — entrée stable absente -> silence",
+            "if-eqz v0, :cond_5" in beta,
+            "attendu, après le chargement de b, un saut vers :cond_5 (silence)",
+        )
+        check(
+            "b()V : branche beta — entrée beta absente -> silence",
+            "if-nez v2, :cond_1" in beta and "goto :goto_0" in beta,
+            "attendu 'if-nez v2, :cond_1' suivi d'un saut vers :goto_0 (silence)",
+        )
+
         # Les branchements qui portent le silence (extraits de b()V) :
         check(
             "b()V : publiée <= installée sur le canal courant -> silence",

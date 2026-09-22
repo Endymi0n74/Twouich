@@ -22,7 +22,9 @@
 # Le bloc 8 rejoue en plus la TABLE DE VERITE DE L'UPDATER (UpdateHelper.b(),
 # v1.0.0 : comparaison a la version installee) via pick(IIII)I — le miroir
 # Dalvik de la table de patch/tests/test_update_check.py : « annonce en
-# retard » -> silence, sur les deux canaux, dans le code compile.
+# retard » -> silence, sur les deux canaux, dans le code compile. Depuis le
+# 22/09/2026 il porte aussi les DEUX preconditions du canal beta (l'entree
+# stable ET l'entree beta doivent exister), qui manquaient aux deux miroirs.
 
 
 # static fields
@@ -169,12 +171,19 @@
 
 # Verdict : une ligne. Log.e quand quelque chose casse (plus visible).
 # Miroir Dalvik de la logique de UpdateHelper.b()V (verifiee par
-# patch/tests/test_update_check.py). pick(canal, version installee, entree du
-# canal, entree de l'autre canal) -> 0 silence, 1 dialogue(b), 2 dialogue(autre
-# canal). -1 = entree absente OU version installee illisible (echec de i()I :
+# patch/tests/test_update_check.py). pick(canal, version installee, entree
+# stable, entree beta) -> 0 silence, 1 dialogue(stable), 2 dialogue(beta).
+# -1 = entree absente OU version installee illisible (echec de i()I :
 # fail-loud, tout semble plus recent). La stricte superiorite porte le silence
-# (publiee <= installee -> JAMAIS de dialogue) et la preference de l'autre
-# canal (c gagne ssi strictement plus recente que tout).
+# (publiee <= installee -> JAMAIS de dialogue) et la preference de l'entree
+# beta (c gagne ssi strictement plus recente que tout).
+#
+# Les arguments sont les ENTREES DU FICHIER, pas les canaux : b = ReleaseType 0
+# (stable), c = ReleaseType 1 (beta) — c'est UpdateHelper.e() qui les remplit.
+# Le canal choisit l'ORDRE dans lequel on les regarde, pas laquelle est lue :
+# sur le canal beta, les DEUX doivent exister, sinon silence (mesure du
+# 22/09/2026 sur le bytecode livre : une annonce stable seule ne reveille pas
+# une installation restee en Beta).
 .method private static pick(IIII)I
     .locals 2
 
@@ -191,25 +200,26 @@
 
     const/4 v1, -0x1
 
-    # cond_1 : l'autre canal (c) gagne ssi c > installee ET (b absente OU c > b)
-    # — structure conforme a a.smali (if-le saute vers cond_2, jamais l'inverse)
-    if-eq p3, v1, :cond_2
+    # Les DEUX entrees doivent exister (a.smali : l'entree stable est chargee
+    # d'abord, son absence rend la main ; puis l'entree beta, meme chose).
+    # Sans l'une des deux : silence, meme si l'annonce est plus recente —
+    # c'est le cas d'une publication stable seule face a un canal beta.
+    if-eq p2, v1, :done
 
+    if-eq p3, v1, :done
+
+    # cond_2 : l'entree stable (b) gagne ssi b > installee (absente ou en
+    # retard : silence) — structure conforme a a.smali (if-le saute vers
+    # cond_2, jamais l'inverse)
     if-le p3, p1, :cond_2
-
-    if-eq p2, v1, :cond_1w
 
     if-le p3, p2, :cond_2
 
-    :cond_1w
     const/4 v0, 0x2
 
     goto :done
 
     :cond_2
-    # l'entree du canal (b) gagne ssi b > installee (absente ou en retard : silence)
-    if-eq p2, v1, :done
-
     if-le p2, p1, :done
 
     const/4 v0, 0x1
@@ -768,8 +778,10 @@
     add-int/lit8 v1, v1, 0x1
 
     # ── 8. table de vérité de l'updater (miroir Dalvik de test_update_check.py) ──
-    # pick(canal, installée, entrée du canal, autre canal) -> 0 silence,
-    # 1 dialogue(b), 2 dialogue(autre) ; -1 = absente / version illisible.
+    # pick(canal, installée, entrée stable, entrée beta) -> 0 silence,
+    # 1 dialogue(stable), 2 dialogue(beta) ; -1 = absente / version illisible :
+    # c'est l'entrée `ReleaseType` qui compte, pas le canal. Les cas 8.11 à 8.13
+    # portent les deux préconditions du canal beta (corrigées le 22/09/2026).
 
     # 8.1 stable + annonce en retard -> silence
     const/4 v9, 0x0
@@ -1052,6 +1064,94 @@
     move-result v13
 
     const-string v12, "updater : version illisible -> dialogue (fail-loud)"
+
+    invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
+
+    move-result v12
+
+    add-int/2addr v0, v12
+
+    add-int/lit8 v1, v1, 0x1
+
+    # 8.11 beta + aucune entree beta (stable seule, plus recente) -> silence.
+    # C'est notre update.json reel : une entree stable, pas d'entree beta.
+    const/4 v9, 0x1
+
+    const/16 v10, 0x98
+
+    const/16 v12, 0x99
+
+    const/4 v13, -0x1
+
+    invoke-static {v9, v10, v12, v13}, Lcom/twouich/adblock/SelfTest;->pick(IIII)I
+
+    move-result v12
+
+    const/4 v13, 0x0
+
+    invoke-static {v12, v13}, Lcom/twouich/adblock/SelfTest;->eq(II)Z
+
+    move-result v13
+
+    const-string v12, "updater : aucune entree beta -> silence (canal beta)"
+
+    invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
+
+    move-result v12
+
+    add-int/2addr v0, v12
+
+    add-int/lit8 v1, v1, 0x1
+
+    # 8.12 beta + aucune entree stable (beta seule, plus recente) -> silence
+    const/4 v9, 0x1
+
+    const/16 v10, 0x98
+
+    const/4 v12, -0x1
+
+    const/16 v13, 0x99
+
+    invoke-static {v9, v10, v12, v13}, Lcom/twouich/adblock/SelfTest;->pick(IIII)I
+
+    move-result v12
+
+    const/4 v13, 0x0
+
+    invoke-static {v12, v13}, Lcom/twouich/adblock/SelfTest;->eq(II)Z
+
+    move-result v13
+
+    const-string v12, "updater : aucune entree stable -> silence (canal beta)"
+
+    invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
+
+    move-result v12
+
+    add-int/2addr v0, v12
+
+    add-int/lit8 v1, v1, 0x1
+
+    # 8.13 stable + entree beta plus recente -> silence (c est ignoree en stable)
+    const/4 v9, 0x0
+
+    const/16 v10, 0x98
+
+    const/4 v12, -0x1
+
+    const/16 v13, 0x99
+
+    invoke-static {v9, v10, v12, v13}, Lcom/twouich/adblock/SelfTest;->pick(IIII)I
+
+    move-result v12
+
+    const/4 v13, 0x0
+
+    invoke-static {v12, v13}, Lcom/twouich/adblock/SelfTest;->eq(II)Z
+
+    move-result v13
+
+    const-string v12, "updater : canal stable ignore l'entree beta"
 
     invoke-static {v13, v12}, Lcom/twouich/adblock/SelfTest;->check(ZLjava/lang/String;)I
 

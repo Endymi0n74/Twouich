@@ -54,7 +54,7 @@ installée** (émulateur en 153 / v1.0.6, `update.json` publié annonçant 153) 
   d'upstream) ; le bras « publiée < installée » — l'« annonce en retard », fenêtre historique
   entre une release et le push de son annonce — donne le même silence par construction :
   verrouillé hors réseau par `patch/tests/test_update_check.py` (table de vérité + gardes
-  sur l'arbre décodé, 20 vérifications) ;
+  sur l'arbre décodé, 26 vérifications — dont les deux préconditions du canal Beta, § 8.15) ;
 - la preuve complémentaire en production est en § 0.2 : la Freebox en 152 a ouvert le
   dialogue au cold start suivant l'annonce 153, pendant que l'émulateur en 153 ne rouvrait
   rien — même logique, observée des deux côtés du seuil.
@@ -480,14 +480,14 @@ Le script rend un verdict et un code de sortie (0 = vert). Deux lignes attendues
 
 ```
 I/Twouich: playlist nettoyee 623 -> 328 octets, segments pub retires : 3
-I/Twouich: SELFTEST 28/28 verifications, flux filtre : 328 octets
+I/Twouich: SELFTEST 31/31 verifications, flux filtre : 328 octets
 ```
 
 | Ligne | Signification |
 |---|---|
-| `SELFTEST 28/28 …` | les 28 vérifications passent : le filtre agit, sur l'appareil, dans le bytecode réel |
+| `SELFTEST 31/31 …` | les 31 vérifications passent : le filtre agit, sur l'appareil, dans le bytecode réel |
 | `SELFTEST KO : <vérification>` | une vérification précise a échoué — c'est la ligne à recopier pour corriger |
-| `SELFTEST ECHEC n/28 …` | verdict global en échec (sortie Log.e, donc bien visible dans les captures) |
+| `SELFTEST ECHEC n/31 …` | verdict global en échec (sortie Log.e, donc bien visible dans les captures) |
 | `VerifyError` | le smali assemble mais ne passe pas le vérificateur Dalvik : à corriger avant tout test live |
 
 **Validé le 15/09/2026** (`emulator-5554`, BlueStacks, API 25) : `SELFTEST 18/18`, flux filtré de
@@ -1634,3 +1634,64 @@ considérer l'interface terminée (`patch/test-chat-toggle.sh`, § 8.9).
 **Leçon.** Un verrou de test écrit à partir du code qu'on vient d'écrire ne prouve rien : les deux
 verrous de `test_smali_branches.py` ajoutés le 21/09 exigeaient `if-ne v2, v3, :twouich_tv_by_mode`
 — la forme fautive. Ils sont alignés sur `if-eq` depuis, avec la raison écrite à côté.
+
+
+### 8.15 La table de vérité de l'updater se relit **dans le livrable**, et se prouve mordante (22/09)
+
+La table de vérité de la mise à jour automatique existe en trois exemplaires :
+`patch/tests/test_update_check.py`, le bloc 8 de `SelfTest.smali`, et `UpdateHelper.b()V`. Les deux
+premiers avaient dérivé du troisième sans que rien ne le dise — ils étaient **d'accord entre eux**,
+donc verts, et le self-test affichait `28/28` sur l'écart. C'est la réextraction du graphe depuis
+l'APK **livré** qui a tranché.
+
+**Relire le comparateur dans les octets publiés** (aucune installation, aucun arbre de travail) :
+
+```bash
+java -jar tools/apktool-3.0.3.jar d -f -r -o work/verify/upd2 dist/Twouich_v1.0.15.apk
+# -r : ressources sautées (inutiles ici), -s : sources java sautées
+sed -n '/^\.method b()V/,/^\.end method/p' \
+  work/verify/upd2/smali_classes2/com/s0und/s0undtv/helpers/a.smali
+```
+
+Ce qu'on y lit (et ce que les miroirs ne disaient pas) : la branche Beta charge l'entrée **stable**
+(`this.b`) puis rend la main si elle est nulle (`if-eqz v0, :cond_5`), charge l'entrée **beta**
+(`this.c`) puis rend la main si elle est nulle (`if-nez v2, :cond_1` + `goto :goto_0`) — **les deux
+entrées sont exigées**. `UpdateHelper.e(List)` les remplit ainsi : `ReleaseType: 0` → `b`,
+`ReleaseType: 1` → `c`. Le canal ne choisit donc pas *quelle* entrée lire, mais dans quel ordre.
+
+**Conséquence produit à retenir** : `update.json` ne publie qu'une entrée stable, donc une
+installation restée en canal **Beta** n'ouvre **aucun** dialogue — pas de message, pas d'erreur, rien
+dans logcat. C'est le comportement voulu (nos installations neuves démarrent en Stable depuis le
+correctif `b.a = false` de la v1.0.2), mais il faut le savoir avant de conclure qu'une annonce
+« ne marche pas ».
+
+**Prouver la mordance des nouvelles vérifications, sans se contenter du vert :**
+
+```bash
+# Scripts d'ATELIER (work/ n'est pas versionné — la recette est ce qui compte,
+# et elle tient en deux gestes : remettre l'ancienne condition, reconstruire).
+python work/mordance_beta.py                 # miroir Python + gardes de l'arbre décodé (4 mutations)
+python work/mutate_selftest_beta.py --mutate # remet le pick() de HEAD dans patch/smali
+bash patch/build.sh
+ADB=/c/Users/<vous>/AppData/Local/ScrcpyGUI/scrcpy-bin/adb.exe \
+  bash patch/test-selftest.sh --serial 192.168.1.24:5555
+#   attendu sur le mutant  : SELFTEST ECHEC 29/31  (les deux cas de précondition en KO)
+python work/mutate_selftest_beta.py --restore
+bash patch/build.sh                           # sha identique à avant la mutation
+bash patch/test-selftest.sh --serial 192.168.1.24:5555
+#   attendu                : SELFTEST 31/31 verifications, flux filtre : 328 octets
+ADB=... adb -s 192.168.1.24:5555 shell rm -f /data/local/tmp/twouich-selftest.apk
+```
+
+Mesures du 22/09 sur la Freebox Pop (`da219e21…`, sonde `app_process`, rien installé) :
+
+| Contrôle | Mesure | Verdict |
+|---|---|---|
+| self-test sur les octets du candidat | `SELFTEST 31/31 verifications, flux filtre : 328 octets` | ✅ |
+| self-test sur le mutant (ancien `pick()`) | `SELFTEST ECHEC 29/31`, **exactement** `aucune entree beta -> silence` et `aucune entree stable -> silence` en KO | ✅ les nouvelles vérifications mordent |
+| retour à la version corrigée | `dist/` retrouve `da219e21…` (rebuild après restauration) | ✅ build reproductible |
+
+**Leçon.** Trois exemplaires d'une même logique qui se citent l'un l'autre forment un **consensus**,
+pas une preuve : c'est le fichier livré qui fait autorité. Quand un modèle est dupliqué dans un test
+et dans le bytecode, il faut un contrôle qui lit **le bytecode**, et une mutation qui montre que ce
+contrôle mord — sinon le vert ne dit que l'accord des miroirs entre eux.
