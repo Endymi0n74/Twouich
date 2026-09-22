@@ -17,8 +17,8 @@ Dernière mise à jour : **22 septembre 2026**.
 | Identité visuelle | piste **C** « dégradé + monogramme », générée par `patch/branding/make_brand.py` |
 | Palette | violet profond `#7c22e8` → `#210849` (dégradé 315°), mot-symbole puffy `#ffffff`, tagline `#e6d8ff` |
 | Base upstream | S0undTV `beta_144.apk`, SHA-256 `578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0` |
-| Version produite | `versionCode 162` / `versionName v1.0.15` — **publiée** (release « latest », `update.json` à jour) |
-| Livrable | `dist/Twouich_v1.0.15.apk`, 11 256 453 octets, SHA-256 `da219e21dc79cb5bd9e71e10ddd899f25544f953e89f4b9f0783c8cf23ad9516` (build local signé v1+v2+v3, zipalign vérifié ; sur tag, la CI Linux doit reproduire **ces** octets — build reproductible inter-plateformes, voir §3) |
+| Version produite | `versionCode 163` / `versionName v1.0.16` — **publiée** (release « latest », `update.json` à jour) |
+| Livrable | `dist/Twouich_v1.0.16.apk`, 11 260 549 octets, SHA-256 `c7ef8490976952fdb50ab328a36850281b1e09d8109fcd0595bdfcb88613b8b9` (build local signé v1+v2+v3, zipalign vérifié ; sur tag, la CI Linux doit reproduire **ces** octets — build reproductible inter-plateformes, voir §3) |
 | Clé de signature | `keys/twouich.keystore`, alias `twouich-dev` — **non versionnée, à sauvegarder hors du dossier** ; mot de passe **hors du dépôt** (`keys/keystore.properties`, ignoré, ou `KEY_PASS`) |
 | Modèle Android minimum | API 23 (Android 6), cible 35 |
 
@@ -36,19 +36,21 @@ playlists et retire ces plages **avant** qu'ExoPlayer ne les voie.
 - **`AdBlockDataSource`** — implémentation de l'interface `Lz3/l;` (la `DataSource` d'ExoPlayer de
   l'app) qui décore la source réelle :
   - `c(Lz3/p;)` (open) : détecte si l'URL se termine par `.m3u8` → `e` = « c'est une playlist » ;
-    réinitialise le cache ; transmet l'ouverture à la source réelle ;
+    capture `lastChannel` si `usher.ttvnw.net/channel/hls` ; réinitialise le cache ; transmet l'ouverture à la source réelle ;
   - `read([BII)` : pour une playlist, vide la source réelle **entièrement** dans un tampon, passe le
-    texte au nettoyeur, met le résultat en cache et le sert par tranches ; pour tout le reste
+    texte au nettoyeur (`PlaylistSanitizer` + `-unmuted`->`-muted` + `VaftFallback`), met le résultat en cache et le sert par tranches ; pour tout le reste
     (segments `.ts`, clés, VOD binaires), simple passe-plat sans copie ;
   - la trace logcat `Twouich` est émise à chaque nettoyage (voir §5).
 - **`PlaylistSanitizer`** — fonction pure `a(String) -> String`, règles alignées sur Streamlink
   (`plugins/twitch.py`) :
+  - `-unmuted` -> `-muted` sur cloudfront VOD (dé-mute, `TwVodNoAdsJCed`) ;
   - retrait des `#EXT-X-DATERANGE` contenant `stitched-ad` ;
   - retrait des `#EXTINF` contenant `Amazon` **et** de l'URI du segment qui suit ;
   - retrait des blocs `#EXT-X-CUE-OUT` … `#EXT-X-CUE-IN` ;
   - **conservation** de `#EXT-X-DISCONTINUITY` et `#EXT-X-TWITCH-LIVE-SEQUENCE` (ils signalent le
     saut de timeline au lecteur — les retirer casse la lecture) ;
   - un corps sans `#EXTM3U` est rendu tel quel.
+- **`VaftFallback`** — fallback `TwVodNoAdsJCed` `processM3U8()` : si `stitched-ad` survit au stripping, `GQL PlaybackAccessToken embed` (`kimne78kx3ncx6brgo4mv6wki5h1ko`) -> `usher v2` -> première variante `m3u8` (5 s timeout, `try/catch` -> repli stripping local, `ENABLED=true` dormant tant que `lastCut>0`).
 
 **Injection** : un seul point, `Lz3/u$b.a()` — l'unique fabrique de sources de données de l'app
 (vérifié : `Lz3/u;` n'est instanciée nulle part ailleurs). Conséquence : *toutes* les lectures HLS
@@ -152,7 +154,7 @@ Détail complet : [`AUDIT.md`](AUDIT.md).
 ### En local, sans appareil
 
 ```bash
-python patch/tests/test_sanitizer.py      # 48 assertions : règles de nettoyage (miroir Python) + fixture SSAI réelle du 18/09/2026 + sentinelle marqueur inconnu
+python patch/tests/test_sanitizer.py      # 52 assertions : règles de nettoyage (miroir Python) + fixture SSAI réelle du 18/09/2026 + sentinelle marqueur inconnu + dé-mute -unmuted->-muted (4 asserts)
 python patch/tests/test_smali_branches.py # 40 assertions : branchements réels du smali (pièges Dalvik),
                                           #   polarité des tests de place du lecteur, et drapeaux d'accès
                                           #   des overrides injectés (voir §6, 20/09)
@@ -609,3 +611,4 @@ preuve ; un refus seul n'en est pas une.
 | 2026-09-22 | **La table de vérité de l'updater modélise un canal Beta qui n'existe pas — les deux miroirs sont d'accord avec eux-mêmes, pas avec le bytecode.** Reconstruit le graphe de `helpers/a.smali` depuis **l'APK livré** (`apktool d` sur `dist/Twouich_v1.0.14.apk`) : la branche Beta exige **`b` (entrée `ReleaseType: 0`) ET `c` (entrée `ReleaseType: 1`) toutes deux non nulles** — `if-eqz v0, :cond_5` juste après le chargement de `b`, puis `if-nez v2, :cond_1 / goto :goto_0` pour `c` — et `UpdateHelper.e(List)` remplit **`b` = l'entrée stable, `c` = l'entrée beta** (pas « le canal courant » / « l'autre canal » comme l'écrit le docstring). Conséquence : sur le canal Beta, deux situations que les deux miroirs annoncent comme un **dialogue** sont en réalité un **silence** — (1) `b` absente et `c` plus récente (c'est le cas d'aucune entrée beta), (2) `c` absente et `b` plus récente (**c'est exactement notre `update.json` d'aujourd'hui : stable seul**). La conclusion produit d'`AGENTS.md` §8 et de ce fichier (une annonce stable seule ne réveille pas une installation restée en Beta) est donc **juste**, mais elle l'est pour une raison que les miroirs ne portent pas : `patch/tests/test_update_check.py::picked()` et `SelfTest.smali::pick(IIII)I` rendent 1 ou 2 là où le code compilé ne fait rien, et le self-test affiche **28/28** sur cette divergence. Deux chemins d'entrée divergents, deux cas non couverts. **Tranché le jour même** : les deux miroirs sont corrigés (voir l'entrée suivante). |
 | 2026-09-22 | **Les deux miroirs de la table de vérité sont alignés sur le bytecode — et le self-test embarqué passe à 31 vérifications.** `test_update_check.py::picked()` exige désormais les deux entrées sur le canal Beta (`b is None or c is None -> silence`) et porte **trois** cas nouveaux : stable seule plus récente -> silence (c'est notre `update.json` réel), beta seule plus récente -> silence, et « le canal stable ignore l'entrée beta ». Le docstring dit enfin ce que le code fait : `b` = l'entrée `ReleaseType: 0`, `c` = l'entrée `ReleaseType: 1` (remplies par `UpdateHelper.e()`), le canal choisissant l'**ordre** de lecture, pas l'entrée lue. Deux gardes de plus lisent ces deux sauts **dans l'arbre décodé** (fenêtre du corps de `b()V` à partir de `:cond_0`), donc le miroir ne peut plus dériver sans que le test le dise : **26 vérifications** au total. Côté appareil, `SelfTest.pick(IIII)I` porte les mêmes préconditions et le bloc 8 passe de 10 à **13** cas (`SELFTEST 31/31`). **Mordance prouvée trois fois** : mutation du miroir Python (les deux cas de précondition en KO), mutation de `a.smali` recopié (chacun des deux sauts, KO exact), et surtout **mutation du `pick()` de HEAD reconstruite dans l'APK** — sonde sur la Freebox : `SELFTEST ECHEC 29/31` avec **exactement** les deux nouvelles lignes en KO, puis `SELFTEST 31/31` après restauration. Livrable `da219e21…` (11 256 453 o, `test_apk` 48/48). |
 | 2026-09-22 | **Release v1.0.15 (162) publiée — le correctif des deux miroirs part en production, et la chaîne est vérifiée jusqu'aux octets.** Trois commits (`fix`, `release` bump, `release` annonce) puis la consignation. Livrable local signé sous Windows : `dist/Twouich_v1.0.15.apk`, 11 256 453 octets, SHA-256 `da219e21…` ; `test_apk` 48/48, contrôle négatif rejoué (l'APK d'amont est refusé), 26/26 pour la table de vérité, 40/40 branches smali. Tag `v1.0.15` poussé → job **signé vert** : `test_apk` vert, signature vérifiée, release « latest » créée avec APK + `changelog.html`, **empreinte du job identique au build Windows** (`da219e21…`). `update.json` poussé après (`ReleaseDate` = `publishedAt` 2026-09-22T06:53:06Z), puis `check-release.sh` **exit 0** sur les quatre étages (octets téléchargés pour de vrai : `da219e21…`). Deux releases publiées le même jour, la seconde étant le correctif de la première : le lot v1.0.14 → v1.0.15 montre la règle — **une annonce stable seule ne réveille pas un appareil resté en Beta** (c'est le comportement du bytecode, pas un défaut d'annonce). |
+| 2026-09-22 | **v1.0.16 : intégration TwVodNoAdsJCed — VOD dé-mutée + fallback VaFT (Freebox POP).** `PlaylistSanitizer.a()` réécrit `-unmuted` -> `-muted` sur cloudfront VOD (5 lignes smali hors machine à états, miroir `test_sanitizer.py` +4 asserts -> 52/52). `AdBlockDataSource` capture `lastChannel` sur `usher.ttvnw.net/channel/hls` et `VaftFallback` (nouveau, `ENABLED=true` dormant tant que `lastCut>0`) tente `GQL PlaybackAccessToken embed` (`kimne78kx3ncx6brgo4mv6wki5h1ko`) -> `usher v2` -> première variante `m3u8` (5 s timeout, `try/catch` -> repli stripping local) si `stitched-ad` survit au stripping (nouveau format). `AdBlockDataSource.read()` `.locals 7` + `try VaftFallback.a()` . `test_smali_branches 40/40`, `test_apk 48/48`, `SELFTEST 31/31` verts sur Freebox `192.168.1.24:5555`. Bump `163/v1.0.16` `c7ef8490…` `11260549` `update.json` `check-release.sh` 4/4 `latest`, `README.md` sync, `memory.md` §1-§2 à jour. |
