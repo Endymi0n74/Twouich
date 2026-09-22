@@ -45,6 +45,25 @@
     return-object v0
 
     :body_ok
+    # VOD dé-mute : TwVodNoAdsJCed -unmuted -> -muted (les segments avec son d'origine existent sous -muted sur cloudfront)
+    # Aucune régression : replace pur, hors machine à états, ne touche ni le comptage ni la sentinelle
+    const-string v0, "-unmuted"
+
+    invoke-virtual {p0, v0}, Ljava/lang/String;->contains(Ljava/lang/CharSequence;)Z
+
+    move-result v0
+
+    if-eqz v0, :no_unmute
+
+    const-string v0, "-unmuted"
+
+    const-string v1, "-muted"
+
+    invoke-virtual {p0, v0, v1}, Ljava/lang/String;->replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;
+
+    move-result-object p0
+
+    :no_unmute
     const-string v1, "#EXTM3U"
 
     invoke-virtual {p0, v1}, Ljava/lang/String;->contains(Ljava/lang/CharSequence;)Z

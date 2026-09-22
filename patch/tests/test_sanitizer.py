@@ -60,6 +60,9 @@ def sanitize(body: str) -> str:
     last_suspicious_line = ""
     if body is None:
         return None
+    # VOD dé-mute : TwVodNoAdsJCed -unmuted -> -muted (hors machine à états)
+    if body is not None and "-unmuted" in body:
+        body = body.replace("-unmuted", "-muted")
     if "#EXTM3U" not in body:
         return body
 
@@ -344,6 +347,17 @@ https://seg.example/live.ts
     sanitize("#EXTM3U\n#EXT-X-CUE-PREPARE:30.000\n#EXTINF:2.000,\nhttps://seg.example/1.ts\n")
     sanitize("#EXTM3U\n#EXTINF:2.000,\nhttps://seg.example/1.ts\n")
     ok &= check("sentinelle : drapeau réinitialisé à chaque playlist", not suspicious)
+
+    # 11. VOD dé-mute : -unmuted -> -muted (TwVodNoAdsJCed, cloudfront VOD)
+    out = sanitize("#EXTM3U\n#EXTINF:2.000,\nhttps://d2nvs31859umc8.cloudfront.net/abc-unmuted-480p.ts\n")
+    ok &= check("dé-mute : -unmuted remplacé par -muted", "-unmuted" not in out and "-muted" in out)
+    ok &= check("dé-mute : segment conservé", "abc-muted-480p.ts" in out)
+    out = sanitize("#EXTM3U\n#EXTINF:2.000,\nhttps://cloudfront.net/vod-720p-unmuted.m3u8\n#EXTINF:2.000,\nhttps://seg2.ts\n")
+    ok &= check("dé-mute : multiple occurrences", out.count("-muted") == 1 and "-unmuted" not in out)
+    sanitize("#EXTM3U\n#EXTINF:2.000,\nhttps://cloudfront.net/a-unmuted.ts\n")
+    ok &= check("dé-mute : compteur inchangé", last_cut == 0)
+    out = sanitize("#EXTM3U\n#EXTINF:2.000,\nhttps://example.com/live.ts\n")
+    ok &= check("dé-mute : playlist sans -unmuted inchangée", "-muted" not in out and "live.ts" in out)
 
     print("\n" + ("✅ règles conformes" if ok else "❌ divergence détectée"))
     return 0 if ok else 1

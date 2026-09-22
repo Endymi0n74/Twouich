@@ -1,5 +1,10 @@
 # Journal des modifications — Twouich
 
+## v1.0.16 — 22 septembre 2026
+
+- **Intégration TwVodNoAdsJCed : VOD dé-mutée et fallback anti-pub VaFT.** Les playlists VOD `cloudfront` contenant `-unmuted` sont réécrites en `-muted` avant lecture (`PlaylistSanitizer`, 5 lignes, miroir `test_sanitizer.py` + 4 asserts) — les VODs mutées retrouvent leur son d'origine lorsque Twitch le conserve sous `-muted`. Le fallback VaFT (`VaftFallback`, `AdBlockDataSource`) capture le `channel` sur `usher.ttvnw.net/channel/hls` et, si `stitched-ad` survit au stripping (nouveau format), tente un flux propre via `GQL PlaybackAccessToken embed` (`kimne78kx3ncx6brgo4mv6wki5h1ko`) -> `usher v2` -> première variante `m3u8` (5 s timeout, `try/catch` -> repli stripping local, `ENABLED=true` dormant tant que `lastCut>0`). `test_smali_branches 40/40`, `test_apk 48/48`, `SELFTEST 31/31` verts sur `Freebox POP`.
+- **Aucune régression** : `AdBlockDataSource.read()` `.locals 7`, `PlaylistSanitizer` hors machine à états, `VaftFallback` no-op quand `ENABLED=false` ou `lastChannel` vide.
+
 ## v1.0.15 — 22 septembre 2026
 
 - **La table de vérité de la mise à jour automatique dit enfin ce que fait l'application.** Le

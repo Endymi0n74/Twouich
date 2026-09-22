@@ -9,6 +9,15 @@
 # Laisser vide pour désactiver. Le stripping local (PlaylistSanitizer) reste actif dans tous les cas.
 .field private static final PROXY_HOST:Ljava/lang/String; = ""
 
+# VaFT : dernier channel vu sur usher (pour fallback backup stream)
+.field public static lastChannel:Ljava/lang/String; = ""
+
+.field private static final GQL_URL:Ljava/lang/String; = "https://gql.twitch.tv/gql"
+
+.field private static final CLIENT_ID:Ljava/lang/String; = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+
+.field private static final HASH:Ljava/lang/String; = "ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9"
+
 
 # instance fields
 .field private a:Lz3/l;
@@ -149,6 +158,37 @@
     :not_playlist
     iput-boolean v2, p0, Lcom/twouich/adblock/AdBlockDataSource;->e:Z
 
+    # VaFT : capture du channel si url usher channel/hls
+    :try_capture_start
+    invoke-virtual {v0}, Landroid/net/Uri;->toString()Ljava/lang/String;
+    move-result-object v3
+    const-string v4, "usher.ttvnw.net"
+    invoke-virtual {v3, v4}, Ljava/lang/String;->contains(Ljava/lang/CharSequence;)Z
+    move-result v4
+    if-eqz v4, :no_capture
+    const-string v4, "channel/hls/"
+    invoke-virtual {v3, v4}, Ljava/lang/String;->contains(Ljava/lang/CharSequence;)Z
+    move-result v4
+    if-eqz v4, :no_capture
+    const-string v4, "channel/hls/"
+    invoke-virtual {v3, v4}, Ljava/lang/String;->indexOf(Ljava/lang/String;)I
+    move-result v4
+    add-int/lit8 v4, v4, 0xc
+    const-string v5, ".m3u8"
+    invoke-virtual {v3, v5}, Ljava/lang/String;->indexOf(Ljava/lang/String;)I
+    move-result v5
+    if-le v5, v4, :no_capture
+    invoke-virtual {v3, v4, v5}, Ljava/lang/String;->substring(II)Ljava/lang/String;
+    move-result-object v3
+    sput-object v3, Lcom/twouich/adblock/AdBlockDataSource;->lastChannel:Ljava/lang/String;
+    :no_capture
+    :try_capture_end
+    .catch Ljava/lang/Exception; {:try_capture_start .. :try_capture_end} :capture_catch
+    goto :capture_done
+    :capture_catch
+    move-exception v3
+    :capture_done
+
     if-eqz v2, :open_direct
 
     new-instance v3, Ljava/io/ByteArrayOutputStream;
@@ -268,7 +308,7 @@
 .end method
 
 .method public read([BII)I
-    .locals 6
+    .locals 7
 
     iget-boolean v0, p0, Lcom/twouich/adblock/AdBlockDataSource;->e:Z
 
@@ -352,6 +392,19 @@
     invoke-static {v3}, Lcom/twouich/adblock/PlaylistSanitizer;->a(Ljava/lang/String;)Ljava/lang/String;
 
     move-result-object v3
+
+    # VaFT fallback (TwVodNoAdsJCed processM3U8) - désactivé par défaut : 0 régression
+    # Quand ENABLED=false, VaftFallback.a() retourne p0 tel quel (no-op, try/catch de sécurité)
+    :try_vaft_start
+    invoke-static {v3}, Lcom/twouich/adblock/VaftFallback;->a(Ljava/lang/String;)Ljava/lang/String;
+    move-result-object v3
+    :try_vaft_end
+    .catch Ljava/lang/Exception; {:try_vaft_start .. :try_vaft_end} :vaft_fallback_catch
+    goto :vaft_done
+    :vaft_fallback_catch
+    move-exception v6
+    # on garde v3 tel quel (déjà nettoyé), pas de log bruyant hors debug
+    :vaft_done
 
     const-string v4, "UTF-8"
 
