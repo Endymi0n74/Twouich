@@ -25,7 +25,7 @@ Ce fichier vérifie donc l'artefact :
     l'app annonce une version, télécharge une URL qui n'existe pas, et reste sur
     place.
 
-    python patch/tests/test_apk.py                       # dist/Twouich_v1.0.14.apk
+    python patch/tests/test_apk.py                       # dist/<APK_NAME de patch/build.sh>
     python patch/tests/test_apk.py --apk dist/autre.apk
 
 Contrôle négatif (l'artefact d'origine doit être refusé) :
@@ -48,7 +48,27 @@ from PIL import Image
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 GENERATED = ROOT / "patch" / "branding" / "assets" / "res"
-DEFAULT_APK = ROOT / "dist" / "Twouich_v1.0.14.apk"
+
+
+def _apk_name_from_build_sh() -> str | None:
+    """Nom du livrable, lu dans `patch/build.sh` — la source unique des valeurs
+    figées (AGENTS.md § 2.5 : versionCode, versionName, nom de l'APK n'y vivent
+    qu'une fois). Une copie figée ici se désynchronise au premier bump : le test
+    cherche alors un fichier qui n'existe plus et échoue pour la mauvaise
+    raison — arrivé le 22/09/2026, d'où la lecture.
+    """
+    try:
+        for line in (ROOT / "patch" / "build.sh").read_text(encoding="utf-8").splitlines():
+            if line.startswith("APK_NAME="):
+                return line.split("=", 1)[1].strip().strip('"') or None
+    except OSError:
+        pass
+    return None
+
+
+# Repli sans numéro de version : s'il s'affiche, c'est build.sh qui est
+# illisible — et le message le dit, plutôt que de figer un nom qui périmera.
+DEFAULT_APK = ROOT / "dist" / (_apk_name_from_build_sh() or "Twouich_APK_NAME_introuvable.apk")
 PLAYBACK_SERVICE = "com.twouich.adblock.PlayerKeepAlive"
 PLAYBACK_PERMISSION = "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
 # aapt2 connaît l'attribut android:foregroundServiceType et encode « mediaPlayback »

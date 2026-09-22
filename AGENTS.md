@@ -114,8 +114,9 @@ bash patch/build.sh          # APK upstream → apktool d → patch.py → apkto
 ```bash
 python patch/tests/test_sanitizer.py       # 48 assertions : règles de nettoyage (miroir Python) + fixture SSAI réelle du 18/09/2026 + sentinelle marqueur inconnu
 python patch/tests/test_smali_branches.py  # 40 assertions : branchements réels du smali
-python patch/tests/test_update_check.py    # 20 vérifications : logique updater (table de vérité + gardes smali
-                                           #   si work/decoded/ existe) — « annonce en retard » -> silence
+python patch/tests/test_update_check.py    # 26 vérifications : logique updater (table de vérité + gardes smali
+                                           #   si work/decoded/ existe) — « annonce en retard » -> silence,
+                                           #   et les deux préconditions du canal Beta (les deux entrées exigées)
 python patch/tests/test_brand.py           # 14 assertions : identité visuelle (voir plus bas)
 python patch/tests/test_apk.py             # 48 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),
                                            #   dont l'accord avec update.json et les pages légales embarquées
@@ -136,9 +137,10 @@ Le self-test embarqué (`patch/smali/com/twouich/adblock/SelfTest.smali`, exécu
 `MainApp.onCreate`) rejoue des playlists publicitaires Twitch dans le **vrai code compilé** et fait
 traverser `AdBlockDataSource` : c'est la seule preuve qui ne dépend pas d'une coupure réelle, et la
 seule qui parle la sémantique Dalvik (elle a déjà trouvé deux défauts que rien d'autre ne voyait).
-Verdict attendu, une ligne : `I/Twouich: SELFTEST 28/28 verifications, flux filtre : 328 octets`
-(18 vérifications du filtre + 10 de la table de vérité de l'updater, miroir Dalvik de
-`patch/tests/test_update_check.py` — bloc 8 de `SelfTest.smali`, méthode `pick(IIII)I`).
+Verdict attendu, une ligne : `I/Twouich: SELFTEST 31/31 verifications, flux filtre : 328 octets`
+(18 vérifications du filtre + 13 de la table de vérité de l'updater, miroir Dalvik de
+`patch/tests/test_update_check.py` — bloc 8 de `SelfTest.smali`, méthode `pick(IIII)I`, dont les
+deux préconditions du canal Beta : `b` **et** `c` doivent exister, sinon silence).
 Toute nouvelle vérification ajoutée là doit passer sur l'appareil avant d'être déclarée bonne.
 
 **Et si tu touches à l'identité visuelle** : `test_brand.py` couvre le générateur et les assets

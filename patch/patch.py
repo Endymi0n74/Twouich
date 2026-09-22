@@ -31,7 +31,7 @@ UPSTREAM = "S0und/S0undTV"
 # manuel de patch.py — build.sh passe toujours --version-code/--version-name/
 # --apk-name. Ils suivent donc le dernier bump (le nom d'APK finit dans l'URL
 # que l'app interroge : un défaut en retard pointerait sur un asset inexistant).
-DEFAULT_APK_NAME = "Twouich_v1.0.14.apk"
+DEFAULT_APK_NAME = "Twouich_v1.0.15.apk"
 
 # ── Étape 1 : greffon anti-pub ────────────────────────────────────────────
 # Libellés de l'UX smartphone. Le champ de saisie reprend celui de l'interface
@@ -2874,8 +2874,8 @@ def main() -> int:
     here = pathlib.Path(__file__).resolve().parent
     parser = argparse.ArgumentParser()
     parser.add_argument("--decoded", required=True, type=pathlib.Path)
-    parser.add_argument("--version-code", type=int, default=161)
-    parser.add_argument("--version-name", default="v1.0.14")
+    parser.add_argument("--version-code", type=int, default=162)
+    parser.add_argument("--version-name", default="v1.0.15")
     parser.add_argument("--apk-name", default=DEFAULT_APK_NAME)
     parser.add_argument("--release-date", default=None,
                         help="date affichée dans la page Nouveautés (AAA.MM.JJ). "

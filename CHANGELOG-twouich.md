@@ -1,5 +1,17 @@
 # Journal des modifications — Twouich
 
+## v1.0.15 — 22 septembre 2026
+
+- **La table de vérité de la mise à jour automatique dit enfin ce que fait l'application.** Le
+  canal Beta exige **les deux entrées** du fichier d'annonce (`ReleaseType: 0` **et** `1`) : une
+  annonce qui n'en publie qu'une — c'est notre cas, nous ne publions qu'une entrée stable — ne
+  réveille donc pas une installation restée en Beta. Les deux miroirs de cette logique (le test
+  hors appareil et le self-test embarqué) annonçaient au contraire un dialogue dans ce cas :
+  corrigés sur le bytecode réellement livré, et **deux vérifications nouvelles** verrouillent la
+  précondition, dans le test comme dans le code compilé.
+- **Le self-test embarqué passe à 31 vérifications** (18 du filtre anti-pub + 13 de la table de
+  vérité de l'updater) : c'est lui qui empêchera la même dérive de revenir.
+
 ## v1.0.14 — 22 septembre 2026
 
 - **Le mode TV est réparé** : l'interface TV se décidait sur le seuil de 600 dp — or la Freebox Pop

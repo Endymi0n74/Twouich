@@ -21,7 +21,7 @@
 # self-test au démarrage ; on lit la ligne dans logcat.
 #
 # Verdict attendu, une ligne (Log.i) :
-#   I/Twouich : SELFTEST 18/18 verifications, flux filtre : 328 octets
+#   I/Twouich : SELFTEST 31/31 verifications, flux filtre : 328 octets
 # En cas d'échec : une ligne Log.e par vérification fautive, puis
 #   E/Twouich : SELFTEST ECHEC <n>/<total> verifications, ...
 #
