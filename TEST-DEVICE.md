@@ -1417,3 +1417,220 @@ Bornes relevées (Xiaomi 1220×2712 @520 dpi, `dumpsys activity top`) :
   retourner l'appareil : `wm size 2712x1220` (puis `wm size reset; wm density reset`),
   ce qui suffit à faire basculer la branche `largeur > hauteur`.
 
+
+### 8.11 Lecteur téléphone v1.0.12 (159) : quatre mesures, deux échecs datés (21/09)
+
+Mesures faites sur le Xiaomi 1220×2712 (Android 16 / HyperOS V816), **v1.0.12 (159)** installée,
+direct ouvert, écran allumé. L'arbre des vues est lu par `uiautomator dump` (§ 8.8), les insets par
+`dumpsys window -a`. Référence de lecture avant chaque test : **2 soutirages de playlist en 20 s**
+(`Twouich : playlist nettoyee …`) — si cette ligne ne tombe pas, rien ne joue et la mesure est vide.
+
+| Point | Mesure | Verdict |
+|---|---|---|
+| Barre de saisie au-dessus du clavier | barre `y 2600→2712` ; clavier `InsetSource id=3 type=ime frame=[0,1687][1220,2712]` | **échec** — la barre est 913 px **sous** la première touche |
+| Bouton de chat à côté du PiP | un seul `ImageButton` dans la zone vidéo (`twouich_phone_pip`) ; **zéro** vue `twouich_phone_chat` | conforme |
+| Page « Application info » | `v1.0.12`, code `159`, branche `Twouich (fork de S0undTV)`, date `2026.09.21` | 4 champs sur 5 — `Build variant: standalone` reste |
+| Lecture écran éteint | lecture poursuivie ~10 s, puis `UnknownHostException (no network)` | **échec** |
+
+Bornes de référence du lecteur (portrait, écran allumé) : vidéo `[0,0][1220,686]` (1220/686 = 1,778,
+16:9 exact), `SendMessageWindow` `[0,2600][1220,2712]`.
+
+**Clavier — la recette de mesure (deux commandes, rien à interpréter à l'œil)** :
+
+```bash
+adb -s $S shell 'dumpsys window -a' | grep -A2 'type=ime'   # InsetSource type=ime frame=[0,1687][1220,2712]
+adb -s $S shell 'uiautomator dump /sdcard/u.xml >/dev/null; cat /sdcard/u.xml' | grep SendMessageWindow
+```
+
+Le cadre du clavier est dans l'**état des insets** (`InsetSource type=ime`), pas dans la fenêtre
+`InputMethod` : celle-ci mesure tout l'écran moins la barre d'état et ne dit pas où commencent les
+touches. Comparer les deux lignes suffit à trancher.
+
+**Pourquoi `adjustResize` ne suffit pas.** La fenêtre du lecteur déclare bien `sim={adjust=resize}`
+(c'est le correctif posé en 159) mais son cadre ne bouge pas : `frame=[0,0][1220,2712]` clavier ouvert.
+Elle demande l'`ime` dans ses insets (`Requested non-default-visibility types: … ime`), c'est-à-dire
+qu'elle est en **edge-to-edge** : le gestionnaire de fenêtres ne la redimensionne plus et l'inset doit
+être consommé par l'application. Le correctif est donc dans le code (écouteur d'insets décalant le chat
+et la saisie de la hauteur du clavier, ou mode non edge-to-edge en téléphone seulement), pas au
+manifeste.
+
+**Veille — la chaîne complète, mesurée.** Écran éteint par `input keyevent KEYCODE_POWER`,
+`mWakefulness=Dozing` tenu 48 s, `pid` vivant :
+
+```
+21:36:05.656 AS.AudioService: AudioHardening background playback would be muted for com.s0und.s0undtv (10267), level: partial
+21:36:05.663 InetDiagMessage: Destroyed live tcp sockets for uids={10267} in 18ms
+21:36:11.810 ExoPlayerImplInternal: Playback error
+21:36:11.810 ExoPlayerImplInternal:   UnknownHostException (no network)
+```
+
+L'audio a **continué ~10 s** (statistiques `AudioTrackImpl` à 25 s puis 30 s de lecture, décodeurs
+vidéo et audio actifs), puis le système a **détruit les sockets TCP** de l'app passée en arrière-plan
+et **annoncé sa mise en sourdine** ; le tampon vidé, le lecteur échoue sur une erreur réseau et se
+libère lui-même. Ce n'est pas le garde `onStop` de la 159 qui a lâché : la marque
+`ecran eteint : lecture maintenue` n'apparaît pas parce que **rien n'a rien libéré** — l'activité
+n'était pas encore arrêtée quand le lecteur est mort.
+
+Ce que la mesure **écarte**, pour ne pas chercher au mauvais endroit :
+
+- le réseau de l'appareil **tient** : Wi-Fi `freebox_carebears` connecté et validé pendant la veille,
+  `ping` IP **et** résolution DNS réussis écran éteint (`wifi_sleep_policy=2`) ;
+- aucune restriction de données : `dumpsys netpolicy` → `Restrict background: false`, et aucune appop
+  visant l'app (`cmd appops get com.s0und.s0undtv`) ;
+- la cause est **structurelle** : `dumpsys activity services com.s0und.s0undtv` → *(nothing)*. L'app ne
+  lance **aucun service de premier plan** et `dumpsys media_session` ne la connaît pas. Une app qui
+  joue sans service de premier plan `mediaPlayback` reste une app d'arrière-plan : Android 14+ (et
+  HyperOS plus tôt) lui coupe les sockets et la met en sourdine. Les verrous d'éveil seuls garderaient
+  le processeur, pas le statut de l'app.
+
+**Pièges d'ADB rencontrés, à ne pas repayer** :
+
+- `am start -n …/.activities.SettingsActivity` → `SecurityException: not exported` : les écrans de
+  réglages ne s'ouvrent qu'**en naviguant dans l'app** (accueil → « Reglages » → la ligne visée).
+- Dans le lecteur, le **premier** `KEYCODE_BACK` est consommé par les contrôles à l'écran : il en faut
+  deux pour revenir à l'accueil.
+- Éteindre l'écran **reverrouille** le téléphone : chaque mesure de veille coûte un déverrouillage
+  manuel, et le lecteur doit être **au premier plan** (sinon l'arrière-plan fausse la mesure — un
+  premier essai a été invalidé pour cette raison).
+
+### 8.12 Mode TV : la régression du 21/09, et sa réparation mesurée sur la Freebox
+
+**Le défaut.** L'amont ne livre **qu'une configuration** de ses layouts (`res/layout/activity_player.xml`
+et `activity_main.xml` — vérifié à l'aapt2 sur `beta_144.apk` : une seule entrée, aucune variante). Un
+téléviseur qui ne déclare pas `sw600dp` gonfle donc `layout/`. Or la Freebox Pop déclare exactement :
+
+```
+mCurrentConfig={... ldltr sw540dp w960dp h540dp 320dpi lrg long land television -touch ...}
+```
+
+1920×1080 en 320 dpi = **540 dp** : `layout-sw600dp/` ne s'applique jamais. Le mode téléphone avait
+transformé `layout/` en layout téléphone (vidéo et chat empilés, barre de navigation tactile) en ne
+copiant l'original que dans `layout-sw600dp/`, et ses gardes smali ne lisaient que le seuil de dp
+(`< 600`), que 540 dp satisfait. Trois conséquences sur la TV : **barre de navigation téléphone** à
+l'accueil (ids `twouich_phone_nav_*` relevés par `uiautomator dump`), **panneau latéral Leanback
+replié** (`MainFragment`), et **géométrie téléphone** dans le lecteur.
+
+**La réparation.** Une seule source de vérité, `twouichTvInterface()Z` : mode TV **déclaré par le
+système** (`uiMode & UI_MODE_TYPE_MASK == UI_MODE_TYPE_TELEVISION`) ou écran large (≥ 600 dp). Les
+quatre gardes du lecteur et l'état du panneau Leanback l'appellent, et un invariant refuse une
+écriture du smali lecteur qui laisserait un second seuil de dp (toute écriture passe par
+`write_player()`). Côté ressources, les layouts TV sont **versionnés** (`patch/res-tv/`, capture de
+l'amont) et posés dans `layout-television/` **et** `layout-sw600dp/` : « television » l'emporte sur
+`layout/`, et une TV 4K (960 dp) garde la variante sw600dp, de contenu identique.
+
+Mesures après réparation, Freebox en v1.0.14 (**premier build**, SHA `476aeb1a…` — voir § 8.14 : les
+ gardes de ce build étaient retournées, d'où deux lignes corrigées depuis) :
+
+| Ce qui était cassé | Mesure après réparation |
+|---|---|
+| accueil, barre téléphone | **aucun** id `twouich_phone_*` ; `browse_headers_dock`, `main_browse_fragment`, `row_content` présents |
+| lecteur | `interface : TV (mode systeme ou ecran large)` dans logcat ; `StyledPlayerView 0,0-1920,1080`, `ChatRecycleView 1470,540-1920,1080` — **la géométrie téléphone paysage** (1632/968) mesurée d'abord avait été prise pour celle de l'amont : c'était l'empilement téléphone appliqué sur la TV par la garde inversée (§ 8.14) |
+| panneau Leanback | **restait replié** (`browse_headers_root` en `GONE`) : la quatrième garde était, elle aussi, inversée |
+
+**Deux pièges payés, tous deux mesurés.**
+
+- **Registre du garde** : écrire le résultat dans `v0` écrasait le `Resources` que
+  `twouichPhoneStackedLayout` lit plus loin (`getDisplayMetrics`). Le vérificateur d'ART rejette
+  alors **toute la classe** — `VerifyError: tried to get class from non-reference register v0
+  (type=Boolean)` — et le lecteur plante à l'ouverture. Le résultat s'écrit donc dans `v2`, et un
+  contrôle de `test_smali_branches.py` interdit `move-result v0` dans le bloc du garde.
+- **Corps d'une méthode déjà injectée** : corriger le gabarit d'une méthode déjà présente dans
+  l'arbre de travail ne suffit pas — le test de présence porte sur le **nom**, donc rien n'est
+  réécrit, et deux builds de suite donnent le **même SHA** alors que le gabarit a changé. Une
+  réparation remplace désormais le corps entier de `twouichTvInterface`, comme les autres
+  réparations du dépôt.
+
+**Le piège d'interprétation, celui qui a failli faire conclure à tort** : la géométrie relevée avant
+la trace (1632/288/968/112) *ressemble* aux nombres du mode téléphone en paysage (plafond à 85 %,
+hauteur de saisie lue sur la vue). Sans la trace `interface : TV`, on concluait que la garde échouait,
+alors que les deux arrangements dérivent des mêmes dimensions d'écran. **Une trace explicite vaut
+mieux qu'une ressemblance.**
+
+### 8.13 Veille : ce que le service de premier plan règle, et ce qui reste (21/09, soir)
+
+Mesuré sur le Xiaomi 1220×2712 (Android 16 / HyperOS V816), direct ouvert, v1.0.14 :
+
+- **Acquis** — le service `PlayerKeepAlive` est en premier plan `mediaPlayback`
+  (`isForeground=true`, `types=0x00000002`), sa notification vit sur le canal `twouich_lecture`, la
+  MediaSession est enregistrée (`Media button session is com.s0und.s0undtv/Twouich/74`), et les
+  lignes qui avaient tué le flux (`AudioHardening background playback would be muted`,
+  `InetDiagMessage: Destroyed live tcp sockets for uids={10267}`) **ne visent plus l'app** : elles
+  ne concernent que d'autres uid pendant la veille.
+- **Reste** — la lecture meurt quand même ~10 s après l'extinction : `dumpsys power` ne montre
+  **aucun verrou** de l'app (`Wake Locks: size=1`, seulement `dream:doze`) et les soutirages de
+  playlist s'arrêtent. Le service protège donc l'app des restrictions d'arrière-plan, mais le **CPU
+  part en veille** faute de `PARTIAL_WAKE_LOCK` tenu (`twouich:lecture`).
+
+Lecture de contrôle, deux commandes :
+
+```bash
+# le verrou est-il tenu ?
+adb -s <serie> shell "dumpsys power | sed -n '/Wake Locks/,/Suspend Blockers/p'"
+# la lecture continue-t-elle ? (compter avant/apres l'extinction)
+adb -s <serie> shell "logcat -c"; adb -s <serie> shell "input keyevent 26"; sleep 120
+adb -s <serie> shell "logcat -d | grep -c 'segments pub retires'"
+```
+
+### 8.14 Mode TV : trois gardes à polarité inversée, et ce que la mesure a montré (22/09)
+
+Le build `476aeb1a…` (v1.0.14, celui qui était installé sur la Freebox le 22/09 au matin) réparait
+deux des trois symptômes — mais **pour une mauvaise raison**, et la mesure de la veille l'a montré.
+
+**Ce que les gardes « mode TV d'abord » faisaient réellement.** Elles testaient
+
+```smali
+    iget v1, v0, ...->uiMode:I
+    and-int/lit8 v1, v1, 0xf
+    const/4 v2, 0x4
+    if-ne v1, v2, :cond_twouich_tv_headers     # <- saute quand le type N'EST PAS la television
+```
+
+`if-ne` saute quand le type **diffère** de `TELEVISION` — donc vers la branche TV. Sur un
+téléviseur, le test ne saute pas : c'est le seuil de dp qui décide, et une Freebox à 540 dp tombait
+dans la branche **téléphone**. Sur un téléphone, le test saute vers la branche **TV**. La réponse
+était juste sur la Freebox **par accident**, et fausse partout ailleurs. La correction est `if-eq`
+(type **égal** à `TELEVISION`) : le seuil de dp saute vers la même destination au-delà de 600 dp, et
+le repli est le téléphone.
+
+**Comment on l'a vu, et pas en relisant le code :**
+
+```bash
+adb -s <serie> shell "logcat -d | grep Twouich | tail"
+#   I/Twouich : veille : service de premier plan actif (mediaPlayback)   <- SUR LE TELEVISEUR
+#   I/Twouich : interface : TV (mode systeme ou ecran large)             <- la trace disait TV
+```
+
+La trace disait TV (donc `twouichTvInterface` renvoyait bien 1) pendant que le **service réservé au
+téléphone** démarrait : deux lecteurs de la même intention se contredisaient. `dumpsys activity
+services` donnait le service en premier plan, notification comprise — sur un téléviseur.
+
+**Ce que la même session a corrigé dans les lectures de mesure :** la géométrie relevée d'abord
+(`StyledPlayerView 0,0-1632,1080`, chat `1632,0-1920,968`) avait été prise pour celle de l'amont.
+C'est en fait la **disposition téléphone paysage** (largeur = hauteur × 16/9, plafonnée à 85 %), donc
+l'empilement téléphone appliqué sur la TV. La géométrie de l'amont, elle, est visible dans
+`patch/res-tv/activity_player.xml` : `ExoPlayer` en `match_parent` (plein écran) et le chat en
+**225 dp** flottant en bas à droite. Une géométrie qui « ressemble » à la nôtre ne prouve pas qui a
+écrit la disposition : la trace, elle, dit lequel des deux chemins a tourné — et ici les deux ont
+tourné en même temps, ce qui est précisément le défaut.
+
+**Mesures du build corrigé** (`68a72bc4…`, installé par `install -r`, self-test embarqué **28/28**
+sur les octets installés) :
+
+| Ce qu'on cherchait | Mesure | Verdict |
+|---|---|---|
+| trace du mode | `I/Twouich : interface : TV (mode systeme ou ecran large)` | ✅ |
+| service de premier plan sur TV | `dumpsys activity services` → *(nothing)*, aucune ligne `veille :` | ✅ la TV est laissée intacte |
+| accueil : barre téléphone | aucun id `twouich_phone_*` dans `uiautomator dump` | ✅ |
+| accueil : panneau Leanback | `browse_headers_root 0,0-540,1080` **visible**, `browse_headers` (VerticalGridView) `0,0-524,1080`, dock déployé à 640 px après deux GAUCHE ; entrées réelles à l'écran (`Settings`, `About`, `Changelog`, `VOD History`…) | ✅ la colonne est revenue |
+| lecteur : géométrie | `StyledPlayerView 0,0-1920,1080` (plein écran, comme l'amont), `ChatRecycleView 1470,540-1920,1080` (= 225 dp, la boîte de chat de l'amont), `ChatRecycleView2` en `G` | ✅ géométrie de l'amont |
+| filtre | `playlist nettoyee 14297 -> 14297 octets, segments pub retires : 0` toutes les ~2 s, 0 erreur de lecture | ✅ |
+
+**Ce qui reste non mesuré sur ce build** : le chemin **téléphone** (aucun appareil connecté au
+moment de la session — pas d'émulateur, le Xiaomi hors ADB). La logique est vérifiable à la main
+(`if-eq` non pris → test de dp → 540 dp < 600 → retour 0, le code téléphone s'exécute), et c'est
+justement la branche que la polarité inversée cassait : à rejouer sur le téléphone avant de
+considérer l'interface terminée (`patch/test-chat-toggle.sh`, § 8.9).
+
+**Leçon.** Un verrou de test écrit à partir du code qu'on vient d'écrire ne prouve rien : les deux
+verrous de `test_smali_branches.py` ajoutés le 21/09 exigeaient `if-ne v2, v3, :twouich_tv_by_mode`
+— la forme fautive. Ils sont alignés sur `if-eq` depuis, avec la raison écrite à côté.

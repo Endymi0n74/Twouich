@@ -1,5 +1,38 @@
 # Journal des modifications — Twouich
 
+## v1.0.14 — 22 septembre 2026
+
+- **Le mode TV est réparé** : l'interface TV se décidait sur le seuil de 600 dp — or la Freebox Pop
+  (1920×1080 en 320 dpi) déclare 540 dp et recevait donc la disposition téléphone (barre de
+  navigation tactile à l'accueil, panneau Leanback replié, géométrie empilée dans le lecteur). La
+  décision passe par le **mode déclaré par le système** (`uiMode`), et les layouts d'origine sont
+  posés dans `layout-television/` (+ `layout-sw600dp/`, `layout-sw540dp/`) depuis la capture
+  versionnée `patch/res-tv/` : une TV ne peut plus recevoir un layout téléphone, quel que soit son
+  nombre de dp. Mesuré sur la Freebox : plus aucun id `twouich_phone_*` à l'accueil, **panneau
+  latéral de nouveau déployé** (`browse_headers 0,0-540,1080`), lecteur dans la géométrie de
+  l'amont (vidéo plein écran, chat 225 dp en bas à droite).
+- **Trois gardes lisaient la polarité à l'envers** (`if-ne` au lieu de `if-eq` sur `uiMode`) : le
+  téléviseur était traité en TV *par accident*, par le seul seuil de dp, et tout appareil non-TV
+  sautait vers la branche TV. Conséquence mesurée : le **service de premier plan démarrait sur le
+  téléviseur** (notification comprise), et un téléphone aurait reçu la disposition TV. Corrigé et
+  rejoué sur la Freebox (aucun service, trace `interface : TV`), verrous de test alignés.
+- **La lecture en veille** : le service de premier plan `mediaPlayback` crée son canal de
+  notification dès l'API 26 et ses branchements sont corrigés (deux polarités inversées qui
+  faisaient planter le service au démarrage). Il est **réservé au téléphone** (`startIfPhone`), et
+  le démontage d'`onStop()` est sauté écran éteint. Le CPU reste à régler pour la veille — détail en
+  `TEST-DEVICE.md` § 8.13.
+## v1.0.13 — 21 septembre 2026
+
+- **La lecture survit vraiment à l'écran éteint** : un service de premier plan `mediaPlayback` (avec sa description de lecture) garde l'application du bon côté du système quand l'écran s'éteint. Mesure du 21/09 sur le téléphone : sans lui, le système **détruisait les sockets TCP** de l'app passée en arrière-plan et HyperOS annonçait sa mise en sourdine — le flux mourait au bout de 10 s sur `UnknownHostException`. Démarrage avec le lecteur, arrêt avec lui, et **téléphone seulement** : le mode TV ne change pas.
+- **La page « Application info » ne montre plus de build obsolète** : la variante `standalone` de l'amont disparaît.
+
+## v1.0.12 — 21 septembre 2026
+
+- **La barre « Envoyer un message » se place au-dessus du clavier** : la fenêtre se réduit quand le clavier s'ouvre, au lieu de laisser la barre au bas de l'écran, cachée derrière les touches.
+- **Les lecteurs ne sont plus libérés à l'extinction de l'écran** : le passage en veille ne libère plus ExoPlayer (garde sur `onStop`). Insuffisant à lui seul — mesuré le 21/09 —, voir la v1.0.13.
+- **La page « Informations sur l'application » dit la vérité** : elle affichait encore les métadonnées de compilation du projet d'origine (« beta_144 », code 144, branche STV-64, date de build de décembre 2025) ; elle montre la version livrée et la date de publication.
+- **Le bouton de repli du chat est retiré** : depuis que le chat vit sous la vidéo, il ne changeait plus la taille de l'image ; le chat reste toujours visible.
+
 ## v1.0.11 — 21 septembre 2026
 
 - **En paysage, le direct occupe tout le bord gauche jusqu'en bas** : la vidéo est calée en 16:9 plein écran (plus aucune bande noire) et le chat tient une colonne à droite, avec la saisie sous lui — au lieu de l'image centrée avec le chat en surimpression.

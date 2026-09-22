@@ -99,7 +99,10 @@ bash patch/build.sh          # APK upstream → apktool d → patch.py → apkto
   sur place (`secret-scan: ok <raison>`) : l'exception reste lisible dans le diff. Corollaire — quand un
   test a besoin d'une valeur qui ressemble à un secret, il l'**assemble à l'exécution** (`FIREBASE_TRACE`
   dans `test_apk.py`) : le scanner ne voit pas les fragments, c'est sa limite assumée, écrite dans son
-  en-tête et vérifiée par son test.
+  en-tête et vérifiée par son test. Le même contrôle tourne **avant chaque commit**, sur l'index seul
+  (`.githooks/pre-commit`, à brancher une fois : `bash patch/install-hooks.sh`) : un secret poussé est
+  un secret perdu, et la CI le voit de toute façon trop tard. Seule sortie assumée :
+  `git commit --no-verify`.
 - `patch/patch.py` **échoue bruyamment** si un motif upstream a changé. Ne « répare » jamais ce
   message en assouplissant le motif : c'est le signal qu'une nouvelle beta upstream demande
   d'adapter le patch.
@@ -110,11 +113,11 @@ bash patch/build.sh          # APK upstream → apktool d → patch.py → apkto
 
 ```bash
 python patch/tests/test_sanitizer.py       # 48 assertions : règles de nettoyage (miroir Python) + fixture SSAI réelle du 18/09/2026 + sentinelle marqueur inconnu
-python patch/tests/test_smali_branches.py  # 11 assertions : branchements réels du smali
+python patch/tests/test_smali_branches.py  # 40 assertions : branchements réels du smali
 python patch/tests/test_update_check.py    # 20 vérifications : logique updater (table de vérité + gardes smali
                                            #   si work/decoded/ existe) — « annonce en retard » -> silence
 python patch/tests/test_brand.py           # 14 assertions : identité visuelle (voir plus bas)
-python patch/tests/test_apk.py             # 18 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),
+python patch/tests/test_apk.py             # 48 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),
                                            #   dont l'accord avec update.json et les pages légales embarquées
 python patch/tests/test_normalize_apk.py   # 29 vérifications : le normaliseur canonise horodatage
                                            #   et ordre des entrées ZIP sans rien toucher d'autre
