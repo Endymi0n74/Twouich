@@ -1,0 +1,44 @@
+#!/bin/bash
+# ═══════════════════════════════════════════════════════════════════════
+# pre-commit — refuser un secret AVANT qu'il n'entre dans l'historique
+# ═══════════════════════════════════════════════════════════════════════
+# Branché par « bash patch/install-hooks.sh » (qui pointe core.hooksPath sur
+# .githooks/). Ce hook ne regarde QUE l'index : ce qui part dans le commit, pas
+# l'arbre de travail entier.
+#
+# Pourquoi avant et pas après : le 21/09, GitHub a signalé une fuite (les
+# identifiants Firebase du projet d'amont écrits en clair dans un fichier de
+# test, commit 00999d6). patch/check-secrets.py a été écrit pour ça, mais la CI
+# le lance APRÈS le push — quand le secret est déjà dans l'historique, donc chez
+# tout le monde, et une alerte de fuite ne s'efface pas en corrigeant le
+# fichier. Le seul moment où le refus est encore gratuit, c'est ici.
+#
+# Sortie : 0 le commit continue ; 1 le commit est refusé (git affiche le
+# message ci-dessous). L'échappatoire est assumée et dite à l'écran :
+#   git commit --no-verify
+# ═══════════════════════════════════════════════════════════════════════
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || ROOT="."
+SCANNER="$ROOT/patch/check-secrets.py"
+if [ ! -f "$SCANNER" ]; then
+    echo "pre-commit : $SCANNER introuvable — contrôle des secrets ignoré"
+    exit 0
+fi
+
+PY="$(command -v python || command -v python3 || true)"
+if [ -z "$PY" ]; then
+    echo "❌ pre-commit : python introuvable, les secrets de l'index n'ont pas pu être contrôlés."
+    echo "   Installer python, ou commiter sans le contrôle : git commit --no-verify"
+    exit 1
+fi
+
+if ! PYTHONIOENCODING=utf-8 "$PY" "$SCANNER" --staged --quiet; then
+    echo
+    echo "❌ commit refusé : un littéral ressemblant à un secret est dans l'index."
+    echo "   Sortie : variable d'environnement, secret GitHub, ou fragments réassemblés"
+    echo "   à l'exécution (cf. FIREBASE_TRACE dans patch/tests/test_apk.py). Si ce n'est"
+    echo "   pas un secret : secret-scan: ok <raison>, sur la ligne ou celle d'avant."
+    echo "   Passer outre pour ce commit : git commit --no-verify"
+    exit 1
+fi
+exit 0
