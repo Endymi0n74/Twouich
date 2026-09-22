@@ -57,6 +57,59 @@ def all_smali():
     return {f.name: f.read_text(encoding="utf-8") for f in files}
 
 
+def skipped_creation(smali_name, smali_text):
+    """Branchements qui sautent la CREATION du champ statique qu'ils testent.
+
+    Motif fautif, mesure sur le telephone le 21/09 (PlayerKeepAlive.twouichWake
+    et twouichSession) :
+
+        sget-object v0, L...;->cache:...
+        if-eqz v0, :cache_done      # saute quand le champ est NUL
+        ... new-instance / sput-object v0, L...;->cache:...
+      :cache_done                   # <- arrive ici avec v0 TOUJOURS nul
+
+    « if-eqz » saute exactement dans le cas ou la creation est necessaire : le
+    champ reste nul, et isHeld() ou tout autre appel sur l'objet rendu tombe sur
+    un objet nul. Le pendant « if-nez » est correct : il saute quand le champ est
+    deja rempli.
+    """
+    lines = smali_text.splitlines()
+    out = []
+    label_at = {}
+    for n, line in enumerate(lines):
+        s = line.strip()
+        if s.startswith(":") and " " not in s and len(s) > 1:
+            label_at.setdefault(s[1:], n)
+    for n, line in enumerate(lines):
+        s = line.strip()
+        if not s.startswith("sget-object "):
+            continue
+        parts = s.replace(",", " ").split()
+        register, field = parts[1], parts[2]
+        for m in range(n + 1, len(lines)):
+            nxt = lines[m].strip()
+            if not nxt or nxt.startswith("#"):
+                continue
+            if not nxt.startswith("if-eqz %s," % register):
+                break
+            label = nxt.split(",")[-1].strip().lstrip(":")
+            end = label_at.get(label)
+            if end is None:
+                break
+            if end <= m:
+                break
+            for k in range(m + 1, end):
+                body = lines[k].strip()
+                if body.startswith("sput-object %s," % register) and field in body:
+                    out.append(
+                        "%s:%d %s saute la creation de %s"
+                        % (smali_name, m + 1, nxt.split(",")[0].strip(), field)
+                    )
+                    break
+            break
+    return out
+
+
 def check(label, condition, detail=""):
     checks.append((label, bool(condition), detail))
 
@@ -70,6 +123,90 @@ def branch_lines(text):
             if stripped.startswith(op):
                 out.append((n, stripped))
                 break
+    return out
+
+
+# --- Registres : aucune ecriture dans un registre de parametre -----------------
+# Le 21/09/2026, PlayerKeepAlive.stop(Context) declarait `.locals 2` alors que son
+# corps ecrivait dans v2 — qui, avec deux registres locaux, EST p0 (le Context).
+# Le `const-class v2` a donc remplace le Context par un Class, et le verificateur
+# d'ART a rejete TOUTE la classe au demarrage du lecteur :
+#   VerifyError: [0xB] 'this' argument 'Reference: java.lang.Class' not instance
+#   of 'Reference: android.content.Context'
+# Le build, le patch et les autres tests passaient : seule la mesure sur appareil
+# l'a vu. La regle est donc posee ici, hors appareil : avec `.locals N`, les
+# registres v0..v(N-1) sont locaux et vN, v(N+1)… sont p0, p1… Ecrire dans l'un
+# d'eux casse le contrat de type que le verificateur verifie.
+# Instructions qui IMPOSENT un type a la valeur ecrite (constante, nouvel objet,
+# champ lu, exception). Une reutilisation du parametre par move-result-object
+# (PlaylistSanitizer.a le fait pour renvoyer sa chaine transformee) est licite :
+# elle ne change pas le type. C'est une constante ou un objet neuf dans un
+# registre de parametre qui casse le contrat verifie par ART.
+TYPE_IMPOSING = (
+    "const/4", "const/16", "const", "const/high16",
+    "const-wide", "const-wide/16", "const-wide/32", "const-wide/high16",
+    "const-string", "const-string/jumbo", "const-class",
+    "new-instance", "new-array", "move-exception",
+    "instance-of", "array-length",
+    "sget", "sget-object", "sget-boolean", "sget-byte", "sget-char", "sget-short",
+    "sget-wide",
+    "iget", "iget-object", "iget-boolean", "iget-byte", "iget-char", "iget-short",
+    "iget-wide",
+)
+
+
+def _param_width(signature: str) -> int:
+    """Nombre de registres de parametre d'une methode (this compris)."""
+    params = signature.split("(", 1)[1].split(")", 1)[0] if "(" in signature else ""
+    count = 0 if " static " in signature else 1
+    i = 0
+    while i < len(params):
+        ch = params[i]
+        if ch == "[":
+            i += 1
+            continue
+        if ch == "L":
+            i = params.index(";", i) + 1
+            count += 1
+            continue
+        count += 2 if ch in "JD" else 1
+        i += 1
+    return count
+
+
+def param_writes(name: str, text: str) -> list[str]:
+    """Ecritures dans un registre de parametre : « fichier:methode v2 (= p0) »."""
+    body_re = re.compile("(?ms)^[.]method ([^\n]*)\n(.*?)^[.]end method")
+    locals_re = re.compile("^[ 	]*[.](locals|registers) ([0-9]+)", re.M)
+    register_re = re.compile("([vp])([0-9]+)")
+    out = []
+    for block in body_re.finditer(text):
+        signature, body = block.group(1), block.group(2)
+        locals_line = locals_re.search(body)
+        if locals_line is None:
+            continue
+        declared, count = locals_line.group(1), int(locals_line.group(2))
+        if declared == "locals":
+            first_param = count
+        else:
+            first_param = count - _param_width(signature)
+        method_name = signature.split("(")[0].split()[-1]
+        for raw in body.splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if not line or line.startswith(".") or line.startswith(":"):
+                continue
+            words = line.split()
+            if words[0] not in TYPE_IMPOSING or len(words) < 2:
+                continue
+            match = register_re.fullmatch(words[1].rstrip(","))
+            if match is None:
+                continue
+            index = int(match.group(2))
+            if match.group(1) == "p":
+                index += first_param
+            if index >= first_param:
+                alias = "p%d" % (index - first_param)
+                out.append(f"{name}:{method_name} ecrit dans {words[1].rstrip(chr(44))} (= {alias})")
     return out
 
 
@@ -385,6 +522,133 @@ def main():
         "l'identifiant existait : le rappel PiP ne masquait ni le chat ni la "
         "saisie.",
     )
+
+
+
+    # --- 16. Registres : ecrire dans un parametre, jamais ----------------------
+    # Le 21/09, le build et tous les tests hors appareil passaient pendant que le
+    # lecteur plantait : PlayerKeepAlive.stop() avait `.locals 2` et ecrivait dans
+    # v2, c'est-a-dire dans p0 (le Context). Seul le verificateur d'ART l'a vu.
+    offenders = []
+    for smali_name, smali_text in all_smali().items():
+        offenders += param_writes(smali_name, smali_text)
+    check(
+        "greffon entier : aucune ecriture dans un registre de parametre",
+        not offenders,
+        "; ".join(offenders[:4]) + " -- un .locals trop court fait de vN l'alias de "
+        "pN : la classe est rejetee et l'application plante au premier onResume",
+    )
+
+    # --- 17. Polarite des branchements sur les champs mis en cache ---------------
+    # Le 21/09, deux fautes de polarite ont survecu au build ET a tous les tests
+    # hors appareil : le verrou de veille sautait sa creation (NullPointerException
+    # sur isHeld, lecteur plante a l'ouverture) et la session media n'etait jamais
+    # creee (methode qui renvoyait nul, sans erreur visible).
+    offenders = []
+    for smali_name, smali_text in all_smali().items():
+        offenders += skipped_creation(smali_name, smali_text)
+    check(
+        "greffon entier : aucun branchement ne saute la creation du champ teste",
+        not offenders,
+        "; ".join(offenders[:4]) + " -- « if-eqz » saute quand le champ est nul : "
+        "la creation est evitee exactement quand elle est necessaire (voir §6).",
+    )
+    keepalive = all_smali().get("PlayerKeepAlive.smali", "")
+    check(
+        "PlayerKeepAlive : le verrou et la session sont crees quand le champ est nul",
+        "if-nez v0, :twouich_wake_ready" in keepalive
+        and "if-nez v0, :twouich_sess_done" in keepalive,
+        "« if-eqz » a ces deux endroits laisse le verrou nul (NullPointerException "
+        "sur isHeld) et rend une session nulle.",
+    )
+    check(
+        "PlayerKeepAlive : le canal de notification est cree a partir de l'API 26",
+        "if-ge v0, v1, :twouich_chan_go" in keepalive
+        and "if-lt v0, v1, :twouich_chan_go" not in keepalive,
+        "« if-lt » saute la creation du canal des l'API 26 : plus aucune "
+        "notification de lecture, et un startForeground sans canal.",
+    )
+
+    # --- 18. Interface TV : une seule source de verite -------------------------
+    # Le 21/09, la TV a ete cassee par un seuil de dp : un televiseur 1080p en
+    # 320 dpi declare 540 dp, donc la disposition telephone s'appliquait a un vrai
+    # televiseur — et l'amont ne livre qu'une seule configuration de layout
+    # lecteur, donc c'est bien `layout/` que la TV gonfle.
+    check("lecteur : toute ecriture passe par la source unique TV",
+          patcher.count("player_smali.write_text(") == 1
+          and "def write_player(final: str) -> None:" in patcher,
+          "une ecriture hors de write_player laisserait un seuil de dp decider de "
+          "l'interface : c'est exactement la regression TV du 21/09.")
+    # `if-eq` et non `if-ne` : mesure du 22/09 sur la Freebox — avec `if-ne`,
+    # tout appareil NON television sautait vers la branche TV (un telephone
+    # passait pour une TV) et la Freebox n'etait TV que par accident, par le
+    # seul seuil de dp : le service de premier plan se lancait sur le televiseur.
+    check("lecteur : twouichTvInterface lit le mode TV du systeme",
+          "uiMode:I" in patcher
+          and "and-int/lit8 v2, v2, 0xf" in patcher
+          and "if-eq v2, v3, :twouich_tv_by_mode" in patcher
+          and "if-ge v2, v3, :twouich_tv_by_mode" in patcher,
+          "sans le mode TV, un televiseur 540 dp retombe dans la branche telephone.")
+    # Meme inversion que ci-dessus : `if-eq` saute vers le panneau deploye quand
+    # le mode EST la television, le seuil de dp saute vers le meme endroit au-dela
+    # de 600 dp, et le repli est le telephone.
+    check("panneau Leanback : etat TV lu dans le mode systeme",
+          "if-eq v1, v2, :cond_twouich_tv_headers" in patcher
+          and "if-ge v1, v2, :cond_twouich_tv_headers" in patcher,
+          "l'etat du panneau etait calcule sur les seuls dp : la TV perdait sa "
+          "colonne de navigation (HEADERS_HIDDEN).")
+    # Borne au bloc du garde : « move-result v0 » est legitime ailleurs.
+    tv_rows = patcher[patcher.index('TV_INTERFACE_ROWS = ('):patcher.index('TV_INTERFACE_CALL =')]
+    check("lecteur : le garde TV n'ecrit pas dans le registre du Resources",
+          "    move-result v2" in tv_rows and "    move-result v0" not in tv_rows,
+          "un move-result v0 ecrase le Resources que twouichPhoneStackedLayout lit "
+          "plus loin : le verificateur d'ART rejette la classe entiere (VerifyError "
+          "mesure sur le telephone le 21/09, lecteur plante a l'ouverture).")
+    tv_source = HERE.parent / "res-tv" / "activity_player.xml"
+    tv_text = tv_source.read_text(encoding="utf-8") if tv_source.is_file() else ""
+    check("layout TV versionne, et vierge de toute greffe",
+          bool(tv_text) and "twouich" not in tv_text
+          and "@id/ChatRecycleView" in tv_text,
+          "patch/res-tv/activity_player.xml doit etre la capture de l'amont : "
+          "c'est la seule source du layout TV, jamais le layout telephone.")
+    # --- 19. Veille : garde sur TOUT le demontage d'onStop() --------------------
+    # Mesure du 21/09 sur le telephone, service de premier plan `mediaPlayback`
+    # actif : le demontage d'onStop() est large — `w2()`/`R1()` (instance
+    # principale) puis `x2()`/`R1()` (multiview) puis `o3()` — et c'est lui qui
+    # coupe le decodeur (`disconnectFromSurface`) et l'AudioTrack
+    # (`setStreamEndDone`) a la seconde de l'extinction. Proteger le seul `o3()`
+    # ne suffisait donc pas, et la premiere version branchait a l'envers
+    # (`if-eqz` sur `:twouich_screen_off_stop`) : elle liberait quand l'ecran
+    # etait ETEINT.
+    anchor_src = patcher[patcher.index("PHONE_SCREEN_OFF_ANCHOR = "):
+                         patcher.index("PHONE_SCREEN_OFF_O3 = ")]
+    veille_fn = patcher[patcher.index("def _patch_screen_off_stop("):
+                        patcher.index("# --- Interface TV")]
+    check("veille : le garde enveloppe tout le demontage, pas le seul o3()",
+          "->w2()LG6/i;" in anchor_src
+          and "body[:anchor]" in veille_fn
+          and "body[anchor:super_call]" in veille_fn,
+          "un garde pose devant o3() seul laisse w2/R1 et x2/R1 demonter les "
+          "lecteurs : la lecture s'arrete des que l'ecran s'eteint (mesure du "
+          "21/09), service de premier plan ou non.")
+    # Borne au bloc du garde : la forme precedente, gardee pour la reparation
+    # des arbres deja patches, porte encore l'etiquette `..._stop`.
+    guard_src = patcher[patcher.index("PHONE_SCREEN_OFF_GUARD = "):
+                        patcher.index("PHONE_SCREEN_OFF_KEPT = ")]
+    check("veille : ecran eteint => demontage saute (polarite du branchement)",
+          "if-eqz v1, :twouich_screen_off_kept" in guard_src
+          and ":twouich_screen_off_stop" not in guard_src,
+          "la forme inversee libere quand l'ecran est eteint, soit exactement "
+          "l'inverse de l'intention.")
+    check("veille : la forme inversee des arbres deja patches est retiree",
+          "PHONE_SCREEN_OFF_LEGACY = " in patcher
+          and "if PHONE_SCREEN_OFF_LEGACY in body:" in veille_fn,
+          "sans cette reparation, un arbre deja patche garde l'ancien garde : "
+          "deux gardes cohabitent et le build ne change jamais de SHA.")
+    check("veille : invoke-super reste appele hors du garde",
+          "PHONE_SCREEN_OFF_SUPER" in veille_fn
+          and "body[:anchor]" in veille_fn,
+          "sauter invoke-super casserait le cycle de vie de l'Activity.")
 
     # --- rapport ----------------------------------------------------------------
     width = max(len(label) for label, _, _ in checks)

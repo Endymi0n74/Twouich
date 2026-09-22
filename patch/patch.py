@@ -144,6 +144,334 @@ PHONE_PIP_RESTORE_TRACE = (
 # revenait tout seul alors que l'état (twouichChatHidden) disait toujours
 # « replié » (mesuré le 21/09). Le garde est réapposé aux arbres déjà patchés
 # par la même mécanique que PHONE_PIP_GUARD : une seule source de texte.
+# Ecran eteint : la lecture continue. onStop() demonte les deux instances
+# ExoPlayer (`w2()`/`R1()`, `x2()`/`R1()`) puis `o3()` — et c'est ce demontage
+# qui coupait le direct des que l'ecran s'eteignait (« si je mets le telephone
+# en veille je veux que le stream continue », 21/09). Mesure du 21/09 sur le
+# telephone, service de premier plan `mediaPlayback` actif : `disconnectFromSurface`
+# (decodeur video) et `setStreamEndDone` (AudioTrack) a la seconde meme de
+# l'extinction — proteger le seul `o3()` ne suffisait pas. Le garde enveloppe
+# donc tout le demontage, et `invoke-super` reste appele dans tous les cas.
+PHONE_SCREEN_OFF_MARK = "ecran eteint : lecture maintenue"
+
+
+def _smali_lines(*rows: str) -> str:
+    """Assemble un bloc smali, une ligne par element.
+
+    Les gabarits du fichier ecrivent leurs fins de ligne en echappement ; ici on
+    les produit, pour n'avoir aucun caractere d'echappement a relire ni a casser
+    en modifiant le bloc.
+    """
+    return "".join(row + chr(10) for row in rows)
+
+
+PHONE_SCREEN_OFF_NL = chr(10)
+
+# Premiere ligne du demontage d'onStop() : point d'insertion du garde.
+PHONE_SCREEN_OFF_ANCHOR = _smali_lines(
+    "    invoke-virtual {p0}, "
+    "Lcom/s0und/s0undtv/activities/PlayerActivity;->w2()LG6/i;",
+)
+# Appel qui fermait la lecture : la forme precedente du garde le protegeait seul.
+PHONE_SCREEN_OFF_O3 = _smali_lines(
+    "    invoke-virtual {p0}, "
+    "Lcom/s0und/s0undtv/activities/PlayerActivity;->o3()V",
+)
+PHONE_SCREEN_OFF_SUPER = "    invoke-super {p0}, Landroid/app/Activity;->onStop()V"
+PHONE_SCREEN_OFF_DONE = "    :twouich_screen_off_done"
+PHONE_SCREEN_OFF_GOTO = "    goto :twouich_screen_off_done"
+
+# Forme ecrite par la v1.0.13/159 (garde devant `o3()` seul, polarite inversee).
+# Elle doit disparaitre d'un arbre deja patche : deux gardes ne peuvent pas
+# cohabiter, et un arbre reutilise tel quel ne changerait jamais de SHA.
+PHONE_SCREEN_OFF_LEGACY = _smali_lines(
+    "    # Ecran eteint : on NE libere PAS les lecteurs, le telephone sert de",
+    "    # lecteur de poche. Registres v0/v1 : ceux de la methode (.locals 2),",
+    "    # tous deux morts a cet endroit du corps.",
+    "    const-string v1, \"power\"",
+    "    invoke-virtual {p0, v1}, Landroid/content/Context;->getSystemService(",
+    "Ljava/lang/String;)Ljava/lang/Object;",
+    "    move-result-object v1",
+    "    check-cast v1, Landroid/os/PowerManager;",
+    "    invoke-virtual {v1}, Landroid/os/PowerManager;->isInteractive()Z",
+    "    move-result v1",
+    "    if-eqz v1, :twouich_screen_off_stop",
+    "    const-string v0, \"Twouich\"",
+    "    const-string v1, \"ecran eteint : lecture maintenue\"",
+    "    invoke-static {v0, v1}, Landroid/util/Log;->i(",
+    "Ljava/lang/String;Ljava/lang/String;)I",
+    "    goto :twouich_screen_off_done",
+    "    :twouich_screen_off_stop",
+) + PHONE_SCREEN_OFF_O3 + _smali_lines(PHONE_SCREEN_OFF_DONE)
+
+# Garde : on saute tout le demontage quand l'ecran N'EST PAS interactif.
+# Registres v0/v1 : ceux de la methode (`.locals 2`), morts a cet endroit.
+PHONE_SCREEN_OFF_GUARD = _smali_lines(
+    "    # Ecran eteint : on NE demonte PAS les lecteurs, le telephone sert de",
+    "    # lecteur de poche. Mesure du 21/09 : ce demontage coupe le decodeur",
+    "    # (disconnectFromSurface) et l'AudioTrack (setStreamEndDone) a la",
+    "    # seconde de l'extinction, service de premier plan actif ou non.",
+    "    # Polarite : `if-eqz` sur isInteractive() saute quand l'ecran est",
+    "    # eteint ; ecran allume, on demonte comme avant.",
+    "    const-string v1, \"power\"",
+    "    invoke-virtual {p0, v1}, Landroid/content/Context;->getSystemService(",
+    "Ljava/lang/String;)Ljava/lang/Object;",
+    "    move-result-object v1",
+    "    check-cast v1, Landroid/os/PowerManager;",
+    "    invoke-virtual {v1}, Landroid/os/PowerManager;->isInteractive()Z",
+    "    move-result v1",
+    "    if-eqz v1, :twouich_screen_off_kept",
+)
+# Chemin « ecran eteint » : on trace et on rejoint la sortie, sans demonter.
+PHONE_SCREEN_OFF_KEPT = _smali_lines(
+    "    :twouich_screen_off_kept",
+    "    const-string v0, \"Twouich\"",
+    "    const-string v1, \"ecran eteint : lecture maintenue (demontage saute)\"",
+    "    invoke-static {v0, v1}, Landroid/util/Log;->i(",
+    "Ljava/lang/String;Ljava/lang/String;)I",
+)
+
+
+def _patch_screen_off_stop(text: str) -> tuple[str, bool]:
+    """Maintient la lecture quand l'ecran s'eteint (cf. PHONE_SCREEN_OFF_GUARD).
+
+    Le garde enveloppe TOUT le demontage d'onStop() (w2/R1/x2/R1/o3) : la mesure
+    du 21/09 a montre que proteger le seul o3() laissait le demontage couper le
+    decodeur video et l'AudioTrack a la seconde de l'extinction. `invoke-super`
+    reste appele dans tous les cas.
+    """
+    match = re.search(r"(?ms)^[.]method protected onStop[(][)]V.*?^[.]end method", text)
+    if match is None:
+        fail("onStop() introuvable dans PlayerActivity.smali (veille)")
+    body = match.group(0)
+    # Arbre deja patche : on remet le corps d'origine avant de reposer le garde.
+    if PHONE_SCREEN_OFF_LEGACY in body:
+        body = body.replace(PHONE_SCREEN_OFF_LEGACY, PHONE_SCREEN_OFF_O3, 1)
+    for injected in (PHONE_SCREEN_OFF_GUARD, PHONE_SCREEN_OFF_KEPT, PHONE_SCREEN_OFF_GOTO):
+        if injected in body:
+            body = body.replace(injected, "", 1)
+    label = PHONE_SCREEN_OFF_DONE + PHONE_SCREEN_OFF_NL
+    if label in body:
+        body = body.replace(label, "", 1)
+    anchor = body.find(PHONE_SCREEN_OFF_ANCHOR)
+    if anchor < 0:
+        fail("demontage (w2/R1) introuvable dans onStop() (veille)")
+    super_call = body.find(PHONE_SCREEN_OFF_SUPER)
+    if super_call < 0 or super_call < anchor:
+        fail("invoke-super onStop() introuvable apres le demontage (veille)")
+    new_body = (body[:anchor]
+                + PHONE_SCREEN_OFF_GUARD
+                + body[anchor:super_call]
+                + PHONE_SCREEN_OFF_GOTO + PHONE_SCREEN_OFF_NL
+                + PHONE_SCREEN_OFF_KEPT
+                + PHONE_SCREEN_OFF_DONE + PHONE_SCREEN_OFF_NL
+                + body[super_call:])
+    if new_body == body:
+        return text, False
+    return text[:match.start()] + new_body + text[match.end():], True
+
+
+# --- Interface TV : une seule source de verite --------------------------------
+# Le mode TV ne se lit PAS dans les dp : un televiseur 1080p en 320 dpi declare
+# 540 dp (mesure du 21/09 sur la Freebox), donc un seuil a 600 dp laissait la
+# disposition telephone s'appliquer sur un vrai televiseur. Le test juste est le
+# mode declare par le systeme : uiMode == UI_MODE_TYPE_TELEVISION, le seuil de
+# dp restant comme filet pour les ecrans larges (tablettes, TV 4K).
+TV_NL = chr(10)
+
+# Le resultat du garde s'ecrit dans v2, JAMAIS dans v0 : dans
+# twouichPhoneStackedLayout, v0 porte le `Resources` que la methode relit plus
+# loin (getDisplayMetrics). Un `move-result v0` y ecrasait cette reference et le
+# verificateur d'ART rejetait la CLASSE ENTIERE — lecteur plante a l'ouverture,
+# reproduit sur le telephone le 21/09.
+TV_INTERFACE_ROWS = (
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;"
+    "->twouichTvInterface()Z",
+    "    move-result v2",
+)
+TV_INTERFACE_CALL = _smali_lines(*TV_INTERFACE_ROWS)
+
+TV_INTERFACE_METHOD = _smali_lines(
+    "",
+    ".method private twouichTvInterface()Z",
+    "    .locals 5",
+    "",
+    "    invoke-virtual {p0}, Landroid/content/Context;->getResources()"
+    "Landroid/content/res/Resources;",
+    "    move-result-object v0",
+    "    invoke-virtual {v0}, Landroid/content/res/Resources;->getConfiguration()"
+    "Landroid/content/res/Configuration;",
+    "    move-result-object v1",
+    "    iget v2, v1, Landroid/content/res/Configuration;->uiMode:I",
+    "    and-int/lit8 v2, v2, 0xf",
+    "    const/4 v3, 0x4",
+    # `if-eq` : le mode TV EST le type 4. Un `if-ne` ici envoyait tout appareil
+    # NON television vers la branche TV — la Freebox ne s'en apercevait pas
+    # (540 dp, seuil juste), un telephone, si.
+    "    if-eq v2, v3, :twouich_tv_by_mode",
+    "    iget v2, v1, Landroid/content/res/Configuration;->smallestScreenWidthDp:I",
+    "    const/16 v3, 0x258",
+    # ecran large : meme destination que le mode TV (TV 4K, tablettes).
+    "    if-ge v2, v3, :twouich_tv_by_mode",
+    "    :twouich_tv_by_mode",
+    "    const-string v3, \"Twouich\"",
+    "    const-string v4, \"interface : TV (mode systeme ou ecran large)\"",
+    "    invoke-static {v3, v4}, Landroid/util/Log;->i("
+    "Ljava/lang/String;Ljava/lang/String;)I",
+    "    const/4 v4, 0x1",
+    "    return v4",
+    "    :twouich_phone_interface",
+    "    const-string v3, \"Twouich\"",
+    "    const-string v4, \"interface : telephone (disposition empilee)\"",
+    "    invoke-static {v3, v4}, Landroid/util/Log;->i("
+    "Ljava/lang/String;Ljava/lang/String;)I",
+    "    const/4 v4, 0x0",
+    "    return v4",
+    ".end method",
+)
+
+
+def use_tv_interface_guard(text: str) -> tuple[str, int]:
+    """Ramene les gardes d'interface au test de mode TV (twouichTvInterface).
+
+    Quatre endroits lisaient le seuil de dp seul : l'empilement du lecteur, le
+    repli du chat, l'incrustation et l'etat des en-tetes. Mesure du 21/09 sur la
+    Freebox : un televiseur 1080p en 320 dpi declare 540 dp, donc la disposition
+    telephone s'appliquait a la TV. Les quatre passent maintenant par la methode
+    dediee — une seule source de verite, verifiee par l'invariant ci-dessous.
+    """
+    rows = text.split(TV_NL)
+    out: list[str] = []
+    changed = 0
+    index = 0
+    while index < len(rows):
+        row = rows[index]
+        if row.startswith("    iget ") and "smallestScreenWidthDp:I" in row:
+            k = index + 1
+            guard = [row]
+            while (k < len(rows) and k - index <= 4
+                   and (rows[k].strip() == "" or not rows[k].strip().startswith("if-"))):
+                guard.append(rows[k])
+                k += 1
+            body = TV_NL.join(guard)
+            if (k < len(rows) and rows[k].strip().startswith("if-ge ")
+                    and "0x258" in body):
+                label = rows[k].strip().split(",")[-1].strip()
+                # Les deux labels internes de twouichTvInterface sont exclus :
+                # sans cela, une seconde execution reecrirait le test de la
+                # methode en un appel a elle-meme (recursion sans fin).
+                if label not in (":twouich_tv_by_mode", ":twouich_phone_interface"):
+                    out.extend(TV_INTERFACE_ROWS)
+                    # Polarite : la garde d'origine sautait quand on etait sur un
+                    # grand ecran (`if-ge dp, 600`) ; l'appel rend VRAI sur une
+                    # TV, donc c'est `if-nez` qui saute au meme endroit. Un
+                    # `if-eqz` y executait la disposition telephone SUR la TV
+                    # (mesure du 21/09 sur la Freebox).
+                    out.append("    if-nez v2, " + label)
+                    changed += 1
+                    index = k + 1
+                    continue
+        out.append(row)
+        index += 1
+    return TV_NL.join(out), changed
+
+
+# Veille : le service de premier plan suit la vie du lecteur. `startIfPhone`
+# sort tout seul quand l'interface est une TV (mode systeme) — c'est la meme
+# source de verite que le reste de l'interface, implementee dans le service
+# (il n'a pas acces a la methode privee du lecteur).
+PHONE_SERVICE_START_ANCHOR = (
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;"
+    "->twouichChatRestore()V\n"
+)
+PHONE_SERVICE_START_CALL = (
+    PHONE_SERVICE_START_ANCHOR
+    + "\n    invoke-static {p0}, Lcom/twouich/adblock/PlayerKeepAlive;"
+      "->startIfPhone(Landroid/app/Activity;)V\n"
+)
+PHONE_SERVICE_STOP_ANCHOR = "    invoke-super {p0}, Landroid/app/Activity;->onDestroy()V\n"
+PHONE_SERVICE_STOP_CALL = (
+    PHONE_SERVICE_STOP_ANCHOR
+    + "\n    invoke-static {p0}, Lcom/twouich/adblock/PlayerKeepAlive;"
+      "->stop(Landroid/content/Context;)V\n"
+)
+
+
+def _patch_playback_calls(text: str) -> tuple[str, int]:
+    """Branche le service de premier plan sur la vie du lecteur (demarrage/arret).
+
+    Sans appel, la classe est dans le dex mais rien ne la demarre : la veille
+    garde son defaut mesure le 21/09 (sockets TCP detruits, flux mort en 10 s).
+    """
+    changed = 0
+    if "PlayerKeepAlive;->startIfPhone" not in text:
+        if PHONE_SERVICE_START_ANCHOR in text:
+            text = text.replace(PHONE_SERVICE_START_ANCHOR, PHONE_SERVICE_START_CALL, 1)
+            changed += 1
+        else:
+            fail("appel twouichChatRestore() introuvable dans onResume() (veille)")
+    if "PlayerKeepAlive;->stop(" not in text:
+        if PHONE_SERVICE_STOP_ANCHOR in text:
+            text = text.replace(PHONE_SERVICE_STOP_ANCHOR, PHONE_SERVICE_STOP_CALL, 1)
+            changed += 1
+        else:
+            fail("invoke-super onDestroy() introuvable dans PlayerActivity (veille)")
+    return text, changed
+
+
+# --- Service de premier plan : declaration au manifeste -----------------------
+PLAYBACK_SERVICE = "com.twouich.adblock.PlayerKeepAlive"
+PLAYBACK_PERMISSIONS = (
+    # FOREGROUND_SERVICE est deja declare par l'amont ; la seule manquante est
+    # celle du type, exigee depuis Android 14 pour `mediaPlayback`.
+    "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+)
+
+
+def install_playback_service(decoded: pathlib.Path) -> None:
+    """Declare le service de premier plan `mediaPlayback` et sa permission.
+
+    La classe peut etre dans le dex : sans declaration, `startForegroundService`
+    est refuse et l'application reste une application d'arriere-plan — le systeme
+    detruit alors ses sockets TCP des que l'ecran s'eteint (mesure du 21/09 sur
+    le telephone : `InetDiagMessage: Destroyed live tcp sockets`, puis
+    `UnknownHostException` au bout de 10 s).
+    """
+    print("[1j/5] Veille (service de premier plan mediaPlayback)")
+    manifest = decoded / "AndroidManifest.xml"
+    text = manifest.read_text(encoding="utf-8")
+    original = text
+
+    for permission in PLAYBACK_PERMISSIONS:
+        if permission in text:
+            continue
+        anchor = "    <uses-permission "
+        if anchor not in text:
+            fail("aucune ligne uses-permission dans AndroidManifest.xml")
+        text = text.replace(
+            anchor,
+            f'    <uses-permission android:name="{permission}"/>' + chr(10) + anchor,
+            1,
+        )
+        log(f"veille : permission {permission.rsplit('.', 1)[-1]} declaree")
+
+    service = (
+        f'        <service android:name="{PLAYBACK_SERVICE}"'
+        ' android:exported="false" android:foregroundServiceType="mediaPlayback" />'
+    )
+    if PLAYBACK_SERVICE not in text:
+        close = "</application>"
+        if close not in text:
+            fail("fin de <application> introuvable dans AndroidManifest.xml")
+        text = text.replace(close, service + chr(10) + close, 1)
+        log("veille : service de premier plan mediaPlayback declare")
+
+    if text != original:
+        manifest.write_text(text, encoding="utf-8")
+    else:
+        log("déjà appliqué : service de premier plan mediaPlayback")
+
+
 PHONE_CHAT_GATE_ANCHOR = ("    const/16 v2, 0x258\n"
                           "    if-ge v1, v2, :return_phone_layout\n")
 PHONE_CHAT_GATE = (PHONE_CHAT_GATE_ANCHOR
@@ -944,7 +1272,39 @@ def patch_smartphone_features(decoded: pathlib.Path) -> int:
     return feature_count
 
 
-def patch_smartphone_ux(decoded: pathlib.Path) -> None:
+def install_tv_layout(decoded: pathlib.Path, here: pathlib.Path, name: str) -> None:
+    """Pose la version TV d'origine d'un layout reecrit par le mode telephone.
+
+    L'amont ne livre QU'UNE configuration de ces layouts : un televiseur qui ne
+    declare pas sw600dp gonfle donc `layout/` — mesure sur la Freebox Pop
+    (1920x1080 en 320 dpi = 540 dp), ou la barre de navigation telephone
+    s'affichait sur le televiseur. Trois qualifiers portent la version d'origine :
+    « television » (mode declare par le systeme), sw600dp (TV 4K, tablettes) et
+    sw540dp (le cas Freebox, garde du premier correctif).
+
+    La source est VERSIONNEE (patch/res-tv/) : une copie faite depuis le layout
+    de base finirait par recopier la greffe telephone sur la TV, et un arbre de
+    travail deja patche ne redeviendrait jamais vierge.
+    """
+    source = here / "res-tv" / name
+    if not source.is_file():
+        fail(f"layout TV de reference absent : {source}")
+    text = source.read_text(encoding="utf-8").replace(chr(13) + chr(10), chr(10))
+    if "twouich" in text:
+        fail(f"le layout TV de reference {name} porte une greffe telephone")
+    for qualifier in ("layout-television", "layout-sw600dp", "layout-sw540dp"):
+        destination = decoded / "res" / qualifier / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        current = ""
+        if destination.is_file():
+            current = destination.read_text(encoding="utf-8").replace(
+                chr(13) + chr(10), chr(10))
+        if current != text:
+            destination.write_text(text, encoding="utf-8", newline=chr(10))
+            log(f"layout TV restaure : res/{qualifier}/{name}")
+
+
+def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     """Installe une variante tactile du lecteur sans dégrader l'interface TV.
 
     Android sélectionne `layout/` sur téléphone et `layout-sw600dp/` sur les
@@ -970,11 +1330,7 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
     phone = decoded / "res/layout/activity_player.xml"
     if not phone.is_file():
         fail(f"layout lecteur absent : {phone}")
-    tv = decoded / "res/layout-sw600dp/activity_player.xml"
-    tv.parent.mkdir(parents=True, exist_ok=True)
-    if not tv.exists():
-        shutil.copy2(phone, tv)
-        log("layout TV conservé : res/layout-sw600dp/activity_player.xml")
+    install_tv_layout(decoded, here, "activity_player.xml")
 
     source = phone.read_text(encoding="utf-8")
     marker = 'android:id="@id/ChatRecycleView"'
@@ -1042,6 +1398,34 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
     # de la machine, et un motif de réparation écrit en LF ne peut pas atteindre
     # un bloc injecté en CRLF (le cas de l'arbre déjà patché sur Windows).
     player_text = player_smali.read_text(encoding="utf-8").replace("\r\n", "\n")
+    player_text, tv_guard_count = use_tv_interface_guard(player_text)
+    if tv_guard_count:
+        log(f"lecteur : {tv_guard_count} garde(s) d'interface ramenee(s) au mode TV")
+    player_text, screen_off_patched = _patch_screen_off_stop(player_text)
+    if screen_off_patched:
+        log("veille : le demontage d'onStop() est saute quand l'ecran est eteint")
+
+    def write_player(final: str) -> None:
+        """Ecrit le smali du lecteur : point unique de la source TV.
+
+        Les gardes de dp vivent dans les gabarits, donc c'est ici — et nulle
+        part ailleurs — qu'elles sont ramenees a l'appel de twouichTvInterface.
+        La methode dediee est posee si elle manque, et l'invariant est verifie
+        sur le texte REELLEMENT ecrit : un seul seuil de dp dans tout le
+        fichier, celui de la methode.
+        """
+        final, lowered = use_tv_interface_guard(final)
+        if ".method private twouichTvInterface()Z" not in final:
+            final = (final.rstrip() + "\n\n"
+                     + TV_INTERFACE_METHOD.rstrip() + "\n")
+        if final.count("smallestScreenWidthDp:I") != 1:
+            fail("le seuil de dp garde encore l'interface ailleurs que dans "
+                 "twouichTvInterface : le mode TV ne serait plus fiable")
+        player_smali.write_text(final, encoding="utf-8", newline="\n")
+        if lowered:
+            log(f"lecteur : {lowered} garde(s) d'interface ramenee(s) au mode "
+                "systeme (mode TV, plus de seuil de dp)")
+
     player_methods = r'''
 
 .method private twouichPhoneId(Ljava/lang/String;)I
@@ -1600,28 +1984,30 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
     # dans un commentaire fait passer une méthode pour présente (constaté le
     # 21/09 : CHAT_METHODS mentionne la disposition empilée, le bloc lecteur
     # n'était plus jamais écrit, onPictureInPictureModeChanged disparaissait).
+    # Veille : le service de premier plan suit la vie du lecteur.
+    player_fixed, service_calls = _patch_playback_calls(player_fixed)
+
     if ".method private twouichPhoneStackedLayout()V" not in player_fixed:
-        player_smali.write_text(player_fixed.rstrip() + "\n"
-                               + player_methods.replace("\r\n", "\n").rstrip() + "\n"
-                               + pip_methods.replace("\r\n", "\n").rstrip() + "\n",
-                               encoding="utf-8", newline="\n")
+        write_player(player_fixed.rstrip() + "\n"
+                     + player_methods.replace("\r\n", "\n").rstrip() + "\n"
+                     + pip_methods.replace("\r\n", "\n").rstrip() + "\n")
         log("smartphone : lecteur empilé vidéo en haut, chat puis saisie en bas")
         log("smartphone : picture-in-picture branché sur le lecteur")
     # PiP absent du fichier : on l'ajoute, et rien d'autre — les méthodes chat
     # sont déjà dans player_fixed (nettoyage puis ajout ci-dessus), les
     # réécrire ici les dupliquerait et apktool refuserait le fichier.
     elif ".method public twouichPhonePip(Landroid/view/View;)V" not in player_fixed:
-        player_smali.write_text(player_fixed.rstrip() + "\n"
-                               + pip_methods.replace("\r\n", "\n").rstrip() + "\n",
-                               encoding="utf-8", newline="\n")
+        write_player(player_fixed.rstrip() + "\n"
+                     + pip_methods.replace("\r\n", "\n").rstrip() + "\n")
         log("smartphone : picture-in-picture branché sur le lecteur")
     elif repaired_chat:
         # Arbre écrit par la version précédente : méthodes chat retirées puis
         # reposées, garde du chat replié ajouté — on écrit l'état corrigé.
-        player_smali.write_text(player_fixed, encoding="utf-8", newline="\n")
+        write_player(player_fixed)
         log("smartphone : chat repliable rebranché sur le lecteur (réparation)")
-    elif player_fixed != player_text:
-        player_smali.write_text(player_fixed, encoding="utf-8", newline="\n")
+    elif (player_fixed != player_text or tv_guard_count or screen_off_patched
+          or service_calls):
+        write_player(player_fixed)
         log("smartphone : correction des paramètres du lecteur empilé")
     else:
         log("déjà appliqué : lecteur empilé smartphone")
@@ -1631,7 +2017,8 @@ def patch_smartphone_ux(decoded: pathlib.Path) -> None:
     # modifier un gabarit si.
     global GREFFE_FINGERPRINT
     GREFFE_FINGERPRINT = hashlib.sha256(
-        "\n".join((CHAT_METHODS, player_methods, pip_methods)).encode("utf-8")
+        "\n".join((CHAT_METHODS, player_methods, pip_methods, TV_INTERFACE_METHOD,
+                    PHONE_SCREEN_OFF_GUARD, PHONE_SCREEN_OFF_KEPT)).encode("utf-8")
     ).hexdigest()
 
     values = decoded / "res/values/dimens.xml"
@@ -1695,12 +2082,20 @@ def patch_smartphone_headers(decoded: pathlib.Path) -> None:
         "    invoke-virtual {v0}, Landroid/content/res/Resources;->getConfiguration()"
         "Landroid/content/res/Configuration;\n"
         "    move-result-object v0\n"
-        "    iget v0, v0, Landroid/content/res/Configuration;->smallestScreenWidthDp:I\n"
-        "    const/16 v1, 0x258\n"
-        "    const/4 v2, 0x2\n"
-        "    if-ge v0, v1, :cond_twouich_tv_headers\n"
+        "    iget v1, v0, Landroid/content/res/Configuration;->uiMode:I\n"
+        "    and-int/lit8 v1, v1, 0xf\n"
+        "    const/4 v2, 0x4\n"
+        # `if-eq` : le mode TV (type 4) deploie le panneau. Avec `if-ne`,
+        # c'est un TELEPHONE qui le recevait deploye — la regression d'UX
+        # corrigee le 19/09 — et une Freebox 540 dp qui perdait sa colonne.
+        "    if-eq v1, v2, :cond_twouich_tv_headers\n"
+        "    iget v1, v0, Landroid/content/res/Configuration;->smallestScreenWidthDp:I\n"
+        "    const/16 v2, 0x258\n"
+        "    if-ge v1, v2, :cond_twouich_tv_headers\n"
         "    const/4 v2, 0x3\n"
+        "    return v2\n"
         ":cond_twouich_tv_headers\n"
+        "    const/4 v2, 0x2\n"
         "    return v2\n"
         ".end method\n"
     )
@@ -1734,6 +2129,38 @@ def patch_smartphone_headers(decoded: pathlib.Path) -> None:
     # (DISABLED) laissait le panneau TV déployé sur téléphone.
     if broken_lookup in text:
         text = text.replace(broken_lookup, context_lookup)
+    # Arbre ecrit avant le 21/09 : le helper testait les seuls dp. Un
+    # televiseur 1080p (540 dp) y passait pour un telephone et perdait sa
+    # colonne de navigation. On remplace le test, garde par garde.
+    dp_only_guard = (
+        "    iget v0, v0, Landroid/content/res/Configuration;->smallestScreenWidthDp:I\n"
+        "    const/16 v1, 0x258\n"
+        "    const/4 v2, 0x2\n"
+        "    if-ge v0, v1, :cond_twouich_tv_headers\n"
+        "    const/4 v2, 0x3\n"
+        ":cond_twouich_tv_headers\n"
+        "    return v2\n"
+    )
+    tv_mode_guard = (
+        "    iget v1, v0, Landroid/content/res/Configuration;->uiMode:I\n"
+        "    and-int/lit8 v1, v1, 0xf\n"
+        "    const/4 v2, 0x4\n"
+        # `if-eq` : le mode TV (type 4) deploie le panneau. Avec `if-ne`,
+        # c'est un TELEPHONE qui le recevait deploye — la regression d'UX
+        # corrigee le 19/09 — et une Freebox 540 dp qui perdait sa colonne.
+        "    if-eq v1, v2, :cond_twouich_tv_headers\n"
+        "    iget v1, v0, Landroid/content/res/Configuration;->smallestScreenWidthDp:I\n"
+        "    const/16 v2, 0x258\n"
+        "    if-ge v1, v2, :cond_twouich_tv_headers\n"
+        "    const/4 v2, 0x3\n"
+        "    return v2\n"
+        ":cond_twouich_tv_headers\n"
+        "    const/4 v2, 0x2\n"
+        "    return v2\n"
+    )
+    if dp_only_guard in text:
+        text = text.replace(dp_only_guard, tv_mode_guard, 1)
+        log("smartphone : panneau lateral — mode TV lu dans le mode systeme")
     if broken_state in text:
         text = text.replace(broken_state, fixed_state, 1)
     if "twouichPhoneHeadersState" in text:
@@ -1780,36 +2207,27 @@ def patch_smartphone_chat_toggle(decoded: pathlib.Path) -> None:
     sur BlueStacks le 21/09). Le repli donne l'écran entier à la vidéo ; l'état
     (twouichChatHidden) et l'application (twouichChatApply) vivent dans
     PlayerActivity, le layout ici.
-    TV intacte : le bouton n'existe que dans res/layout/activity_player.xml et
-    les méthodes sortent avant tout effet au-dessus de 600 dp.
+    Retiré depuis la v1.0.12 : le chat vit SOUS la vidéo, donc le replier ne
+    changeait plus la taille de l'image (« l'icône à côté du PiP ne sert à
+    rien », 21/09). La machinerie du repli (twouichChatApply, twouichChatCollapse)
+    reste dans le dex — sans prise : aucune vue ne l'appelle. Ce passage est donc
+    une RÉPARATION : il retire le bouton d'un arbre déjà patché.
     """
     print("[1i/5] UX smartphone (bouton masquer/afficher le chat)")
     phone = decoded / "res/layout/activity_player.xml"
     if not phone.is_file():
         fail(f"layout lecteur absent : {phone}")
     source = phone.read_text(encoding="utf-8")
-    # Signature exacte : "twouich_phone_chat" matche aussi le dimen
-    # twouich_phone_chat_height posé avant — le bouton n'était jamais inséré
-    # (même famille que les tests de présence par nom nu, corrigés plus haut).
-    if "twouich_phone_chat\"" in source:
-        log("déjà appliqué : bouton masquer/afficher le chat")
+    # Un arbre écrit par la version précédente peut porter le bouton : on le
+    # retire, quel que soit son emplacement.
+    button = re.compile(r"\s*<ImageButton android:id=\"@\+id/twouich_phone_chat\".*?/>",
+                        re.DOTALL)
+    new, count = button.subn("", source, count=1)
+    if count == 0:
+        log("déjà appliqué : aucun bouton de chat dans le lecteur")
         return
-    anchor = '<ImageButton android:id="@+id/twouich_phone_pip"'
-    if anchor not in source:
-        fail("bouton picture-in-picture introuvable dans activity_player.xml - cible changée")
-    button = ('<ImageButton android:id="@+id/twouich_phone_chat"\n'
-              '        android:layout_width="48dp" android:layout_height="48dp"\n'
-              '        android:layout_alignTop="@id/ExoPlayer" android:layout_alignEnd="@id/ExoPlayer"\n'
-              '        android:layout_marginTop="8dp" android:layout_marginEnd="64dp"\n'
-              '        android:padding="12dp" android:scaleType="fitCenter"\n'
-              '        android:background="#66000000" android:src="@drawable/twouich_ic_chat"\n'
-              '        android:contentDescription="Masquer ou afficher le chat"\n'
-              '        android:onClick="twouichPhoneChatToggle" />')
-    new = source.replace(anchor, "    " + button + "\n    " + anchor, 1)
-    if new == source:
-        fail("insertion du bouton chat impossible dans activity_player.xml")
-    phone.write_text(new, encoding="utf-8")
-    log("smartphone : bouton masquer/afficher le chat posé sur la vidéo")
+    phone.write_text(new, encoding="utf-8", newline="\n")
+    log("smartphone : bouton masquer/afficher le chat retiré du lecteur")
 
 def patch_smartphone_tap(decoded: pathlib.Path) -> None:
     """Traduit un tap sur une carte Leanback en clic, sur téléphone seulement.
@@ -1953,17 +2371,13 @@ def patch_smartphone_pip(decoded: pathlib.Path) -> None:
     log("smartphone : bouton picture-in-picture posé sur la vidéo")
 
 
-def patch_smartphone_navigation(decoded: pathlib.Path) -> None:
+def patch_smartphone_navigation(decoded: pathlib.Path, here: pathlib.Path) -> None:
     """Ajoute une navigation tactile au shell téléphone, sans modifier le shell TV."""
     print("[1e/5] UX smartphone (navigation tactile)")
     phone = decoded / "res/layout/activity_main.xml"
     if not phone.is_file():
         fail(f"layout principal absent : {phone}")
-    tv = decoded / "res/layout-sw600dp/activity_main.xml"
-    tv.parent.mkdir(parents=True, exist_ok=True)
-    if not tv.exists():
-        shutil.copy2(phone, tv)
-        log("layout principal TV conservé : res/layout-sw600dp/activity_main.xml")
+    install_tv_layout(decoded, here, "activity_main.xml")
 
     # Barre basse sobre : fond opaque de la marque, hairline de séparation et trois
     # libellés — plus aucune « bouton Android » grise par défaut, qui jurait avec le
@@ -2481,11 +2895,12 @@ def main() -> int:
     disable_remote_config_calls(decoded)
     disable_crashlytics_facade(decoded)
     patch_smartphone_features(decoded)
+    install_playback_service(decoded)
     install_phone_assets(decoded, here)
-    patch_smartphone_ux(decoded)
+    patch_smartphone_ux(decoded, here)
     patch_smartphone_headers(decoded)
     patch_smartphone_tap(decoded)
-    patch_smartphone_navigation(decoded)
+    patch_smartphone_navigation(decoded, here)
     patch_smartphone_pip(decoded)
     patch_smartphone_chat_toggle(decoded)
     install_selftest(decoded)
@@ -2546,8 +2961,6 @@ def main() -> int:
         ("AndroidManifest.xml", 'android:supportsPictureInPicture="true"'),
         ("AndroidManifest.xml", "smallestScreenSize"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhonePip"),
-        ("res/layout/activity_player.xml", "twouich_phone_chat\""),
-        ("res/layout/activity_player.xml", 'android:onClick="twouichPhoneChatToggle"'),
         ("res/drawable/twouich_ic_chat.xml", "<vector"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhoneChatToggle"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", ".field private twouichChatHidden:Z"),
@@ -2586,6 +2999,18 @@ def main() -> int:
                 fail(f"contrôle échoué : télémétrie Firebase encore déclarée dans {path.relative_to(decoded)}")
         elif not path.is_file() or needle not in path.read_text(encoding="utf-8"):
             fail(f"contrôle échoué : {needle!r} absent de {path.relative_to(decoded)}")
+        checks += 1
+    # Le bouton du chat est RETIRÉ depuis la v1.0.12 : le chat vit sous la
+    # vidéo, donc replier ne changeait plus la taille de l'image. La preuve est
+    # donc l'INVERSE — plus de bouton dans le layout téléphone — tandis que la
+    # machinerie du repli reste dans le lecteur (contrôlée ci-dessus).
+    phone_layout = decoded / "res/layout/activity_player.xml"
+    phone_layout_text = phone_layout.read_text(encoding="utf-8")
+    for needle in ('twouich_phone_chat"',
+                   'android:onClick="twouichPhoneChatToggle"'):
+        if needle in phone_layout_text:
+            fail(f"contrôle échoué : le bouton du chat est encore dans le lecteur "
+                 f"({needle})")
         checks += 1
     # Garde-fou : setVisibility(int) recevait un objet LayoutParams — erreur de
     # vérification Dalvik qui faisait planter le lecteur à l'ouverture.
