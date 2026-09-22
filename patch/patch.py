@@ -27,7 +27,11 @@ for _stream in (sys.stdout, sys.stderr):
 
 REPO = "Endymi0n74/Twouich"
 UPSTREAM = "S0und/S0undTV"
-DEFAULT_APK_NAME = "Twouich_v1.0.11.apk"
+# Nom du livrable tel qu'il est publié : ces défauts ne servent qu'à un appel
+# manuel de patch.py — build.sh passe toujours --version-code/--version-name/
+# --apk-name. Ils suivent donc le dernier bump (le nom d'APK finit dans l'URL
+# que l'app interroge : un défaut en retard pointerait sur un asset inexistant).
+DEFAULT_APK_NAME = "Twouich_v1.0.14.apk"
 
 # ── Étape 1 : greffon anti-pub ────────────────────────────────────────────
 # Libellés de l'UX smartphone. Le champ de saisie reprend celui de l'interface
@@ -2870,8 +2874,8 @@ def main() -> int:
     here = pathlib.Path(__file__).resolve().parent
     parser = argparse.ArgumentParser()
     parser.add_argument("--decoded", required=True, type=pathlib.Path)
-    parser.add_argument("--version-code", type=int, default=157)
-    parser.add_argument("--version-name", default="v1.0.11")
+    parser.add_argument("--version-code", type=int, default=161)
+    parser.add_argument("--version-name", default="v1.0.14")
     parser.add_argument("--apk-name", default=DEFAULT_APK_NAME)
     parser.add_argument("--release-date", default=None,
                         help="date affichée dans la page Nouveautés (AAA.MM.JJ). "

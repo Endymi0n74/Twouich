@@ -25,7 +25,7 @@ Ce fichier vérifie donc l'artefact :
     l'app annonce une version, télécharge une URL qui n'existe pas, et reste sur
     place.
 
-    python patch/tests/test_apk.py                       # dist/Twouich_v1.0.12.apk
+    python patch/tests/test_apk.py                       # dist/Twouich_v1.0.14.apk
     python patch/tests/test_apk.py --apk dist/autre.apk
 
 Contrôle négatif (l'artefact d'origine doit être refusé) :
