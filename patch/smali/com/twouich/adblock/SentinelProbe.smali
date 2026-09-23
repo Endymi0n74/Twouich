@@ -25,10 +25,6 @@
 # Le nettoyage lui-meme n'est pas touche : la sentinelle n'observe pas.
 
 
-# static fields
-.field private static final TAG:Ljava/lang/String; = "Twouich"
-
-
 # direct methods
 .method private constructor <init>()V
     .locals 0

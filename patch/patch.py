@@ -155,8 +155,6 @@ PHONE_PIP_RESTORE_TRACE = (
 # (decodeur video) et `setStreamEndDone` (AudioTrack) a la seconde meme de
 # l'extinction — proteger le seul `o3()` ne suffisait pas. Le garde enveloppe
 # donc tout le demontage, et `invoke-super` reste appele dans tous les cas.
-PHONE_SCREEN_OFF_MARK = "ecran eteint : lecture maintenue"
-
 
 def _smali_lines(*rows: str) -> str:
     """Assemble un bloc smali, une ligne par element.
@@ -292,7 +290,6 @@ TV_INTERFACE_ROWS = (
     "->twouichTvInterface()Z",
     "    move-result v2",
 )
-TV_INTERFACE_CALL = _smali_lines(*TV_INTERFACE_ROWS)
 
 TV_INTERFACE_METHOD = _smali_lines(
     "",
@@ -954,8 +951,6 @@ MANIFEST_THEMES = [
     ("@style/LeanbackPreferencesRed", "@style/LeanbackPreferencesPurple"),
 ]
 SPLASH_THEME = "SplashScreenThemeVector"
-
-BRAND_PAGES = ["assets/S0undTV_about.html", "assets/S0undTV_changelog.html"]
 
 # Pages légales Twouich : sources de vérité sous patch/branding/, injectées dans
 # assets/ à l'étape 5 (mention légale + politique de confidentialité). La source
@@ -2964,7 +2959,6 @@ def main() -> int:
         ("AndroidManifest.xml", 'android:supportsPictureInPicture="true"'),
         ("AndroidManifest.xml", "smallestScreenSize"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhonePip"),
-        ("res/drawable/twouich_ic_chat.xml", "<vector"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhoneChatToggle"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", ".field private twouichChatHidden:Z"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",

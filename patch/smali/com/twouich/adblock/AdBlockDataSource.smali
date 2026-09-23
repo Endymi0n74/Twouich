@@ -12,12 +12,6 @@
 # VaFT : dernier channel vu sur usher (pour fallback backup stream)
 .field public static lastChannel:Ljava/lang/String; = ""
 
-.field private static final GQL_URL:Ljava/lang/String; = "https://gql.twitch.tv/gql"
-
-.field private static final CLIENT_ID:Ljava/lang/String; = "kimne78kx3ncx6brgo4mv6wki5h1ko"
-
-.field private static final HASH:Ljava/lang/String; = "ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9"
-
 
 # instance fields
 .field private a:Lz3/l;

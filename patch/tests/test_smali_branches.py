@@ -598,7 +598,7 @@ def main():
           "l'etat du panneau etait calcule sur les seuls dp : la TV perdait sa "
           "colonne de navigation (HEADERS_HIDDEN).")
     # Borne au bloc du garde : « move-result v0 » est legitime ailleurs.
-    tv_rows = patcher[patcher.index('TV_INTERFACE_ROWS = ('):patcher.index('TV_INTERFACE_CALL =')]
+    tv_rows = patcher[patcher.index('TV_INTERFACE_ROWS = ('):patcher.index('TV_INTERFACE_METHOD =')]
     check("lecteur : le garde TV n'ecrit pas dans le registre du Resources",
           "    move-result v2" in tv_rows and "    move-result v0" not in tv_rows,
           "un move-result v0 ecrase le Resources que twouichPhoneStackedLayout lit "

@@ -26,8 +26,6 @@
 
 
 # static fields
-.field private static final PHONE_MAX_DP:I = 0x258
-
 # Etat du geste en cours (un tap est un geste unique, un doigt a la fois).
 .field private static downX:F
 

@@ -31,8 +31,6 @@
 # Interrupteur : passer a false pour ne plus executer le self-test au demarrage.
 .field private static final ENABLED:Z = true
 
-.field private static final TAG:Ljava/lang/String; = "Twouich"
-
 
 # direct methods
 .method private constructor <init>()V
