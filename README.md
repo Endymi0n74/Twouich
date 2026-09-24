@@ -3,6 +3,8 @@
 [![CI](https://github.com/Endymi0n74/Twouich/actions/workflows/build.yml/badge.svg)](https://github.com/Endymi0n74/Twouich/actions/workflows/build.yml)
 [![Dernière release](https://img.shields.io/github/v/release/Endymi0n74/Twouich)](https://github.com/Endymi0n74/Twouich/releases/latest)
 
+**🇫🇷 Français** · [🇬🇧 English](README.en.md)
+
 Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires SSAI, dé-mute VOD et fallback anti-pub VaFT.
 
 > Projet indépendant, sans affiliation avec Twitch Interactive, Inc.
