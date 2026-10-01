@@ -270,6 +270,57 @@ def main():
         "annoncait 4 segments pub la ou il y en avait 3.",
     )
 
+    # --- 6b. Fermeture de la zone pub : le DISCONTINUITY du pod ne suffit plus ---
+    # Fuite du 01/10/2026 : dans un pod réel, le #EXT-X-DISCONTINUITY arrive
+    # dans le même bloc que les marqueurs, AVANT les segments. L'armer
+    # (stitched-ad) puis le désarmer ici ne protégeait que le bloc de balises :
+    # un second créatif dont le titre #EXTINF ne contient pas « Amazon » partait
+    # tel quel vers le lecteur (compteur figé à 8, +968 oct/2 s pendant 48 s).
+    def seg(start: str, end: str) -> str:
+        i = sanitizer.find(start)
+        j = sanitizer.find(end, i + len(start)) if i != -1 else -1
+        return sanitizer[i:j] if i != -1 and j != -1 else ""
+
+    disc = seg('const-string v5, "#EXT-X-DISCONTINUITY"', "\n    :after_discontinuity\n")
+    check(
+        "PlaylistSanitizer : le DISCONTINUITY conserve le tag sans fermer la zone",
+        disc != ""
+        and "goto :emit" in disc
+        and "const/4 v7, 0x0" not in disc,
+        "le bloc DISCONTINUITY ne doit PAS contenir 'const/4 v7, 0x0' "
+        "(désarmement) : la zone doit tenir jusqu'aux marqueurs de fin de pod "
+        "(LIVE-SEQ ou source live) — sinon fuite du 01/10/2026 rejouée.",
+    )
+
+    lseq = seg('const-string v5, "#EXT-X-TWITCH-LIVE-SEQUENCE"',
+               "\n    :after_live_sequence\n")
+    check(
+        "PlaylistSanitizer : LIVE-SEQ ferme toujours la zone",
+        lseq != "" and "const/4 v7, 0x0" in lseq,
+        "le bloc LIVE-SEQ doit contenir 'const/4 v7, 0x0' (fermeture de zone)",
+    )
+
+    quart = seg('const-string v5, "X-TV-TWITCH-AD-QUARTILE"',
+                "\n    :after_daterange\n")
+    check(
+        "PlaylistSanitizer : un quartile en ligne réarme la zone",
+        quart != "" and "const/4 v7, 0x1" in quart
+        and 'if-eqz v5, :check_quartile' in sanitizer,
+        "le bloc :check_quartile doit réarmer v7 (filet de sécurité si la "
+        "fenêtre démarre hors du bloc stitched-ad)",
+    )
+
+    srclive = seg("\n    :after_live_sequence\n", "\n    :not_in_ad\n")
+    check(
+        "PlaylistSanitizer : la source live ferme aussi la zone (doublon)",
+        srclive != ""
+        and 'X-TV-TWITCH-STREAM-SOURCE=\\"live\\"' in srclive
+        and "const/4 v7, 0x0" in srclive,
+        "le bloc :after_live_sequence -> :not_in_ad doit contenir l'aiguille "
+        "X-TV-TWITCH-STREAM-SOURCE=\"live\" et remettre v7 à 0 — doublon de "
+        "LIVE-SEQ contre la disparition de l'un des deux marqueurs.",
+    )
+
     # --- 7. Le self-test doit continuer d'exercer le VRAI chemin de lecture -----
     # Un self-test qui n'appelle plus AdBlockDataSource ne prouverait plus rien :
     # c'est cette traversee (c() puis read()) qui reproduisait la lecture cassee.

@@ -27,11 +27,21 @@
 # virtual methods
 # Retire les plages publicitaires d'une playlist HLS Twitch.
 # Regles (alignees sur Streamlink plugins/twitch.py) :
-#   - plage pub  : #EXT-X-DATERANGE contenant "stitched-ad"
-#   - segment pub: titre #EXTINF contenant "Amazon", ou dans une plage pub
-#   - bloc pub   : #EXT-X-CUE-OUT ... #EXT-X-CUE-IN
-#   - fin de pub : #EXT-X-DISCONTINUITY et #EXT-X-TWITCH-LIVE-SEQUENCE sont
-#                  CONSERVES (ils signalent le saut de timeline au lecteur)
+#   - zone pub   : armee par #EXT-X-DATERANGE "stitched-ad", par un quartile
+#                  en ligne (X-TV-TWITCH-AD-QUARTILE, filet de securite) ou par
+#                  #EXT-X-CUE-OUT ; une fois armee, TOUTE ligne est jetee
+#                  (marqueurs, segments, balises), quel que soit le titre.
+#   - segment pub: titre #EXTINF contenant "Amazon" (secours, fenetre dont le
+#                  bloc de marqueurs serait hors fenetre)
+#   - fin de zone: #EXT-X-TWITCH-LIVE-SEQUENCE ou DATERANGE
+#                  X-TV-TWITCH-STREAM-SOURCE="live" (fin de pod reelle), et
+#                  #EXT-X-CUE-IN pour le bloc client-side.
+#   - #EXT-X-DISCONTINUITY est toujours CONSERVE (saut de timeline pour le
+#                  lecteur) mais NE FERME PAS la zone : dans un pod reel il
+#                  arrive dans le meme bloc que les marqueurs, AVANT les
+#                  segments — l'armer puis le desarmer ici laissait les
+#                  segments sans protection autre que le titre « Amazon »
+#                  (fuite constatee sur appareil le 01/10/2026).
 .method public static a(Ljava/lang/String;)Ljava/lang/String;
     .locals 12
 
@@ -149,9 +159,26 @@
 
     move-result v5
 
-    if-eqz v5, :after_daterange
+    if-eqz v5, :check_quartile
 
     # debut d'une plage publicitaire : le tag disparait, la zone est sautee
+    const/4 v7, 0x1
+
+    goto :drop
+
+    :check_quartile
+    # filet de securite : un quartile en ligne rearme la zone, au cas ou une
+    # fenetre demarrerait apres le bloc de marqueurs (jamais observe — la
+    # fenetre grossit pendant le pod — mais c'est alors la seule protection
+    # des segments d'un pod dont le stitched-ad serait hors fenetre).
+    const-string v5, "X-TV-TWITCH-AD-QUARTILE"
+
+    invoke-virtual {v4, v5}, Ljava/lang/String;->contains(Ljava/lang/CharSequence;)Z
+
+    move-result v5
+
+    if-eqz v5, :after_daterange
+
     const/4 v7, 0x1
 
     goto :drop
@@ -191,9 +218,14 @@
 
     if-eqz v5, :after_discontinuity
 
-    # fin de la plage pub : on garde le tag pour que le lecteur gere le saut
-    const/4 v7, 0x0
-
+    # le tag est CONSERVE (saut de timeline pour le lecteur) mais NE desarme
+    # PAS la zone : dans un pod reel, ce DISCONTINUITY arrive DANS LE MEME BLOC
+    # que les marqueurs, AVANT les segments — armer (stitched-ad) puis desarmer
+    # ici laissait les segments sans protection autre que le titre « Amazon »
+    # du #EXTINF. Second creatif sans « Amazon » observe en fuite sur appareil
+    # le 01/10/2026 : compteur fige a 8, +968 oct/2 s livres pendant 48 s.
+    # La zone ne se ferme que sur #EXT-X-TWITCH-LIVE-SEQUENCE ou la DATERANGE
+    # X-TV-TWITCH-STREAM-SOURCE="live" (fin de pod reelle).
     goto :emit
 
     :after_discontinuity
@@ -210,6 +242,31 @@
     goto :emit
 
     :after_live_sequence
+    # deuxieme marqueur de fin de pod : la DATERANGE dont la source redevient
+    # « live ». Elle n'est pas jetee ici : elle desarme la zone puis retombe
+    # sur le test ci-dessous (zone deja fermee) et est donc EMISE, comme les
+    # autres DATERANGE utilitaires hors zone. Doublon volontaire avec
+    # #EXT-X-TWITCH-LIVE-SEQUENCE : si Twitch supprime l'un des deux marqueurs,
+    # l'autre ferme toujours la zone (sinon : contenu jete = ecran noir).
+    const-string v5, "#EXT-X-DATERANGE"
+
+    invoke-virtual {v4, v5}, Ljava/lang/String;->startsWith(Ljava/lang/String;)Z
+
+    move-result v5
+
+    if-eqz v5, :after_src_live
+
+    const-string v5, "X-TV-TWITCH-STREAM-SOURCE=\"live\""
+
+    invoke-virtual {v4, v5}, Ljava/lang/String;->contains(Ljava/lang/CharSequence;)Z
+
+    move-result v5
+
+    if-eqz v5, :after_src_live
+
+    const/4 v7, 0x0
+
+    :after_src_live
     or-int v5, v7, v8
 
     if-eqz v5, :not_in_ad

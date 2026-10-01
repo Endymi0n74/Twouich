@@ -9,6 +9,16 @@ titre Amazon, daterange non publicitaire), sur une playlist SSAI **réelle**
 capturée le 18/09/2026 (fixtures/ssai-2026-09-18.m3u8) et à détecter toute
 divergence lors d'une modification du smali.
 
+Fuite du 01/10/2026 (pod midroll double-créatif observé en direct) : dans un pod
+réel, le `#EXT-X-DISCONTINUITY` arrive **dans le même bloc que les marqueurs**,
+avant les segments — armer la zone (`stitched-ad`) puis la désarmer sur ce tag
+laissait les segments sans protection autre que le titre `Amazon` du `#EXTINF`.
+Un second créatif dont le titre ne contient pas `Amazon` partait donc tel quel
+vers le lecteur (compteur figé à 8 pendant que la sortie grandissait de
++968 oct/2 s pendant 48 s). La zone ne se ferme plus que sur
+`#EXT-X-TWITCH-LIVE-SEQUENCE` ou la DATERANGE `X-TV-TWITCH-STREAM-SOURCE="live"`
+(fin de pod réelle), rejouée par la fixture `MIDROLL_DOUBLE_CREATIF_2026_10_01`.
+
     python patch/tests/test_sanitizer.py
 """
 from __future__ import annotations
@@ -84,7 +94,13 @@ def sanitize(body: str) -> str:
             skip_uri = False
             drop(t)
             continue
-        if t.startswith("#EXT-X-DATERANGE") and AD_MARKER in t:
+        if t.startswith("#EXT-X-DATERANGE") and (
+            AD_MARKER in t or "X-TV-TWITCH-AD-QUARTILE" in t
+        ):
+            # armé par stitched-ad, mais aussi par un quartile en ligne : si la
+            # fenêtre démarrait en plein pod (bloc de marqueurs hors fenêtre),
+            # les segments suivants restent couverts (filet de sécurité, aucun
+            # cas observé — la fenêtre grossit pendant le pod).
             in_ad = True
             drop(t)
             continue
@@ -97,13 +113,19 @@ def sanitize(body: str) -> str:
             drop(t)
             continue
         if t.startswith("#EXT-X-DISCONTINUITY"):
-            in_ad = False
+            # conserve (saut de timeline) mais NE ferme PAS la zone : dans un pod
+            # réel ce tag arrive dans le bloc de marqueurs, avant les segments
+            # (fuite du 01/10/2026, fixture MIDROLL_DOUBLE_CREATIF_2026_10_01).
             out.append(t)
             continue
         if t.startswith("#EXT-X-TWITCH-LIVE-SEQUENCE"):
             in_ad = False
             out.append(t)
             continue
+        if t.startswith("#EXT-X-DATERANGE") and 'X-TV-TWITCH-STREAM-SOURCE="live"' in t:
+            # fin de pod : la source redevient « live » — la ligne retombe ensuite
+            # dans le traitement normal et est émise (marqueur inoffensif).
+            in_ad = False
         if in_ad or in_cue:
             drop(t)
             continue
@@ -190,6 +212,125 @@ REAL_SSAI_2026_09_18 = (
     pathlib.Path(__file__).parent / "fixtures" / "ssai-2026-09-18.m3u8"
 ).read_text(encoding="utf-8").replace("\r\n", "\n")
 
+# ── Fixture de régression : fuite du 01/10/2026 (pod midroll double-créatif) ──
+# Structure reconstituée à l'identique des dumps kenbogard du 01/10/2026
+# (work/device-test/pods/pod-1314xx) et de la trace appareil du pod de
+# 12:43:58 → 12:44:58 : bloc de marqueurs PUIS #EXT-X-DISCONTINUITY PUIS les
+# segments — deux créatifs dos à dos, le second sans « Amazon » dans son titre
+# (#EXTINF « TTD|8890177 » et titre vide), séparés du contenu par
+# X-TV-TWITCH-STREAM-SOURCE="live" + #EXT-X-TWITCH-LIVE-SEQUENCE.
+# Sur appareil : compteur figé à 8 pendant que la sortie grandissait de
+# +968 oct/2 s (≈ 24 segments livrés) — l'utilisateur voyait la pub.
+# Avant la correction de la machine à états, ce cas rate : les 3 segments du
+# second créatif survivent.
+MIDROLL_DOUBLE_CREATIF_2026_10_01 = """#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-TARGETDURATION:2
+#EXT-X-MEDIA-SEQUENCE:0
+#EXT-X-TWITCH-ELAPSED-SECS:44197.900
+#EXT-X-TWITCH-TOTAL-SECS:44203.900
+#EXT-X-DATERANGE:ID="playlist-creation-1790853236",CLASS="timestamp",START-DATE="2026-10-01T11:13:56.430Z",END-ON-NEXT=YES,X-SERVER-TIME="1790853236.81"
+#EXT-X-DATERANGE:ID="playlist-session-1790853236",CLASS="twitch-session",START-DATE="2026-10-01T11:13:56.430Z",END-ON-NEXT=YES,X-TV-TWITCH-SESSIONID="0"
+#EXT-X-PROGRAM-DATE-TIME:2026-10-01T11:13:56.430Z
+#EXTINF:2.000,live
+https://video-weaver.example/hls/live-1200.ts
+#EXTINF:2.000,live
+https://video-weaver.example/hls/live-1201.ts
+#EXT-X-DATERANGE:ID="stitched-ad-1790853246-30235000000",CLASS="twitch-stitched-ad",START-DATE="2026-10-01T11:14:06.430Z",DURATION=30.235,X-TV-TWITCH-AD-ROLL-TYPE="MIDROLL",X-TV-TWITCH-AD-POD-LENGTH="2",X-TV-TWITCH-AD-RADS-TOKEN="eyJhbGciOiJFUzI1NiJ9.scrubbed"
+#EXT-X-DATERANGE:ID="source-1790853246",CLASS="twitch-stream-source",START-DATE="2026-10-01T11:14:06.430Z",END-ON-NEXT=YES,X-TV-TWITCH-STREAM-SOURCE="Amazon|2474283100494"
+#EXT-X-DATERANGE:ID="trigger-1790853246",CLASS="twitch-trigger",START-DATE="2026-10-01T11:14:06.430Z",END-ON-NEXT=YES,X-TV-TWITCH-TRIGGER-URL="https://euw33.playlist.ttvnw.net/trigger/scrubbed"
+#EXT-X-DATERANGE:ID="quartile-1790853246-0",CLASS="twitch-ad-quartile",START-DATE="2026-10-01T11:14:06.430Z",DURATION=2.000,X-TV-TWITCH-AD-QUARTILE="0"
+#EXT-X-DISCONTINUITY
+#EXT-X-MAP:URI="https://7dba.example/v1/init-a.mp4"
+#EXT-X-PROGRAM-DATE-TIME:2026-10-01T11:14:06.430Z
+#EXTINF:2.000,Amazon|2474283100494
+https://7dba.example/v1/segment/scrubbed-ad-1.m4s?dna=scrubbed
+#EXT-X-PROGRAM-DATE-TIME:2026-10-01T11:14:08.430Z
+#EXTINF:2.000,Amazon|2474283100494
+https://7dba.example/v1/segment/scrubbed-ad-2.m4s?dna=scrubbed
+#EXT-X-PROGRAM-DATE-TIME:2026-10-01T11:14:10.430Z
+#EXTINF:2.000,Amazon|2474283100494
+https://7dba.example/v1/segment/scrubbed-ad-3.m4s?dna=scrubbed
+#EXT-X-DATERANGE:ID="stitched-ad-1790853264-15235000000",CLASS="twitch-stitched-ad",START-DATE="2026-10-01T11:14:24.665Z",DURATION=15.235,X-TV-TWITCH-AD-ROLL-TYPE="MIDROLL",X-TV-TWITCH-AD-POD-LENGTH="2",X-TV-TWITCH-AD-RADS-TOKEN="eyJhbGciOiJFUzI1NiJ9.scrubbed"
+#EXT-X-DATERANGE:ID="source-1790853264",CLASS="twitch-stream-source",START-DATE="2026-10-01T11:14:24.665Z",END-ON-NEXT=YES,X-TV-TWITCH-STREAM-SOURCE="TTD|8890177"
+#EXT-X-DATERANGE:ID="trigger-1790853264",CLASS="twitch-trigger",START-DATE="2026-10-01T11:14:24.665Z",END-ON-NEXT=YES,X-TV-TWITCH-TRIGGER-URL="https://euw33.playlist.ttvnw.net/trigger/scrubbed"
+#EXT-X-DATERANGE:ID="quartile-1790853264-0",CLASS="twitch-ad-quartile",START-DATE="2026-10-01T11:14:24.665Z",DURATION=2.000,X-TV-TWITCH-AD-QUARTILE="0"
+#EXT-X-DISCONTINUITY
+#EXT-X-MAP:URI="https://ttd.example/v1/init-b.mp4"
+#EXT-X-PROGRAM-DATE-TIME:2026-10-01T11:14:24.665Z
+#EXTINF:2.000,TTD|8890177
+https://ttd.example/v1/segment/scrubbed-ttd-1.m4s?dna=scrubbed
+#EXT-X-PROGRAM-DATE-TIME:2026-10-01T11:14:26.665Z
+#EXTINF:2.000,
+https://ttd.example/v1/segment/scrubbed-ttd-2.m4s?dna=scrubbed
+#EXT-X-DATERANGE:ID="quartile-1790853272-1",CLASS="twitch-ad-quartile",START-DATE="2026-10-01T11:14:32.900Z",DURATION=2.000,X-TV-TWITCH-AD-QUARTILE="1"
+#EXT-X-PROGRAM-DATE-TIME:2026-10-01T11:14:28.665Z
+#EXTINF:2.000,TTD|8890177
+https://ttd.example/v1/segment/scrubbed-ttd-3.m4s?dna=scrubbed
+#EXT-X-DATERANGE:ID="source-1790853274",CLASS="twitch-stream-source",START-DATE="2026-10-01T11:14:34.900Z",END-ON-NEXT=YES,X-TV-TWITCH-STREAM-SOURCE="live"
+#EXT-X-DISCONTINUITY
+#EXT-X-TWITCH-LIVE-SEQUENCE:1240
+#EXT-X-MAP:URI="https://video-weaver.example/hls/live-init.mp4"
+#EXT-X-PROGRAM-DATE-TIME:2026-10-01T11:14:34.900Z
+#EXTINF:2.000,live
+https://video-weaver.example/hls/live-1240.ts
+#EXTINF:2.000,live
+https://video-weaver.example/hls/live-1241.ts
+"""
+
+# ── Fixture de sécurité : fenêtre démarrant en plein pod ──
+# Le bloc de marqueurs (stitched-ad / source / trigger) est supposé toujours
+# présent pendant un pod (la fenêtre grossit au lieu de glisser — vérifié sur
+# les 155 dumps du 01/10), mais si une fenêtre démarrait APRÈS lui, seule
+# l'extension de zone sur les quartiles en ligne couvre les segments.
+QUARTILE_SEUL_2026_10_01 = """#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-TARGETDURATION:2
+#EXT-X-MEDIA-SEQUENCE:0
+#EXT-X-DATERANGE:ID="playlist-session-1790853400",CLASS="twitch-session",START-DATE="2026-10-01T11:16:40.000Z",END-ON-NEXT=YES,X-TV-TWITCH-SESSIONID="0"
+#EXT-X-DATERANGE:ID="quartile-1790853400-1",CLASS="twitch-ad-quartile",START-DATE="2026-10-01T11:16:40.000Z",DURATION=2.000,X-TV-TWITCH-AD-QUARTILE="1"
+#EXT-X-MAP:URI="https://ttd.example/v1/init-c.mp4"
+#EXT-X-PROGRAM-DATE-TIME:2026-10-01T11:16:40.000Z
+#EXTINF:2.000,TTD|8890177
+https://ttd.example/v1/segment/scrubbed-ttd-9.m4s?dna=scrubbed
+#EXTINF:2.000,
+https://ttd.example/v1/segment/scrubbed-ttd-10.m4s?dna=scrubbed
+#EXT-X-DATERANGE:ID="source-1790853412",CLASS="twitch-stream-source",START-DATE="2026-10-01T11:16:52.000Z",END-ON-NEXT=YES,X-TV-TWITCH-STREAM-SOURCE="live"
+#EXT-X-DISCONTINUITY
+#EXT-X-TWITCH-LIVE-SEQUENCE:1300
+#EXT-X-MAP:URI="https://video-weaver.example/hls/live-init.mp4"
+#EXT-X-PROGRAM-DATE-TIME:2026-10-01T11:16:52.000Z
+#EXTINF:2.000,live
+https://video-weaver.example/hls/live-1300.ts
+"""
+
+# ── Fixture de sécurité : fin de pod SANS #EXT-X-TWITCH-LIVE-SEQUENCE ──
+# Deux marqueurs de fin de pod coexistent (source live ET LIVE-SEQ) ; celui-ci
+# vérifie que le DATERANGE X-TV-TWITCH-STREAM-SOURCE="live" ferme la zone seul,
+# si le format un jour ne plus émettre LIVE-SEQ (sinon : contenu jeté = écran
+# noir jusqu'à la fenêtre suivante).
+FIN_DE_POD_SANS_LIVE_SEQ_2026_10_01 = """#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-TARGETDURATION:2
+#EXT-X-MEDIA-SEQUENCE:0
+#EXT-X-DATERANGE:ID="playlist-session-1790853460",CLASS="twitch-session",START-DATE="2026-10-01T11:17:40.000Z",END-ON-NEXT=YES,X-TV-TWITCH-SESSIONID="0"
+#EXTINF:2.000,live
+https://video-weaver.example/hls/live-1400.ts
+#EXT-X-DATERANGE:ID="stitched-ad-1790853464-10000000000",CLASS="twitch-stitched-ad",START-DATE="2026-10-01T11:17:44.000Z",DURATION=10.000,X-TV-TWITCH-AD-ROLL-TYPE="PREROLL",X-TV-TWITCH-AD-POD-POSITION="0"
+#EXT-X-DATERANGE:ID="source-1790853464",CLASS="twitch-stream-source",START-DATE="2026-10-01T11:17:44.000Z",END-ON-NEXT=YES,X-TV-TWITCH-STREAM-SOURCE="Amazon|2474283100494"
+#EXT-X-DISCONTINUITY
+#EXT-X-MAP:URI="https://7dba.example/v1/init-d.mp4"
+#EXT-X-PROGRAM-DATE-TIME:2026-10-01T11:17:44.000Z
+#EXTINF:2.000,Amazon|2474283100494
+https://7dba.example/v1/segment/scrubbed-ad-9.m4s?dna=scrubbed
+#EXT-X-DATERANGE:ID="source-1790853474",CLASS="twitch-stream-source",START-DATE="2026-10-01T11:17:54.000Z",END-ON-NEXT=YES,X-TV-TWITCH-STREAM-SOURCE="live"
+#EXT-X-DISCONTINUITY
+#EXT-X-MAP:URI="https://video-weaver.example/hls/live-init.mp4"
+#EXT-X-PROGRAM-DATE-TIME:2026-10-01T11:17:54.000Z
+#EXTINF:2.000,live
+https://video-weaver.example/hls/live-1401.ts
+"""
+
 
 def segments(text: str) -> list[str]:
     return [l for l in text.splitlines() if l.startswith("https://")]
@@ -270,11 +411,68 @@ def main() -> int:
     ok &= check("réelle 18/09 : SESSIONID de la session conservé", "X-TV-TWITCH-SESSIONID" in out)
     ok &= check("réelle 18/09 : EXT-X-START conservé", "#EXT-X-START:TIME-OFFSET=0.000" in out)
     ok &= check("réelle 18/09 : discontinuité conservée", out.count("#EXT-X-DISCONTINUITY") == 1)
-    ok &= check("réelle 18/09 : PROGRAM-DATE-TIME conservés", out.count("#EXT-X-PROGRAM-DATE-TIME") == 3)
+    # Les 3 PROGRAM-DATE-TIME de la fixture sont DANS la zone pub (après le
+    # DISCONTINUITY du pod) : depuis la fermeture de la zone jusqu'à la fin du
+    # pod réelle (fuite du 01/10/2026), ils partent avec lui. Le lecteur n'en a
+    # pas besoin — le contenu qui suit porte ses propres marqueurs.
+    ok &= check("réelle 18/09 : les PDT du pod partent avec la pub",
+                out.count("#EXT-X-PROGRAM-DATE-TIME") == 0)
     ok &= check("réelle 18/09 : en-tête TWITCH conservé", "#EXT-X-TWITCH-ELAPSED-SECS:44175.583" in out)
     ok &= check("réelle 18/09 : idempotence", out == sanitize(out))
     sanitize(REAL_SSAI_2026_09_18)
     ok &= check("compteur réelle 18/09 = 3", last_cut == 3, str(last_cut))
+
+    # 9b. pod midroll double-créatif (fuite du 01/10/2026 sur appareil) :
+    #     le second créatif ne porte pas « Amazon » dans son titre — seule la
+    #     fermeture de la zone jusqu'aux marqueurs de fin de pod le retire.
+    out = sanitize(MIDROLL_DOUBLE_CREATIF_2026_10_01)
+    ok &= check("double-créatif : contenu avant la pub conservé",
+                "live-1200.ts" in out and "live-1201.ts" in out)
+    ok &= check("double-créatif : contenu après la pub conservé (pas d'écran noir)",
+                "live-1240.ts" in out and "live-1241.ts" in out)
+    ok &= check("double-créatif : aucun segment pub survivant",
+                not any(s.startswith("https://7dba") or s.startswith("https://ttd")
+                        for s in segments(out)), str(segments(out)))
+    ok &= check("double-créatif : second créatif sans titre Amazon retiré",
+                "scrubbed-ttd-1.m4s" not in out and "scrubbed-ttd-2.m4s" not in out)
+    ok &= check("double-créatif : marqueurs stitched-ad des deux blocs retirés",
+                out.count("stitched-ad") == 0)
+    ok &= check("double-créatif : compteur = les 6 segments des deux créatifs",
+                last_cut == 6, str(last_cut))
+    ok &= check("double-créatif : les 3 discontinuités sont conservées",
+                out.count("#EXT-X-DISCONTINUITY") == 3)
+    ok &= check("double-créatif : séquence live conservée",
+                "#EXT-X-TWITCH-LIVE-SEQUENCE:1240" in out)
+    ok &= check("double-créatif : marqueur de fin de pod (source live) émis",
+                'X-TV-TWITCH-STREAM-SOURCE="live"' in out)
+    ok &= check("double-créatif : les PDT du pod partent, ceux du contenu restent",
+                out.count("#EXT-X-PROGRAM-DATE-TIME") == 2, str(out.count("#EXT-X-PROGRAM-DATE-TIME")))
+    ok &= check("double-créatif : MAP du contenu conservée, MAP de pub retirée",
+                "live-init.mp4" in out and "init-a.mp4" not in out and "init-b.mp4" not in out)
+    ok &= check("double-créatif : idempotence", out == sanitize(out))
+    ok &= check("double-créatif : sentinelle muette (format connu)", not suspicious)
+
+    # 9c. fenêtre démarrant en plein pod, bloc de marqueurs hors fenêtre :
+    #     seul un quartile en ligne ré-arme la zone (filet de sécurité).
+    out = sanitize(QUARTILE_SEUL_2026_10_01)
+    ok &= check("quartile seul : segment pub sans marqueur retiré",
+                "scrubbed-ttd-9.m4s" not in out, str(segments(out)))
+    ok &= check("quartile seul : contenu après la pub conservé",
+                "live-1300.ts" in out)
+    ok &= check("quartile seul : compteur = 2 segments pub", last_cut == 2,
+                str(last_cut))
+    ok &= check("quartile seul : sentinelle muette", not suspicious)
+
+    # 9d. fin de pod sans #EXT-X-TWITCH-LIVE-SEQUENCE : le seul marqueur de
+    #     fin est la DATERANGE source="live" — elle doit fermer la zone.
+    out = sanitize(FIN_DE_POD_SANS_LIVE_SEQ_2026_10_01)
+    ok &= check("fin sans LIVE-SEQ : contenu avant la pub conservé",
+                "live-1400.ts" in out)
+    ok &= check("fin sans LIVE-SEQ : contenu après la pub conservé (source live ferme la zone)",
+                "live-1401.ts" in out)
+    ok &= check("fin sans LIVE-SEQ : segment pub retiré",
+                "scrubbed-ad-9.m4s" not in out)
+    ok &= check("fin sans LIVE-SEQ : compteur = 1", last_cut == 1, str(last_cut))
 
     # 10. sentinelle « marqueur pub inconnu » : observation pure (aucune
     #     modification du nettoyage), qui doit se taire sur tout ce que Twitch
