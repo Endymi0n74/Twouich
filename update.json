@@ -1,10 +1,10 @@
 [
   {
-    "APK": "Twouich_v1.0.16.apk",
-    "ReleaseDate": "2026-09-22T22:04:00.000Z",
+    "APK": "Twouich_v1.0.17.apk",
+    "ReleaseDate": "2026-10-02T00:00:00.000Z",
     "ReleaseType": 0,
-    "VersionCode": 163,
-    "VersionName": "v1.0.16",
+    "VersionCode": 164,
+    "VersionName": "v1.0.17",
     "hasChangeLog": true
   }
 ]
