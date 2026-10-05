@@ -30,7 +30,7 @@ UPSTREAM = "S0und/S0undTV"
 # manuel de patch.py — build.sh passe toujours --version-code/--version-name/
 # --apk-name. Ils suivent donc le dernier bump (le nom d'APK finit dans l'URL
 # que l'app interroge : un défaut en retard pointerait sur un asset inexistant).
-DEFAULT_APK_NAME = "Twouich_v1.0.16.apk"
+DEFAULT_APK_NAME = "Twouich_v1.0.18.apk"
 
 # ── Étape 1 : greffon anti-pub ────────────────────────────────────────────
 # Libellés de l'UX smartphone. Le champ de saisie reprend celui de l'interface
@@ -47,11 +47,30 @@ CHAT_HINT_LEGACY = "Écrire dans le chat"
 PHONE_GEO_OLD_TAIL = ("    const/16 v11, 0x70\n"
                       "    sub-int v7, v9, v10\n"
                       "    sub-int/2addr v7, v11\n")
-PHONE_GEO_CLAMPED_TAIL = PHONE_GEO_OLD_TAIL.replace(
+PHONE_GEO_CLAMPED_TAIL_OLD = PHONE_GEO_OLD_TAIL.replace(
     "    const/16 v11, 0x70\n",
     "    const/16 v11, 0x70\n    sub-int v7, v9, v11\n"
     "    if-ge v10, v7, :twouich_phone_video_fits\n    move v10, v7\n"
     ":twouich_phone_video_fits\n",
+)
+# La forme du 20/09 calculait la hauteur du CHAT avec `sub-int v7, v9, v11`
+# (hauteur totale moins la seule barre de saisie), en ignorant la vidéo : le
+# chat, ancré SOUS la vidéo et en bas, débordait alors de la hauteur de la vidéo.
+# La place du chat se déduit donc de la vidéo APRÈS son plafond.
+PHONE_GEO_CLAMPED_TAIL = PHONE_GEO_OLD_TAIL.replace(
+    "    const/16 v11, 0x70\n",
+    "    const/16 v11, 0x70\n"
+    # v7 reçoit d'abord un ENTIER : `v7` portait encore la référence
+    # DisplayMetrics issue de getDisplayMetrics(), et le test de plafond qui suit le
+    # lirait sinon une référence — `VerifyError: args to 'if'
+    # (Integer, Reference: android.util.DisplayMetrics) must be integral`
+    # (mesuré le 05/10/2026 sur le lecteur au lancement).
+    "    sub-int v7, v9, v10\n    sub-int/2addr v7, v11\n"
+    "    if-ge v10, v7, :twouich_phone_video_fits\n    move v10, v7\n"
+    ":twouich_phone_video_fits\n"
+    # v7 = hauteur totale − vidéo plafonnée − barre de saisie : la place réelle
+    # du chat, et la valeur que le test du tiers doit regarder.
+    "    sub-int v7, v9, v10\n    sub-int/2addr v7, v11\n",
 )
 # if-lt : on SAUTE le plafond quand la vidéo tient déjà (v10 < v7) ;
 # if-ge : on empile quand il reste au moins un tiers de la hauteur pour le chat.
@@ -262,7 +281,15 @@ def _patch_screen_off_stop(text: str) -> tuple[str, bool]:
         fail("invoke-super onStop() introuvable apres le demontage (veille)")
     new_body = (body[:anchor]
                 + PHONE_SCREEN_OFF_GUARD
-                + body[anchor:super_call]
+                # Idempotence du garde : sans cette normalisation, chaque repassage
+                # laissait UNE ligne vide de plus avant `goto` (mesure du 05/10 :
+                # `work/decoded` != `work/decoded` reapplique, +1 octet par build,
+                # et `new_body != body` meme sans changement reel — donc
+                # `work/decoded` derivait a chaque build). Le smali ignore les
+                # lignes vides ; on les supprime donc avant de reinserer, ce qui
+                # rend le second passage un vrai no-op.
+                + body[anchor:super_call].rstrip(PHONE_SCREEN_OFF_NL)
+                + PHONE_SCREEN_OFF_NL
                 + PHONE_SCREEN_OFF_GOTO + PHONE_SCREEN_OFF_NL
                 + PHONE_SCREEN_OFF_KEPT
                 + PHONE_SCREEN_OFF_DONE + PHONE_SCREEN_OFF_NL
@@ -313,6 +340,14 @@ TV_INTERFACE_METHOD = _smali_lines(
     "    const/16 v3, 0x258",
     # ecran large : meme destination que le mode TV (TV 4K, tablettes).
     "    if-ge v2, v3, :twouich_tv_by_mode",
+    # **Repli explicite** : sans ce `goto`, l'etiquette `:twouich_tv_by_mode`
+    # collee sur la ligne suivante ALIGNAIT la sortie des deux tests, donc tout
+    # appareil qui n'est ni une TV ni un ecran large tombait quand meme dans la
+    # branche TV — la methode renvoyait TOUJOURS vrai. Mesure du 05/10/2026 sur
+    # BlueStacks en portrait 720x1280 (480 dp) : trace `interface : TV`, donc
+    # empilement refuse, video en `match_parent` sur tout l'ecran et chat GONE —
+    # c'est-a-dire la video qui empiete sur le chat.
+    "    goto :twouich_phone_interface",
     "    :twouich_tv_by_mode",
     "    const-string v3, \"Twouich\"",
     "    const-string v4, \"interface : TV (mode systeme ou ecran large)\"",
@@ -421,55 +456,152 @@ def _patch_playback_calls(text: str) -> tuple[str, int]:
 
 # --- Service de premier plan : declaration au manifeste -----------------------
 PLAYBACK_SERVICE = "com.twouich.adblock.PlayerKeepAlive"
-PLAYBACK_PERMISSIONS = (
-    # FOREGROUND_SERVICE est deja declare par l'amont ; la seule manquante est
-    # celle du type, exigee depuis Android 14 pour `mediaPlayback`.
+UPDATE_SERVICE = "com.s0und.s0undtv.service.AutoUpdateService"
+NOTIFICATION_SERVICE = "com.s0und.s0undtv.notification.NotificationService"
+WORK_FOREGROUND_SERVICE = "androidx.work.impl.foreground.SystemForegroundService"
+SPECIAL_USE_SUBTYPE = "Twitch event notifications, polled continuously while enabled by the user"
+FGS_PERMISSIONS = (
     "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+    "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+    "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
 )
 
 
-def install_playback_service(decoded: pathlib.Path) -> None:
-    """Declare le service de premier plan `mediaPlayback` et sa permission.
-
-    La classe peut etre dans le dex : sans declaration, `startForegroundService`
-    est refuse et l'application reste une application d'arriere-plan — le systeme
-    detruit alors ses sockets TCP des que l'ecran s'eteint (mesure du 21/09 sur
-    le telephone : `InetDiagMessage: Destroyed live tcp sockets`, puis
-    `UnknownHostException` au bout de 10 s).
-    """
-    print("[1j/5] Veille (service de premier plan mediaPlayback)")
+def install_foreground_services(decoded: pathlib.Path) -> None:
+    """Déclare les services foreground selon l'usage réellement exécuté."""
+    print("[1j/5] Services foreground (mediaPlayback, dataSync, specialUse)")
     manifest = decoded / "AndroidManifest.xml"
     text = manifest.read_text(encoding="utf-8")
     original = text
-
-    for permission in PLAYBACK_PERMISSIONS:
-        if permission in text:
-            continue
-        anchor = "    <uses-permission "
-        if anchor not in text:
-            fail("aucune ligne uses-permission dans AndroidManifest.xml")
-        text = text.replace(
-            anchor,
-            f'    <uses-permission android:name="{permission}"/>' + chr(10) + anchor,
-            1,
-        )
-        log(f"veille : permission {permission.rsplit('.', 1)[-1]} declaree")
-
-    service = (
-        f'        <service android:name="{PLAYBACK_SERVICE}"'
-        ' android:exported="false" android:foregroundServiceType="mediaPlayback" />'
-    )
-    if PLAYBACK_SERVICE not in text:
-        close = "</application>"
-        if close not in text:
-            fail("fin de <application> introuvable dans AndroidManifest.xml")
-        text = text.replace(close, service + chr(10) + close, 1)
-        log("veille : service de premier plan mediaPlayback declare")
-
+    for permission in FGS_PERMISSIONS:
+        if f'android:name="{permission}"' not in text:
+            anchor = "    <uses-permission "
+            if anchor not in text:
+                fail("aucune ligne uses-permission dans AndroidManifest.xml")
+            text = text.replace(anchor,
+                f'    <uses-permission android:name="{permission}"/>' + chr(10) + anchor, 1)
+    specs = ((PLAYBACK_SERVICE, "mediaPlayback", None),
+             (UPDATE_SERVICE, "dataSync", None),
+             (NOTIFICATION_SERVICE, "specialUse", SPECIAL_USE_SUBTYPE))
+    # L'élément <service> est remplacé EN ENTIER (balise ouvrante, enfants et
+    # </service> compris) : ne matcher que la balise ouvrante laissait les
+    # enfants d'origine dans le texte → doublons de <property>/</service> à la
+    # seconde exécution, manifeste invalide (ParseError, constaté le 04/10).
+    # La reconstruction est déterministe : quel que soit l'état d'entrée
+    # (auto-fermant, déjà patché, ancien doublon…), la sortie est identique.
+    # L'alternative auto-fermante est testée EN PREMIER et reste contrainte
+    # par [^>]* : sinon `>.*?</service>` l'emporte sur un tag `/>` et avale
+    # les services suivants jusqu'au prochain </service> du manifeste.
+    # Les attributs upstream inutiles à la correction (stopWithTask…) sont
+    # conservés : on ne touche que exported et foregroundServiceType.
+    element_re = re.compile(
+        r'<service(?=[\s/>])[^>]*?/>'
+        r'|<service(?=[\s/>])[^>]*?>.*?</service>', re.DOTALL)
+    for name, fgs_type, subtype in specs:
+        matches = [m for m in element_re.finditer(text)
+                   if f'android:name="{name}"' in m.group(0).split(">", 1)[0]]
+        if len(matches) > 1:
+            fail(f"service dupliqué : {name}")
+        if matches:
+            old = matches[0].group(0)
+            start, end = matches[0].span()
+        else:
+            # Création : PlayerKeepAlive est une classe Twouich, absente du
+            # manifeste d'amont. Comme install_playback_service avant lui, la
+            # déclaration est posée juste avant </application>.
+            old = ""
+            close = "</application>"
+            if close not in text:
+                fail("fin de <application> introuvable dans AndroidManifest.xml")
+            start = end = text.index(close)
+        opening = (old.split(">", 1)[0] if old
+                   else f'        <service android:name="{name}"')
+        opening = re.sub(r'\s*/\s*$', "", opening)
+        opening = re.sub(r'\s+android:foregroundServiceType="[^"]*"', "", opening)
+        opening = re.sub(r'\s+android:exported="[^"]*"', "", opening)
+        opening += (f' android:exported="false"'
+                    f' android:foregroundServiceType="{fgs_type}"')
+        self_closing = not old or old.rstrip().endswith("/>")
+        children = ("" if self_closing
+                    else old[old.index(">") + 1:old.rfind("</service>")])
+        children = re.sub(
+            r'<property(?=[\s/>])(?=[^>]*android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE")'
+            r'[^>]*?/>|<property(?=[\s/>])(?=[^>]*android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE")'
+            r'[^>]*?>.*?</property>', "", children, flags=re.DOTALL)
+        children = children.strip()
+        if subtype:
+            children = (children + chr(10) if children else "") + (
+                "<property android:name=" + chr(34)
+                + "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" + chr(34)
+                + " android:value=" + chr(34) + subtype + chr(34) + " />")
+        if children:
+            lines = ["        " + line.strip() + chr(10)
+                     for line in children.split(chr(10)) if line.strip()]
+            replacement = (opening + ">" + chr(10)
+                           + "".join(lines) + "    </service>")
+        else:
+            replacement = opening + " />"
+        if not matches:
+            replacement += chr(10)
+        text = text[:start] + replacement + text[end:]
+    if WORK_FOREGROUND_SERVICE not in text:
+        fail("SystemForegroundService WorkManager attendu mais absent du manifeste")
     if text != original:
         manifest.write_text(text, encoding="utf-8")
-    else:
-        log("déjà appliqué : service de premier plan mediaPlayback")
+    result = manifest.read_text(encoding="utf-8")
+    for permission in FGS_PERMISSIONS:
+        if f'android:name="{permission}"' not in result:
+            fail(f"permission foreground absente : {permission}")
+    for name, fgs_type in ((PLAYBACK_SERVICE, "mediaPlayback"),
+                           (UPDATE_SERVICE, "dataSync"),
+                           (NOTIFICATION_SERVICE, "specialUse")):
+        if not re.search(r'<service\b(?=[^>]*android:name="' + re.escape(name)
+                         + r'")(?=[^>]*android:foregroundServiceType="' + fgs_type
+                         + r'")[^>]*>', result):
+            fail(f"déclaration foreground {name} ({fgs_type}) absente ou incorrecte")
+    if ("android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" not in result
+            or SPECIAL_USE_SUBTYPE not in result):
+        fail("sous-type specialUse NotificationService absent")
+
+
+def verify_foreground_service_inventory(decoded: pathlib.Path) -> None:
+    """Refuse l'oubli d'un nouveau appel startForeground dans le dex."""
+    found: set[str] = set()
+    for root in (decoded / "smali", decoded / "smali_classes2"):
+        if not root.exists():
+            continue
+        for path in root.rglob("*.smali"):
+            source = path.read_text(encoding="utf-8", errors="ignore")
+            if "Landroid/app/Service;->startForeground(" in source:
+                found.add(path.relative_to(decoded).as_posix())
+    expected = {
+        "smali_classes2/com/s0und/s0undtv/service/AutoUpdateService.smali",
+        "smali_classes2/com/s0und/s0undtv/notification/NotificationService.smali",
+        "smali_classes2/com/twouich/adblock/PlayerKeepAlive.smali",
+        # Le composant WorkManager compte aussi ses deux ponts synthétiques
+        # ($a/$b), qui appellent la variante 3 arguments de startForeground
+        # pour le compte du même service. Chemins vérifiés dans l'arbre neuf
+        # (04/10) : PlayerKeepAlive vit dans smali_classes2, WorkManager dans
+        # smali.
+        "smali/androidx/work/impl/foreground/SystemForegroundService.smali",
+        "smali/androidx/work/impl/foreground/SystemForegroundService$a.smali",
+        "smali/androidx/work/impl/foreground/SystemForegroundService$b.smali",
+    }
+    if found != expected:
+        fail("inventaire startForeground inattendu : "
+             + f"absents={sorted(expected - found)}, nouveaux={sorted(found - expected)}")
+    # La bibliothèque WorkManager est présente, mais aucun Worker n'emploie
+    # ForegroundInfo/setForeground : son service générique reste sans type.
+    for root in (decoded / "smali", decoded / "smali_classes2"):
+        if not root.exists():
+            continue
+        for path in root.rglob("*.smali"):
+            source = path.read_text(encoding="utf-8", errors="ignore")
+            if ("Landroidx/work/ForegroundInfo;" in source
+                    or "Landroidx/work/ListenableWorker;->setForeground" in source
+                    or "Landroidx/work/ListenableWorker;->setForegroundAsync" in source):
+                fail(f"Worker foreground actif non audité : {path.relative_to(decoded)}")
+
 
 
 PHONE_CHAT_GATE_ANCHOR = ("    const/16 v2, 0x258\n"
@@ -1354,7 +1486,7 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
                 ' android:layout_alignParentBottom="true"'
                 ' android:layout_marginBottom="@dimen/twouich_phone_chat_height"'
                 ' android:layout_alignParentStart="true"'
-                ' layout="@layout/include_send_chat_message_window" />')
+                ' layout="@layout/include_send_chat_message_window_phone" />')
     send_pattern = r'<include\s+[^>]*android:id="@id/SendMessageWindow"[^>]*/>'
     rewritten, send_count = re.subn(send_pattern, send_new, rewritten, count=1)
     if send_count != 1:
@@ -1366,32 +1498,45 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     else:
         log("déjà appliqué : layout lecteur smartphone")
 
-    send_layout = decoded / "res/layout/include_send_chat_message_window.xml"
-    if not send_layout.is_file():
-        fail(f"layout de saisie chat absent : {send_layout}")
-    send_text = send_layout.read_text(encoding="utf-8")
-    send_text_new = send_text.replace(f'android:hint="{CHAT_HINT_LEGACY}"',
-                                      f'android:hint="{CHAT_HINT}"')
-    if f'android:hint="{CHAT_HINT}"' not in send_text_new:
-        send_text_new = send_text_new.replace(
-            'android:id="@id/ET_SendMessage"',
-            f'android:imeOptions="actionSend" android:hint="{CHAT_HINT}" android:id="@id/ET_SendMessage"',
-            1,
-        )
-    # Une version antérieure du patch a pu écrire l'attribut deux fois : on
-    # déduplique la paire (apktool ne préserve pas l'ordre d'insertion).
-    send_text_new = re.sub(
-        rf'(android:hint="{re.escape(CHAT_HINT)}"\s+android:imeOptions="actionSend"\s+)'
-        rf'(?:android:hint="{re.escape(CHAT_HINT)}"\s+android:imeOptions="actionSend"\s+)+',
-        r'\1', send_text_new,
-    )
-    if send_text_new != send_text:
-        send_layout.write_text(send_text_new, encoding="utf-8", newline="\n")
-        log(f"smartphone : champ de chat « {CHAT_HINT} » (libellé + touche Envoyer)")
+    phone_layout_source = here / "res" / "layout" / "include_send_chat_message_window_phone.xml"
+    phone_layout = decoded / "res" / "layout" / "include_send_chat_message_window_phone.xml"
+    if not phone_layout_source.is_file():
+        fail(f"layout téléphone de saisie absent : {phone_layout_source}")
+    phone_layout.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(phone_layout_source, phone_layout)
+    send_drawable_source = here / "res" / "drawable" / "twouich_ic_send.xml"
+    send_drawable = decoded / "res" / "drawable" / "twouich_ic_send.xml"
+    if not send_drawable_source.is_file():
+        fail(f"icône Envoyer absente : {send_drawable_source}")
+    shutil.copy2(send_drawable_source, send_drawable)
 
     player_smali = decoded / "smali/com/s0und/s0undtv/activities/PlayerActivity.smali"
     if not player_smali.is_file():
         fail(f"activité lecteur absente : {player_smali}")
+    player_source = player_smali.read_text(encoding="utf-8").replace("\r\n", "\n")
+    send_method = """
+.method public twouichPhoneSendChatMessage(Landroid/view/View;)V
+    .locals 3
+    iget-object v0, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->U:Landroid/widget/EditText;
+    if-eqz v0, :twouich_chat_send_done
+    invoke-virtual {v0}, Landroid/widget/EditText;->getText()Landroid/text/Editable;
+    move-result-object v1
+    invoke-virtual {v1}, Ljava/lang/Object;->toString()Ljava/lang/String;
+    move-result-object v1
+    invoke-virtual {v1}, Ljava/lang/String;->isEmpty()Z
+    move-result v2
+    if-nez v2, :twouich_chat_send_done
+    # Même callback asynchrone que PlayerActivity.p0 (touche clavier actionSend).
+    new-instance v2, Ly6/i0;
+    invoke-direct {v2, p0, v1}, Ly6/i0;-><init>(Lcom/s0und/s0undtv/activities/PlayerActivity;Ljava/lang/String;)V
+    invoke-static {v2}, Lx1/a;->a(Lx1/a$c;)V
+    :twouich_chat_send_done
+    return-void
+.end method
+"""
+    if "prefs_chat_font_size" not in player_source:
+        fail("réglage existant prefs_chat_font_size absent du lecteur")
+
     # Fins de ligne normalisées : apktool décode le smali dans les fins de ligne
     # de la machine, et un motif de réparation écrit en LF ne peut pas atteindre
     # un bloc injecté en CRLF (le cas de l'arbre déjà patché sur Windows).
@@ -1402,6 +1547,14 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     player_text, screen_off_patched = _patch_screen_off_stop(player_text)
     if screen_off_patched:
         log("veille : le demontage d'onStop() est saute quand l'ecran est eteint")
+    # La méthode du bouton Envoyer rejoint le flux d'écriture unique : c'est
+    # write_player qui pose la plume (invariant « source unique TV » du 21/09),
+    # jamais une écriture directe du smali du lecteur — le verrou de test en
+    # compte exactement une.
+    send_added = False
+    if ".method public twouichPhoneSendChatMessage(Landroid/view/View;)V" not in player_text:
+        player_text = player_text.rstrip() + "\n" + send_method.strip() + "\n"
+        send_added = True
 
     def write_player(final: str) -> None:
         """Ecrit le smali du lecteur : point unique de la source TV.
@@ -1823,6 +1976,10 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     # depuis la largeur sans plafond, puis empilement tenté en paysage faute de
     # place pour le chat.
     ).replace(
+        PHONE_GEO_CLAMPED_TAIL_OLD + PHONE_GEO_ROOM_BLOCK, PHONE_GEO_TAIL,
+    ).replace(
+        PHONE_GEO_CLAMPED_TAIL_OLD, PHONE_GEO_CLAMPED_TAIL,
+    ).replace(
         PHONE_GEO_CLAMPED_TAIL, PHONE_GEO_TAIL,
     ).replace(
         PHONE_GEO_OLD_TAIL, PHONE_GEO_TAIL,
@@ -1835,6 +1992,13 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     ).replace(
         "    if-lt v7, v3, :twouich_phone_room",
         "    if-ge v7, v3, :twouich_phone_room",
+    # `twouichTvInterface` : le repli explicite vers la branche téléphone manque
+    # sur tout arbre écrit avant le 05/10 — sans lui la methode renvoie toujours
+    # « TV », donc l'empilement du lecteur ne s'applique jamais sur un telephone.
+    ).replace(
+        "    if-ge v2, v3, :twouich_tv_by_mode\n    :twouich_tv_by_mode\n",
+        "    if-ge v2, v3, :twouich_tv_by_mode\n"
+        "    goto :twouich_phone_interface\n    :twouich_tv_by_mode\n",
     # Un arbre qui portait déjà le bloc de place voit la réparation ci-dessus en
     # insérer un second : on recolle les doublons, sinon apktool refuse le fichier
     # (« There is already a label with that name »).
@@ -2004,7 +2168,7 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         write_player(player_fixed)
         log("smartphone : chat repliable rebranché sur le lecteur (réparation)")
     elif (player_fixed != player_text or tv_guard_count or screen_off_patched
-          or service_calls):
+          or service_calls or send_added):
         write_player(player_fixed)
         log("smartphone : correction des paramètres du lecteur empilé")
     else:
@@ -2042,8 +2206,14 @@ def patch_smartphone_headers(decoded: pathlib.Path) -> None:
     du BrowseSupportFragment occupe alors ~70 % de la largeur (mesuré : `[0,0][852,2504]`
     sur un écran de 1220 px), ne laissant aux cartes qu'une bande de 362 px — un tap y
     déplace la mise en page (repli du panneau) au lieu d'ouvrir la carte. HEADERS_HIDDEN
-    rend la même navigation accessible par la touche retour, mais laisse les rangées
-    occuper toute la largeur : elles deviennent utilisables au doigt.
+    laisse les rangées occuper toute la largeur : elles deviennent utilisables au doigt.
+
+    **Ce que le repli fait perdre, mesuré le 05/10/2026 sur BlueStacks (API 33) :** le
+    panneau n'est plus atteignable du tout. La touche retour ne le révèle PAS — elle Ferme l'activité (après
+    `KEYCODE_BACK` on se retrouve sur le lanceur) — et `KEYCODE_MENU` n'ouvre rien. L'accueil au doigt n'expose alors que cinq éléments cliquables : `title_orb`,
+    `title_text` et les trois entrées de notre barre basse. Les entrées du panneau
+    (**Logout**, About, Changelog, Privacy policy, Preview audio) et celles du menu Leanback
+    (**Refresh**, Login with Turbo, Test) sont donc inatteignables au doigt.
 
     Le seuil 600dp est celui d'Android : au-delà (TV, grande tablette) le comportement
     d'origine est conservé à l'identique.
@@ -2178,6 +2348,158 @@ def patch_smartphone_headers(decoded: pathlib.Path) -> None:
     text = text.rstrip() + "\n" + helper + "\n"
     path.write_text(text, encoding="utf-8", newline="\n")
     log("smartphone : panneau latéral replié au profit des rangées (HEADERS_HIDDEN)")
+
+
+# Connexion Twitch au doigt. Leanback compose le titre d'en-tête comme un
+# simple libellé : sans session, il affiche la chaîne amont `login_relogin`
+# (« Login to use the app »). Les entrées réelles — « Login (Preferred) »,
+# « Login (Web) », « Login with Turbo » — sont des actions d'un menu latéral que
+# la télécommande ouvre et que le doigt n'atteint pas : mesuré le 05/10/2026 sur
+# le Xiaomi 24095PCADG (Android 16 / HyperOS), le tap, l'appui long et la touche
+# MENU ouvrent autre chose, et l'accueil n'a plus la moindre rangée sans session.
+# Le téléphone était donc IMPOSSIBLE à connecter — ni chat, ni « Abonnées », ni
+# VOD réservées au compte — alors que la TV y accède à la télécommande.
+#
+# Le correctif pose un `OnClickListener` sur ce libellé, et rien d'autre :
+#   - le garde est `twouichPhoneHeadersState() == 3`, soit exactement la
+#     décision déjà employée par le portage (mode TV du système, ou ≥ 600 dp) :
+#     une TV sort de la méthode avant tout contact avec une vue, son titre reste
+#     inerte comme aujourd'hui ;
+#   - l'action appelle `v4()`, le chemin de connexion déjà livré par l'amont
+#     (« Login (Web) » -> LoginActivity) : aucun flux d'authentification
+#     n'est réimplémenté, les mêmes garde-fous s'appliquent.
+#     Pourquoi `v4()` et non `s4()` (« Login (Preferred) » -> AltLoginV2Activity)
+#     alors que le menu Leanback préfère `s4()` : le « préféré » de l'amont
+#     interroge un serveur HTTP du réseau local, `http://<ip>:13378/login`, dont
+#     l'adresse est celle du poste de l'auteur. Mesuré le 05/10/2026 : sur le
+#     réseau du téléphone (Xiaomi en 192.168.1.22/24, Freebox en .24) ce port
+#     refuse la connexion — l'écran s'ouvre sur une URL morte. `v4()` ouvre la
+#     page OAuth officielle de Twitch dans un WebView, sans tiers ; l'endpoint de
+#     l'amont a été vérifié vivant le même jour (HTTP 302 de
+#     `id.twitch.tv/oauth2/authorize` vers `twitch.tv/login`).
+#   - le listener n'est posé que dans la branche de `c5()` qui AFFICHE le bandeau
+#     de connexion : un utilisateur connecté n'a donc aucun gestionnaire sur son
+#     titre, et la TV n'a jamais de bannière.
+LOGIN_LISTENER = "com/twouich/phone/PhoneLoginOnClick"
+# Ancre volontairement étroite : la ligne unique qui pose le bandeau
+# « Login to use the app » (la constante amont `login_relogin`). Un bloc
+# d'instructions ne tiendrait pas — apktool intercale des directives `.line`
+# entre elles, et l'ancre casserait à la première recompilation de l'amont.
+LOGIN_TITLE_MARKER = "    sget p1, Lcom/s0und/s0undtv/n;->k:I\n"
+LOGIN_BIND_CALL = (
+    "\n    # Le bandeau de connexion devient le bouton de connexion au doigt.\n"
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/fragments/MainFragment;"
+    "->twouichPhoneLoginBind()V\n"
+)
+LOGIN_METHODS = (
+    "\n\n.method private twouichPhoneLoginBind()V\n"
+    "    .locals 4\n"
+    # Même garde que le panneau latéral : 3 = téléphone, 2 = télévision. Une TV
+    # repart ici avant d'avoir touché une seule vue.
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/fragments/MainFragment;"
+    "->twouichPhoneHeadersState()I\n"
+    "    move-result v0\n"
+    "    const/4 v1, 0x3\n"
+    "    if-ne v0, v1, :twouich_login_bind_done\n"
+    # Le titre est un TextView d'identifiant `title_text` : on le résout par nom
+    # (même méthode que twouichPhoneId côté lecteur) plutôt que par un id figé,
+    # qui changerait à la prochaine compilation de l'amont.
+    "    invoke-virtual {p0}, Landroidx/fragment/app/f;->B1()Landroid/content/Context;\n"
+    "    move-result-object v1\n"
+    "    invoke-virtual {v1}, Landroid/content/Context;->getResources()"
+    "Landroid/content/res/Resources;\n"
+    "    move-result-object v1\n"
+    "    const-string v2, \"title_text\"\n"
+    "    const-string v3, \"id\"\n"
+    "    const-string v0, \"com.s0und.s0undtv\"\n"
+    "    invoke-virtual {v1, v2, v3, v0}, Landroid/content/res/Resources;"
+    "->getIdentifier(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)I\n"
+    "    move-result v1\n"
+    "    if-lez v1, :twouich_login_bind_done\n"
+    # L'en-tête Leanback vit dans la FENÊTRE de l'activité, pas dans la vue du
+    # fragment, et `findViewById` est une méthode de `View` : l'appeler sur le
+    # Context lève `NoSuchMethodError` au démarrage (mesuré le 05/10/2026 sur le
+    # Xiaomi, crash à l'ouverture de l'accueil). On passe donc par l'activité,
+    # avec un test de type : sans activité, on repart au lieu de lever.
+    "    invoke-virtual {p0}, Landroidx/fragment/app/f;->B1()Landroid/content/Context;\n"
+    "    move-result-object v2\n"
+    "    instance-of v3, v2, Landroid/app/Activity;\n"
+    "    if-eqz v3, :twouich_login_bind_done\n"
+    "    check-cast v2, Landroid/app/Activity;\n"
+    "    invoke-virtual {v2}, Landroid/app/Activity;->getWindow()Landroid/view/Window;\n"
+    "    move-result-object v2\n"
+    "    invoke-virtual {v2}, Landroid/view/Window;->getDecorView()Landroid/view/View;\n"
+    "    move-result-object v2\n"
+    "    invoke-virtual {v2, v1}, Landroid/view/View;"
+    "->findViewById(I)Landroid/view/View;\n"
+    "    move-result-object v1\n"
+    # En-tête pas encore monté (appel très tôt au démarrage) : on repart sans
+    # bruit, le prochain passage de c5() réessaiera.
+    "    if-eqz v1, :twouich_login_bind_done\n"
+    "    new-instance v2, L" + LOGIN_LISTENER + ";\n"
+    "    invoke-direct {v2, p0}, L" + LOGIN_LISTENER
+    + ";-><init>(Lcom/s0und/s0undtv/fragments/MainFragment;)V\n"
+    "    invoke-virtual {v1, v2}, Landroid/view/View;"
+    "->setOnClickListener(Landroid/view/View$OnClickListener;)V\n"
+    "    :twouich_login_bind_done\n"
+    "    return-void\n"
+    ".end method\n"
+    "\n"
+    ".method public twouichPhoneLogin(Landroid/view/View;)V\n"
+    "    .locals 2\n"
+    # Garde de téléphone redondant avec celui du poser : le listener peut être
+    # rappelé après un changement de configuration qui bascule en mode TV.
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/fragments/MainFragment;"
+    "->twouichPhoneHeadersState()I\n"
+    "    move-result v0\n"
+    "    const/4 v1, 0x3\n"
+    "    if-ne v0, v1, :twouich_login_done\n"
+    # Chemin de connexion de l'amont, non réimplémenté : « Login (Web) ».
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/fragments/MainFragment;->v4()V\n"
+    "    :twouich_login_done\n"
+    "    return-void\n"
+    ".end method\n"
+)
+
+
+def patch_phone_login(decoded: pathlib.Path, here: pathlib.Path) -> None:
+    """Rend la connexion Twitch atteignable au doigt, téléphone seul (OAuth).
+
+    Le bandeau d'en-tête « Login to use the app » devient un bouton qui appelle
+    le chemin de connexion déjà présent dans l'app. Une TV n'est jamais touchée :
+    le garde `twouichPhoneHeadersState()` la fait sortir avant tout accès à une
+    vue, et le listener n'est posé que dans la branche qui affiche ce bandeau —
+    donc jamais pour un utilisateur connecté, ni en mode télévision.
+    """
+    print("[1j2/5] Connexion Twitch au doigt (bandeau d'en-tête, téléphone seul)")
+    listener_source = here / "smali" / "com" / "twouich" / "phone" / "PhoneLoginOnClick.smali"
+    if not listener_source.is_file():
+        fail(f"listener de connexion absent : {listener_source}")
+    listener = (decoded / "smali_classes2" / "com" / "twouich" / "phone"
+                / "PhoneLoginOnClick.smali")
+    listener.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(listener_source, listener)
+
+    path = decoded / "smali_classes2/com/s0und/s0undtv/fragments/MainFragment.smali"
+    if not path.is_file():
+        fail(f"fragment principal absent : {path}")
+    text = path.read_text(encoding="utf-8")
+    if "twouichPhoneLoginBind()V" in text and LOGIN_LISTENER in text:
+        log("déjà appliqué : bandeau de connexion cliquable au doigt")
+        return
+    if text.count(LOGIN_TITLE_MARKER) != 1:
+        fail(f"pose du bandeau de connexion introuvable dans MainFragment "
+             f"({text.count(LOGIN_TITLE_MARKER)} fois) — cible changée")
+    title = text.index(LOGIN_TITLE_MARKER)
+    tail = text.find("    return-void\n", title)
+    if tail < 0:
+        fail("retour de la branche du bandeau de connexion introuvable — "
+             "cible changée")
+    text = text[:tail] + LOGIN_BIND_CALL + text[tail:]
+    text = text.rstrip() + "\n" + LOGIN_METHODS + "\n"
+    path.write_text(text, encoding="utf-8", newline="\n")
+    log("smartphone : bandeau « Login to use the app » cliquable (mode TV exclu)")
+    log(f"copié : PhoneLoginOnClick.smali")
 
 
 def find_base_grid(decoded: pathlib.Path) -> pathlib.Path:
@@ -2893,10 +3215,12 @@ def main() -> int:
     disable_remote_config_calls(decoded)
     disable_crashlytics_facade(decoded)
     patch_smartphone_features(decoded)
-    install_playback_service(decoded)
+    install_foreground_services(decoded)
+    verify_foreground_service_inventory(decoded)
     install_phone_assets(decoded, here)
     patch_smartphone_ux(decoded, here)
     patch_smartphone_headers(decoded)
+    patch_phone_login(decoded, here)
     patch_smartphone_tap(decoded)
     patch_smartphone_navigation(decoded, here)
     patch_smartphone_pip(decoded)
@@ -2936,14 +3260,33 @@ def main() -> int:
         ("smali_classes2/P6/l.smali", "return-void"),
         ("res/layout/activity_player.xml", "twouich_phone_chat_height"),
         ("res/layout/activity_player.xml", "SendMessageWindow"),
-        ("res/layout/include_send_chat_message_window.xml", "ET_SendMessage"),
+        ("res/layout/include_send_chat_message_window_phone.xml", "ET_SendMessage"),
+        ("res/layout/include_send_chat_message_window_phone.xml", "twouich_chat_send"),
+        ("res/drawable/twouich_ic_send.xml", "<vector"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".method public twouichPhoneSendChatMessage(Landroid/view/View;)V"),
         ("res/layout-sw600dp/activity_player.xml", "ChatRecycleView"),
         ("res/layout/activity_main.xml", "twouich_phone_nav_search"),
         ("res/layout-sw600dp/activity_main.xml", "main_browse_fragment"),
         ("smali/com/s0und/s0undtv/activities/MainActivity.smali", "twouichPhoneSearch"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhoneStackedLayout"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "prefs_chat_font_size"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".method public twouichPhoneSendChatMessage(Landroid/view/View;)V"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         "Ly6/i0;-><init>(Lcom/s0und/s0undtv/activities/PlayerActivity;Ljava/lang/String;)V"),
         ("smali_classes2/com/s0und/s0undtv/fragments/MainFragment.smali",
          "invoke-direct {p0}, Lcom/s0und/s0undtv/fragments/MainFragment;->twouichPhoneHeadersState()I"),
+        # Connexion au doigt : le bandeau d'en-tête devient le bouton, et la TV
+        # reste exclue par le même garde que le panneau latéral.
+        ("smali_classes2/com/s0und/s0undtv/fragments/MainFragment.smali",
+         "invoke-direct {p0}, Lcom/s0und/s0undtv/fragments/MainFragment;->twouichPhoneLoginBind()V"),
+        ("smali_classes2/com/s0und/s0undtv/fragments/MainFragment.smali",
+         ".method public twouichPhoneLogin(Landroid/view/View;)V"),
+        ("smali_classes2/com/s0und/s0undtv/fragments/MainFragment.smali",
+         "invoke-direct {p0}, Lcom/s0und/s0undtv/fragments/MainFragment;->v4()V"),
+        ("smali_classes2/com/twouich/phone/PhoneLoginOnClick.smali",
+         ".implements Landroid/view/View$OnClickListener;"),
         ("res/values/dimens.xml", "twouich_phone_chat_height"),
         ("smali_classes2/com/twouich/adblock/TapClick.smali",
          ".method public static touch(Landroid/view/View;Landroid/view/MotionEvent;)Z"),
@@ -2958,6 +3301,11 @@ def main() -> int:
         ("res/layout/activity_player.xml", "twouich_phone_pip"),
         ("AndroidManifest.xml", 'android:supportsPictureInPicture="true"'),
         ("AndroidManifest.xml", "smallestScreenSize"),
+        ("AndroidManifest.xml", "android.permission.FOREGROUND_SERVICE_DATA_SYNC"),
+        ("AndroidManifest.xml", "android.permission.FOREGROUND_SERVICE_SPECIAL_USE"),
+        ("AndroidManifest.xml", SPECIAL_USE_SUBTYPE),
+        ("AndroidManifest.xml", 'android:foregroundServiceType="dataSync"'),
+        ("AndroidManifest.xml", 'android:foregroundServiceType="specialUse"'),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhonePip"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhoneChatToggle"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", ".field private twouichChatHidden:Z"),

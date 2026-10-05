@@ -71,11 +71,23 @@ def _apk_name_from_build_sh() -> str | None:
 DEFAULT_APK = ROOT / "dist" / (_apk_name_from_build_sh() or "Twouich_APK_NAME_introuvable.apk")
 PLAYBACK_SERVICE = "com.twouich.adblock.PlayerKeepAlive"
 PLAYBACK_PERMISSION = "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+UPDATE_SERVICE = "com.s0und.s0undtv.service.AutoUpdateService"
+NOTIFICATION_SERVICE = "com.s0und.s0undtv.notification.NotificationService"
 # aapt2 connaît l'attribut android:foregroundServiceType et encode « mediaPlayback »
 # en drapeau : la chaîne n'existe donc NULLE PART dans le livrable (vérifié le
 # 21/09 : absente du pool de chaînes du manifeste binaire). C'est ce drapeau, lu
 # dans l'AXML signé, qui fait foi.
+#
+# Les trois drapeaux sont ceux MESURÉS sur l'AXML compilé le 04/10/2026
+# (dist/Twouich_v1.0.18.apk), avec mediaPlayback = 1<<1 comme témoin de
+# calibrage déjà vérifié sur appareil : dataSync = 1<<0, specialUse = 1<<30.
+# Rien n'est deviné : si aapt2 change d'encodage, ces valeurs cessent de
+# coller au livrable et le test le dira.
 FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK = 1 << 1
+FOREGROUND_SERVICE_TYPE_DATA_SYNC = 1 << 0
+FOREGROUND_SERVICE_TYPE_SPECIAL_USE = 1 << 30
+DATA_SYNC_PERMISSION = "android.permission.FOREGROUND_SERVICE_DATA_SYNC"
+SPECIAL_USE_PERMISSION = "android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
 
 # Chaînes d'affichage : ce que l'utilisateur lit à l'écran. Le paquet Android
 # (`com.s0und.s0undtv`) et les URL du journal des modifications gardent
@@ -104,6 +116,9 @@ FIREBASE_TRACE = (
 # (Twitch mobile). Volontairement recopié de CHAT_HINT (patch/patch.py) : si le
 # générateur change le texte, ce test échoue et force à traiter les deux côtés.
 CHAT_HINT = "Envoyer un message"
+# Sous-type specialUse exigé par Android 14+ pour les services sans usage
+# standard. Volontairement recopié de SPECIAL_USE_SUBTYPE (patch/patch.py).
+SPECIAL_USE_SUBTYPE = "Twitch event notifications, polled continuously while enabled by the user"
 PAGES = ("assets/S0undTV_about.html", "assets/S0undTV_changelog.html")
 
 
@@ -778,11 +793,49 @@ def main() -> int:
                     holds(dex_blob, "twouichChatApply"),
                     "les méthodes du repli ont disparu du dex livré")
         # Le libellé du champ vit dans le layout compilé (AXML), pas dans
-        # resources.arsc : aapt2 le laisse dans l'entrée du layout.
-        hint_layout = "res/layout/include_send_chat_message_window.xml"
+        # resources.arsc : aapt2 le laisse dans l'entrée du layout. Depuis la
+        # v1.0.18, c'est le compositeur TÉLÉPHONE (include_send_chat_message_
+        # window_phone.xml) qui porte le hint et le bouton Envoyer : le layout
+        # upstream include_send_chat_message_window.xml n'est plus patché (il
+        # sert aux écrans TV, avec son libellé d'origine).
+        hint_layout = "res/layout/include_send_chat_message_window_phone.xml"
         ok &= check("champ de chat : libellé de saisie",
                     hint_layout in names and holds(z.read(hint_layout), CHAT_HINT),
                     f"attendu : « {CHAT_HINT} » dans {hint_layout}")
+        ok &= check("bouton Envoyer : rappel dans le layout téléphone",
+                    hint_layout in names
+                    and holds(z.read(hint_layout), "twouichPhoneSendChatMessage"),
+                    "android:onClick=twouichPhoneSendChatMessage absent du compositeur")
+        ok &= check("bouton Envoyer : icône et identifiant compilés",
+                    holds(arsc, "twouich_ic_send") and holds(arsc, "twouich_chat_send"),
+                    "icône ou identifiant du bouton absents des ressources")
+        # Le bouton emprunte la MÊME voie d'envoi que la touche ENTER du clavier :
+        # le callback asynchrone Ly6/i0(PlayerActivity, String) est ce qui partage
+        # la file d'attente, le garde auth et les followers-only. Sans lui, le
+        # bouton et le clavier divergeraient dès la première évolution d'amont.
+        ok &= check("bouton Envoyer : méthode et voie d'envoi compilées",
+                    holds(dex_blob, "twouichPhoneSendChatMessage")
+                    and holds(dex_blob, "Ly6/i0;"),
+                    "méthode d'envoi ou callback asynchrone absents du dex")
+        # Connexion au doigt : le bandeau d'en-tête « Login to use the app »
+        # devient le bouton de connexion. Sans session, l'accueil téléphone n'a
+        # AUCUNE autre porte d'entrée vers le compte — les entrées « Login
+        # (Preferred)/(Web)/with Turbo » vivent dans un menu que le doigt
+        # n'atteint pas (mesuré le 05/10/2026 sur le Xiaomi 24095PCADG).
+        ok &= check("connexion au doigt : les deux méthodes sont dans le dex livré",
+                    holds(dex_blob, "twouichPhoneLoginBind")
+                    and holds(dex_blob, "twouichPhoneLogin"),
+                    "le pose du listener ou son action sont absents du dex : le "
+                    "bandeau « Login to use the app » reste inerte")
+        ok &= check("connexion au doigt : le listener est compilé",
+                    holds(dex_blob, "PhoneLoginOnClick"),
+                    "classe com/twouich/phone/PhoneLoginOnClick absente du dex")
+        # L'action délègue à l'activité de connexion de l'amont : elle doit donc
+        # exister dans le manifeste livré, faute de quoi le tap ouvre l'écran
+        # d'erreur « app introuvable ».
+        ok &= check("connexion au doigt : l'activité de connexion est déclarée",
+                    holds(manifest, "LoginActivity"),
+                    "LoginActivity absente du manifeste : le tap ne peut rien ouvrir")
         leaked_m = [s for s in DEAD_NAMES if holds(manifest, s)]
         ok &= check("libellé du manifeste Twouich",
                     not leaked_m and holds(manifest, "Twouich"), ", ".join(leaked_m))
@@ -848,6 +901,27 @@ def main() -> int:
                     holds(dex_blob, PLAYBACK_SERVICE.replace(".", "/"))
                     and holds(dex_blob, "startIfPhone"),
                     "la classe du service est absente du dex livré")
+        # Depuis la v1.0.18 : le crash Android 14+ (MissingForegroundServiceType-
+        # Exception, constaté en DropBox sur le téléphone Xiaomi) venait
+        # d'AutoUpdateService, démarré en foreground SANS type déclaré. Les trois
+        # services portent leur usage réel, avec les permissions de type et le
+        # sous-type specialUse exigé par la plateforme.
+        ok &= check("permissions de type foreground déclarées",
+                    holds(manifest, DATA_SYNC_PERMISSION)
+                    and holds(manifest, SPECIAL_USE_PERMISSION),
+                    "FOREGROUND_SERVICE_DATA_SYNC / SPECIAL_USE absentes du manifeste")
+        ok &= check("service de mise à jour en dataSync",
+                    services.get(UPDATE_SERVICE) == FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                    f"{UPDATE_SERVICE} : type lu {services.get(UPDATE_SERVICE)}, attendu "
+                    f"{FOREGROUND_SERVICE_TYPE_DATA_SYNC} (dataSync)")
+        ok &= check("service d'alertes en specialUse",
+                    services.get(NOTIFICATION_SERVICE) == FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+                    f"{NOTIFICATION_SERVICE} : type lu {services.get(NOTIFICATION_SERVICE)}, attendu "
+                    f"{FOREGROUND_SERVICE_TYPE_SPECIAL_USE} (specialUse)")
+        ok &= check("sous-type specialUse déclaré",
+                    holds(manifest, SPECIAL_USE_SUBTYPE),
+                    "PROPERTY_SPECIAL_USE_FGS_SUBTYPE absent : le service d'alertes "
+                    "serait refusé par la plateforme")
 
         # 5. Un paquet sans signature ne s'installe pas : l'apk porte bien les
         #    blocs v1/v2/v3 (les .SF/.RSA du schéma v1, l'APK Signing Block sinon).

@@ -640,6 +640,43 @@ def main():
           and "if-eq v2, v3, :twouich_tv_by_mode" in patcher
           and "if-ge v2, v3, :twouich_tv_by_mode" in patcher,
           "sans le mode TV, un televiseur 540 dp retombe dans la branche telephone.")
+    # Repli explicite (05/10) : les deux tests ci-dessus aboutissent a la meme
+    # etiquette, et l'etiquette etait collee JUSTE APRES le second `if-ge`.
+    # L'execution tombait donc dans la branche TV pour tout appareil — la
+    # methode renvoyait toujours vrai. Mesure : BlueStacks en portrait 720x1280
+    # (480 dp) => trace « interface : TV », video en match_parent sur tout
+    # l'ecran et chat GONE, c'est-a-dire la video par-dessus le chat.
+    tv_method = patcher[patcher.index("TV_INTERFACE_METHOD = "):patcher.index("def use_tv_interface_guard")]
+    goto_row = '"    goto :twouich_phone_interface",'
+    label_row = '"    :twouich_tv_by_mode",'
+    check("lecteur : twouichTvInterface retombe sur le telephone",
+          goto_row in tv_method and label_row in tv_method
+          and tv_method.index(goto_row) < tv_method.index(label_row)
+          and 'goto :twouich_phone_interface\\n    :twouich_tv_by_mode' in patcher,
+          "sans `goto` avant l'etiquette TV, tout telephone est declare "
+          "televiseur : plus d'empilement, la video couvre le chat.")
+    # Hauteur du chat en portrait : elle doit se déduire de la vidéo APRÈS son
+    # plafond, sinon le chat (ancré sous la vidéo ET en bas) déborde de la
+    # hauteur de la vidéo. La forme du 20/09 faisait `sub-int v7, v9, v11`.
+    geo_tail = patcher[patcher.index("PHONE_GEO_CLAMPED_TAIL = "):patcher.index("PHONE_GEO_ROOM_BLOCK = ")]
+    after_clamp = geo_tail[geo_tail.index(":twouich_phone_video_fits"):]
+    before_test = geo_tail[:min([geo_tail.index(k) for k in
+                                  ("if-ge v10, v7", "if-lt v10, v7") if k in geo_tail])]
+    check("lecteur : la place du chat se calcule apres le plafond de la video",
+          "sub-int v7, v9, v10" in after_clamp
+          and "sub-int/2addr v7, v11" in after_clamp
+          and "sub-int v7, v9, v11" not in geo_tail,
+          "avec `sub-int v7, v9, v11`, le chat prend la hauteur entiere moins la "
+          "barre de saisie : il deborde sous l'ecran sous la video.")
+    # ART rejette la CLASSE entiere si le test de plafond lit v7 alors que le
+    # verificateur y voit encore la reference DisplayMetrics : un entier doit
+    # etre ecrit dans v7 AVANT le test. Mesure le 05/10 : VerifyError a
+    # l'ouverture du lecteur, classe entiere refusee.
+    check("lecteur : v7 recoit un entier avant le test de plafond",
+          "sub-int v7, v9, v10" in before_test
+          and "sub-int/2addr v7, v11" in before_test,
+          "sans ecriture entiere avant le test, ART leve `VerifyError: args to "
+          "'if' (Integer, Reference: DisplayMetrics) must be integral`.")
     # Meme inversion que ci-dessus : `if-eq` saute vers le panneau deploye quand
     # le mode EST la television, le seuil de dp saute vers le meme endroit au-dela
     # de 600 dp, et le repli est le telephone.
@@ -648,6 +685,68 @@ def main():
           and "if-ge v1, v2, :cond_twouich_tv_headers" in patcher,
           "l'etat du panneau etait calcule sur les seuls dp : la TV perdait sa "
           "colonne de navigation (HEADERS_HIDDEN).")
+    # Connexion au doigt : le bandeau d'en-tete devient le bouton. Mesure du
+    # 05/10/2026 sur le Xiaomi (Android 16) : tap, appui long et touche MENU
+    # ouvraient autre chose, le titre n'etait pas cliquable, et les entrees
+    # « Login (Preferred)/(Web)/with Turbo » restaient dans un menu que le doigt
+    # n'atteint pas — le telephone etait impossible a connecter.
+    login_block = patcher[patcher.index("LOGIN_METHODS = ("):patcher.index("def patch_phone_login")]
+    title_block = patcher[patcher.index("LOGIN_TITLE_MARKER = "):patcher.index("LOGIN_METHODS = (")]
+    LOGIN_MARKER_OK = (
+        "LOGIN_TITLE_MARKER = \"    sget p1, Lcom/s0und/s0undtv/n;->k:I\\n\"" in patcher
+        and "->twouichPhoneLoginBind()V" in title_block
+        and "text.find(\"    return-void\\n\", title)" in patcher
+    )
+    check("connexion : le bandeau d'en-tete est pose dans la branche de connexion",
+          LOGIN_MARKER_OK and "patch_phone_login(decoded, here)" in patcher,
+          "sans appel insere avant le retour de la branche qui affiche « Login "
+          "to use the app », le bandeau reste inerte : aucun gestionnaire n'est pose.")
+    check("connexion : le mode TV sort avant toute vue",
+          "->twouichPhoneHeadersState()I" in login_block
+          and login_block.count("const/4 v1, 0x3") == 2
+          and "if-ne v0, v1, :twouich_login_bind_done" in login_block
+          and "if-ne v0, v1, :twouich_login_done" in login_block
+          and login_block.count("->twouichPhoneHeadersState()I") == 2,
+          "sans le garde 3 = telephone (mode systeme + seuil 600 dp, celui du "
+          "panneau lateral), une TV verrait son titre cable. Les DEUX methodes "
+          "doivent etre gardees : le listener peut etre rappele apres un "
+          "changement de configuration.")
+    # `s4()` (« Login (Preferred) » -> AltLoginV2Activity) ouvre l'URL
+    # `http://<ip>:13378/login` d'un serveur du reseau local : port refuse le
+    # 05/10/2026 sur le reseau du telephone (Xiaomi en 192.168.1.22/24, Freebox
+    # en .24), donc URL morte. `v4()` (« Login (Web) » -> LoginActivity) est
+    # l'OAuth officiel de Twitch, verifie vivant le meme jour (302 de
+    # id.twitch.tv/oauth2/authorize vers twitch.tv/login).
+    check("connexion : le chemin de connexion de l'amont est reutilise, pas reecrit",
+          "Lcom/s0und/s0undtv/fragments/MainFragment;->v4()V" in login_block
+          and "->s4()V" not in login_block
+          and "LoginActivity;" not in login_block
+          and "AltLogin" not in login_block,
+          "un flux d'authentification reecrit divergerait de l'amont ; v4() est "
+          "le chemin « Login (Web) » deja livre, seul a parler a Twitch sans "
+          "serveur tiers. Revenir a s4() rouvrirait une URL locale morte.")
+    # `findViewById` est une methode de `View`, pas de `Context` : l'appeler sur
+    # le contexte du fragment leve `NoSuchMethodError` des l'ouverture de
+    # l'accueil (crash mesure sur le Xiaomi le 05/10/2026, pile entiere :
+    # twouichPhoneLoginBind <- c5 <- j4). L'en-tete Leanback etant dans la
+    # fenetre de l'activite, le passage par getDecorView() n'est pas un detail.
+    check("connexion : findViewById est appele sur une vue, jamais sur un contexte",
+          "invoke-virtual {v2, v1}, Landroid/view/View;\"\n    \"->findViewById(" in login_block
+          and "Landroid/app/Activity;->getWindow()Landroid/view/Window;" in login_block
+          and "Landroid/view/Window;->getDecorView()Landroid/view/View;" in login_block
+          and "instance-of v3, v2, Landroid/app/Activity;" in login_block
+          and login_block.count("findViewById(") == 1,
+          "sur un Context la methode n'existe pas : NoSuchMethodError au demarrage. "
+          "Sans test de type sur l'activite, un contexte inattendu lverait de meme.")
+    listener = (HERE.parent / "smali" / "com" / "twouich" / "phone" / "PhoneLoginOnClick.smali")
+    listener_text = listener.read_text(encoding="utf-8") if listener.is_file() else ""
+    check("connexion : le listener ne decide rien, il delegue",
+          ".implements Landroid/view/View$OnClickListener;" in listener_text
+          and "->twouichPhoneLogin(Landroid/view/View;)V" in listener_text
+          and "getIdentifier" not in listener_text
+          and "smallestScreenWidthDp" not in listener_text,
+          "le choix du mode appartient au fragment : un listener qui le decide "
+          "lui-meme divergerait du garde unique.")
     # Borne au bloc du garde : « move-result v0 » est legitime ailleurs.
     tv_rows = patcher[patcher.index('TV_INTERFACE_ROWS = ('):patcher.index('TV_INTERFACE_METHOD =')]
     check("lecteur : le garde TV n'ecrit pas dans le registre du Resources",

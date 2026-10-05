@@ -110,6 +110,72 @@ initialise ni ne leur fournit de configuration.
 
 ---
 
+### Crash de mise à jour Android 14+ — diagnostic et correction validés sur le Xiaomi (04–05/10/2026)
+
+**Symptôme.** Trois entrées `data_app_crash` dans la DropBox du Xiaomi (`QOGQ694DEE5PLBGI`,
+Android 16 / HyperOS V816) le 04/10 entre 10 h 22 et 10 h 23 :
+
+```
+java.lang.RuntimeException: Unable to create service com.s0und.s0undtv.service.AutoUpdateService:
+  android.app.MissingForegroundServiceTypeException: Starting FGS without a type
+  callerApp=ProcessRecord{… com.s0und.s0undtv/u0a267} targetSDK=35
+    at com.s0und.s0undtv.service.AutoUpdateService.onCreate(…)
+```
+
+L'app est tuée au moment de créer son service de mise à jour : la mise à jour automatique ne peut
+plus rien proposer, et l'application se ferme sur elle-même.
+
+**Cause.** `AutoUpdateService.onCreate` appelle `startForeground(1, notification)` sans que le
+manifeste déclare `android:foregroundServiceType` pour ce service. Depuis Android 14, une app visant
+SDK 34+ qui démarre un service de premier plan sans type déclaré se voit refuser le démarrage.
+L'inventaire du dex (6 fichiers) donne les types réels : `AutoUpdateService` → **dataSync**,
+`NotificationService` (boucle d'alertes d'environ une minute) → **specialUse** avec le sous-type
+`android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE`, `PlayerKeepAlive` → mediaPlayback (veille lecture),
+et `SystemForegroundService` de WorkManager — avec ses deux ponts synthétiques `$a`/`$b` — qui reste
+**sans type**, aucun Worker concret n'ayant de `ForegroundInfo` à fournir.
+
+**Comment le correctif a été prouvé sur l'appareil** (et pas seulement dans le manifeste). Un APK
+jetable au `versionCode 150` construit depuis le même arbre patché a été installé, ce qui force
+l'app à proposer la mise à jour (l'annonce publiee est en 164). Chemin mesuré :
+
+| Heure | Événement (logcat de l'appareil) |
+|---|---|
+| 06:44:04.924 | `ActivityManager: Background started FGS: Allowed [… cmp=com.s0und.s0undtv/.service.AutoUpdateService (has extras)]` |
+| 06:44:04.935 | `S0undTV_AutoUpdateSrv: onStartCommand: https://github.com/Endymi0n74/Twouich/releases/download/v1.0.17/Twouich_v1.0.17.apk` |
+| 06:44:58 | `dumpsys package` → `lastUpdateTime=2026-10-05 06:44:58` : l'updater a installé v1.0.17 |
+| 06:47:37.781 | démarrage de `AutoUpdateService` par **la 164** (non corrigée) |
+| 06:47:37.798 | `FATAL EXCEPTION … MissingForegroundServiceTypeException` — **démonstration en négatif** |
+
+Atteindre `onStartCommand` est la preuve : le crash du matin tuait dans `onCreate`, donc **avant**
+cette ligne. Le build testé a passé `startForeground` sans mourir, téléchargé et installé la
+version publiée ; c'est cette version-là, privée du correctif, qui reproduit le symptôme d'origine.
+
+> **À lire correctement dans la DropBox.** L'appareil affiche désormais **quatre** entrées
+> `data_app_crash` : trois du 04/10 (10 h 22, 10 h 23 — le défaut d'origine) et une du **05/10 à
+> 06 h 47:37**, qui appartient à la **v1.0.17 installée par l'updater pendant le rejeu**, pas au
+> build testé. Il n'y en a **aucune** après l'installation du 165 (06 h 50:18) : c'est le critère
+> de tri, l'horodatage, pas le compte d'entrées.
+
+**État final mesuré (165 / v1.0.18 installé)** : `SELFTEST 31/31 verifications, flux filtre : 328
+octets` ; **zéro** `FATAL EXCEPTION` et **zéro** occurrence de `MissingForegroundServiceType` ;
+**zéro** ligne `S0undTV_AutoUpdateSrv` — le silence attendu, l'annonce 164 étant antérieure à la
+165 installée ; les trois permissions `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, `_DATA_SYNC`,
+`_SPECIAL_USE` sont `granted=true`, ce qui confirme que le manifeste est parsé par la plateforme.
+
+**Ce qui n'a pas été exercé, volontairement** : l'envoi d'un message de chat par le nouveau bouton
+« Envoyer » (aucun message ne doit être publié sur Twitch pendant un test) et le parcours
+`165 → 166` (il faudrait une release, hors périmètre d'une candidate locale). La présence du bouton
+et de sa méthode est verrouillée dans le livrable par `patch/tests/test_apk.py` (layout téléphone,
+rappel `android:onClick`, icône, méthode dans le dex, callback asynchrone `Ly6/i0`).
+
+**Coût de terrain, à ne pas répéter.** Le rejeu exigeait d'abaisser le `versionCode` sous celui de
+l'annonce — ce qu'Android 16 refuse, `-d` compris (`INSTALL_FAILED_VERSION_DOWNGRADE`), le
+`versionCode` étant une propriété **globale** du paquet : un utilisateur secondaire ne sert à rien.
+Il a donc fallu désinstaller l'app, ce qui **efface la session Twitch** : à prévenir avant, et à
+prévoir la reconnexion. Voir § 8.16 pour les autres refus de l'appareil.
+
+---
+
 ## 0.3 Observation smartphone — candidat v1.0.9 (19/09/2026)
 
 Le téléphone connecté apparaît comme `ONEPLUS_A3010` / Android 7.1.1, mais son profil d'émulation
@@ -1695,3 +1761,167 @@ Mesures du 22/09 sur la Freebox Pop (`da219e21…`, sonde `app_process`, rien in
 pas une preuve : c'est le fichier livré qui fait autorité. Quand un modèle est dupliqué dans un test
 et dans le bytecode, il faut un contrôle qui lit **le bytecode**, et une mutation qui montre que ce
 contrôle mord — sinon le vert ne dit que l'accord des miroirs entre eux.
+
+### 8.16 HyperOS : ce que le téléphone refuse, et comment travailler avec (05/10/2026)
+
+Trois refus rencontrés le 05/10 sur le Xiaomi 24095PCADG (HyperOS V816, Android 16). Aucun n'est
+contournable depuis `adb` : ils sont payés par un réglage ou par une action humaine.
+
+| Symptôme exact | Cause réelle | Contournement |
+|---|---|---|
+| `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user`, session marquée en échec en ~26 ms pendant que `com.miui.global.packageinstaller.activity.RiskDialogActivity` est créée puis annulée seule | **« Installation via USB » désactivée** dans les options pour les développeurs | la réactiver sur le téléphone ; en attendant, `adb push` vers `/sdcard/Download/` puis installation manuelle depuis Fichiers. Aucun réglage shell ne débloque : `settings put global adb_install_need_confirm 0` a été essayé sans effet (la clé n'existe pas sur cette build) |
+| `INSTALL_FAILED_VERSION_DOWNGRADE` **même avec** `adb install -r -d` ; `--downgrade` est inconnu de `pm install` ; `pm install --user 10` échoue aussi | le `versionCode` est une propriété **globale** du paquet : un utilisateur secondaire ne crée pas de version distincte | désinstaller puis installer l'APK de test — **ça efface les données de l'app** (session Twitch), donc prévenir avant |
+| l'appareil est passé de la 150 à la 164 publiée en ~80 s pendant un test, sans que personne ne l'ait demandé | le parcours d'updater télécharge **et installe** seul après « Install update » | lire `dumpsys package com.s0und.s0undtv \| grep lastUpdateTime` **avant** d'attribuer un crash au build testé — et `pm path` + `pull` pour vérifier les octets réellement installés |
+
+Deux corollaires de méthode :
+
+- **`dumpsys package` ne montre ni `foregroundServiceType` ni l'historique des versions.** Les
+  permissions accordées (`FOREGROUND_SERVICE_DATA_SYNC: granted=true`) prouvent que le manifeste est
+  parsé ; seul le **démarrage réel** du service prouve que la plateforme accepte le type. Un
+  `adb shell am start-foreground-service` ne sert à rien ici : le service n'est pas exporté
+  (`Permission Denial … not exported from uid`), il faut passer par l'UI.
+- **L'écran verrouillé bloque tout.** Avec le keyguard actif, `uiautomator dump` renvoie l'arbre du
+  systemui, `mCurrentFocus` reste `NotificationShade` et aucun `input tap` n'atteint l'app. Le
+  parcours se fait après `KEYCODE_WAKEUP` + `wm dismiss-keyguard` sur un appareil sans verrouillage
+  sûr ; sinon, c'est une action humaine.
+
+### 8.17 BlueStacks : valider le téléphone et la branche TV sans le téléphone (05/10/2026)
+
+Le Xiaomi étant débranché, la v1.0.18 a été validée sur **BlueStacks** (`127.0.0.1:5555`,
+Android 13 / API 33, x86_64). Ce n'est pas un téléphone : c'est le moyen de faire deux mesures
+que la Freebox (injoignable ce jour-là) ne permettait pas.
+
+**Connexion au doigt.** 720×1280 en 240 dpi = 480 dp, donc branche téléphone :
+
+```bash
+adb connect 127.0.0.1:5555            # le port de BlueStacks est le 5555
+adb -s 127.0.0.1:5555 install -r dist/Twouich_v1.0.18.apk
+adb -s 127.0.0.1:5555 shell am start -n com.s0und.s0undtv/.activities.FireTVMainActivity
+adb -s 127.0.0.1:5555 shell uiautomator dump /sdcard/ui.xml
+adb -s 127.0.0.1:5555 exec-out cat /sdcard/ui.xml > ui.xml   # pull échoue selon les chemins
+adb -s 127.0.0.1:5555 shell input tap 436 86
+adb -s 127.0.0.1:5555 shell dumpsys activity activities | grep topResumedActivity
+```
+
+| Mesure | Valeur lue | Ce qu'elle prouve |
+|---|---|---|
+| `title_text` | `clickable=true`, `text="Login to use the app"`, `[237,41][636,131]` | le bandeau est bien le bouton (sinon `clickable=false`) |
+| `topResumedActivity` après tap | `com.s0und.s0undtv/.activities.LoginActivity` | le tap ouvre le **vrai** OAuth Twitch, pas `AltLoginV2Activity` |
+| couleurs de l'écran | `#451093`, `#54239B`, `#18181B` | la page Twitch est rendue ; le thème de l'app serait `#130c1f`/`#7c22e8` |
+| logcat | `SELFTEST 31/31`, aucun `FATAL`, aucun `net::ERR` | rien ne casse, le réseau du WebView fonctionne |
+
+Aucune connexion Twitch n'a été tentée : pas de compte dans l'environnement de test.
+
+**Branche TV, sans Freebox.** `wm size 1920x1080` + `wm density 240` donne 1080/1,5 = **720 dp** de
+largeur minimale, donc le seuil `≥ 600 dp` de `twouichPhoneHeadersState()` bascule en télévision.
+Résultat relu après redémarrage de l'app : `title_text` toujours « Login to use the app » mais
+**`clickable=false`**, et **zéro** nœud `twouich_*` dans l'arbre. Le garde exclut donc bien la
+télévision, et rien de ce correctif n'y touche.
+
+> **`wm size reset` ne rétablit PAS BlueStacks.** L'override d'origine de cette instance est
+> `720x1280` (480 dp, branche téléphone) alors que son écran physique est `1080x1920` en 240 dpi,
+> soit 720 dp — **la branche télévision**. Un `wm size reset` fait donc retomber l'émulateur dans la
+> configuration TV, et l'app s'y affiche sans aucun en-tête `twouich_*` : on croit à une régression
+> alors qu'on a changé la résolution. Rétablir par `wm size 720x1280` + `wm density 240`, puis relire
+> `wm size` (la ligne `Override size:` doit être présente).
+
+**Le piège qui coûte une validation.** `patch/build.sh` **réutilise `work/decoded`** quand
+`apktool.yml` porte le même `versionName` : une retouche de `patch/patch.py` peut donc être
+ignorée en silence — le journal affiche `déjà appliqué : bandeau de connexion cliquable au doigt`
+et le build est vert, mais l'APK embarque l'ancienne cible. Après toute modification d'une cible
+dans le générateur, `rm -rf work/decoded work/build` **avant** de reconstruire, puis vérifier la
+ligne voulue dans `work/decoded/.../MainFragment.smali`.
+
+**Contrôle d'idempotence du générateur** (à refaire après toute retouche de `patch.py`) : copier
+l'arbre patché, repasser `patch.py --decoded <copie>` deux fois, puis `diff -rq work/decoded <copie>`
+— il ne doit plus rien sortir. C'est ce contrôle qui a révélé, le 05/10, que le garde de veille
+(`_patch_screen_off_stop`) insérait **une ligne vide de plus à chaque repassage** devant
+`goto :twouich_screen_off_done` : `PlayerActivity.smali` dérivait à chaque build. Sans effet sur le
+dex (l'empreinte du livrable est restée `66c5599e…`), mais c'est exactement le mécanisme qui rend
+une cible de `patch.py` invisible. Corrigé par normalisation du point d'insertion ; le build
+reconstruit donne la **même empreinte**, preuve que la correction est sémantiquement neutre.
+
+### 8.18 Une mise à jour efface-t-elle la session Twitch ? Non — sauf `uninstall` (05/10/2026)
+
+Question posée le 05/10 : « est-ce qu'une connexion déjà faite survit à une réinstallation en `-r` ? »
+Réponse **mesurée**, parce que la question inverse (`uninstall` puis `install`) fait perdre la session
+et que la recette d'installation affichait justement les deux commandes d'affilée.
+
+**L'indicateur.** Sans racine sur l'émulateur (`adb shell id` → `uid=2000(shell)`), on passe par le
+gestionnaire de paquets : `firstInstallTime` ne bouge que sur une **réinstallation**, alors
+qu'`lastUpdateTime` avance à chaque mise à jour. Un `dataDir` inchangé confirme qu'il s'agit du même
+répertoire de données.
+
+```bash
+adb shell dumpsys package com.s0und.s0undtv | grep -E 'firstInstallTime|lastUpdateTime|dataDir'
+adb install -r dist/Twouich_v1.0.18.apk      # même que PackageInstaller
+adb shell dumpsys package com.s0und.s0undtv | grep -E 'firstInstallTime|lastUpdateTime'
+```
+
+| Recette | `firstInstallTime` | Lecture |
+|---|---|---|
+| `adb install -r` | **inchangé** (07:48:50 → 07:48:50, `lastUpdateTime` 08:26:51 → 08:35:52) | *upgrade* de paquet : `/data/user/0/com.s0und.s0undtv` est conservé, donc **la session survit** |
+| `adb uninstall` + `adb install` | **remis à l'heure d'installation** (08:36:20) | paquet recréé : données détruites, **session perdue**, reconnexion Twitch nécessaire |
+
+Le cas négatif est indispensable : sans lui, on ne sait pas si `firstInstallTime` est vraiment
+discriminant.
+
+**L'updater de l'app fait la même chose que `-r`.** `AutoUpdateService` dépose un intent de MIME
+`application/vnd.android.package-archive` avec `REQUEST_INSTALL_PACKAGES` : c'est le
+`PackageInstaller` système qui met l'application à jour sur place — même opération de mise à jour,
+donc mêmes données conservées. Le chemin « Install update » observé le 04/10 sur le Xiaomi relève du
+même mécanisme.
+
+**Rien dans le build Twouich ne touche la session.** `patch/smali/**` ne contient **aucun**
+`getSharedPreferences`, `putString`, `putBoolean` ou `putInt` : le greffon ne peut ni lire ni écrire
+le jeton. Dans l'arbre amont, `SharedPreferences$Editor.clear()` n'apparaît nulle part ; `MainApp` se
+contient de **lire** `USER_LOGGED_OUT` (jamais de l'écrire) ; le jeton n'est écrit que par
+`LoginActivity` / `AltLoginV2Activity` à la connexion, et `D6/E` (la déconnexion) n'est atteint que
+par `LogoutDialogActivity`, donc par une action explicite de l'utilisateur.
+
+**Ce qui a été corrigé.** La recette imprimée en fin de `patch/build.sh` enchaînait
+`adb uninstall … || true` **puis** `adb install -r` : le `|| true` masquait l'échec sur une app déjà
+installée, donc la session était effacée à chaque installation manuelle. Elle distingue maintenant
+les deux cas et nomme le coût.
+
+### 8.19 Le lecteur téléphone n'empilait plus : la vidéo couvrait le chat (05/10/2026)
+
+Signalé sur le Xiaomi (capture d'écran, portrait) : « la fenêtre vidéo empiète sur le chat ».
+Reproduction et diagnostic sur BlueStacks (API 33), lecteur lancé par
+`am start -a android.intent.action.VIEW -d "channel://com.s0und.s0undtv/startstream?channel=xqc" -n com.s0und.s0undtv/.activities.PlayerActivity`
+(l'activité est exportée : c'est le seul moyen d'atteindre le lecteur sans session).
+
+**Cause 1 — `twouichTvInterface()` renvoyait toujours « TV ».** Les deux tests (mode système,
+puis `smallestScreenWidthDp ≥ 600`) aboutissent à l'étiquette `:twouich_tv_by_mode`, et
+l'étiquette était posée **sur la ligne immédiatement suivante** : l'exécution tombait donc dans
+la branche TV même pour un téléphone. Mesuré : trace `interface : TV` sur un écran portrait de
+480 dp, `ExoPlayer` en `0,0-720,1280` (match_parent) et `ChatRecycleView` **GONE** — la vidéo
+couvre l'écran entier, le chat n'existe pas. Le `goto :twouich_phone_interface` manquant est
+reposé, sur les arbres neufs comme sur les arbres déjà patchés.
+
+**Cause 2 — la hauteur du chat ignorait la vidéo.** `sub-int v7, v9, v11` (hauteur totale moins
+la seule barre de saisie) donnait au chat les 1168 px du bas de l'écran alors qu'il est ancré
+**sous** la vidéo : il débordait d'autant. La place se déduit maintenant de la vidéo **après**
+son plafond, et le test du tiers regarde cette valeur (il était auparavant toujours vrai).
+
+**Piège de vérification ART.** Faire passer le test de plafond avant d'écrire l'entier fait lever
+`VerifyError: args to 'if' (Integer, Reference: android.util.DisplayMetrics) must be integral` —
+`v7` porte encore la référence renvoyée par `getDisplayMetrics()`. ART refuse alors **la classe
+entière** et le lecteur ne s'ouvre plus. Deux verrous couvrent désormais ce point
+(`test_smali_branches` : recalcul après le plafond, entier écrit avant le test), et
+`patch/tests/check_phone_geometry.py` rejoue la séquence générée hors appareil.
+
+**Mesures avant/après**, BlueStacks 720×1280 en 240 dpi (480 dp) :
+
+| Vue | Avant | Après |
+|---|---|---|
+| `ExoPlayer` | `0,0-720,1280` (plein écran, chat dessous) | **`0,0-720,405`** — 16:9 exact, en haut |
+| `ChatRecycleView` | `GONE`, `0,0-0,0` | **`0,405-720,1168`** (visible) |
+| `SendMessageWindow` | `0,971-720,1055` | **`0,1168-720,1280`** — collé en bas |
+| trace | `interface : TV` | `interface : telephone (disposition empilee)` |
+
+405 + 763 + 112 = 1280 : la fenêtre vidéo est rehaussée et ne touche plus le chat.
+
+**Non-régression TV.** En 1920×1080 @ 240 dpi (720 dp) : trace `interface : TV`,
+`ExoPlayer` en `0,0-1920,1080` et `SendMessageWindow` GONE — la disposition d'origine est
+intacte. BlueStacks a été rendu à sa configuration d'origine (720×1280).

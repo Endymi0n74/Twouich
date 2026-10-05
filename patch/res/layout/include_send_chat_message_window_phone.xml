@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@color/black_opacity_90">
+    <EditText
+        android:id="@id/ET_SendMessage"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_margin="5dp"
+        android:padding="8dp"
+        android:background="@color/black_opacity_chatwindow"
+        android:textColor="@color/white"
+        android:text=""
+        android:hint="Envoyer un message"
+        android:imeOptions="actionSend"
+        android:inputType="text"
+        android:singleLine="true"
+        android:ems="10"
+        android:textCursorDrawable="@null" />
+    <ImageButton
+        android:id="@+id/twouich_chat_send"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_margin="4dp"
+        android:padding="12dp"
+        android:background="?android:attr/selectableItemBackground"
+        android:src="@drawable/twouich_ic_send"
+        android:tint="@color/theme_purple_bright"
+        android:contentDescription="Envoyer le message"
+        android:focusable="true"
+        android:clickable="true"
+        android:onClick="twouichPhoneSendChatMessage" />
+</LinearLayout>

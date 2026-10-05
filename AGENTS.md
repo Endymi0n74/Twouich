@@ -55,7 +55,7 @@ Les formes à deux registres (`if-le v4, v3`, `if-ge v2, v3`) sont littérales.
 
 - **Interdit** : `if-gez` et `if-gtz`. Utiliser `if-ltz` (`v < 0`) ou `if-lez` (`v <= 0`), avec un
   commentaire au-dessus quand l'intention n'est pas évidente.
-- Après **toute** édition de smali : `python patch/tests/test_smali_branches.py` (11 vérifications).
+- Après **toute** édition de smali : `python patch/tests/test_smali_branches.py` (52 vérifications).
   Ce test refuse les opcodes ambigus et l'inversion des branchements critiques ; il balaie **tout**
   `patch/smali/**/*.smali`, donc un nouveau fichier est surveillé sans rien changer.
 - **Sens des branchements sur un test de forme.** `if-eqz` branche quand le résultat est faux,
@@ -113,13 +113,15 @@ bash patch/build.sh          # APK upstream → apktool d → patch.py → apkto
 
 ```bash
 python patch/tests/test_sanitizer.py       # 69 assertions : règles de nettoyage (miroir Python) + fixtures SSAI réelle 18/09/2026, midroll double-créatif & fin de pod 01/10/2026 + sentinelle + dé-mute -unmuted->-muted
-python patch/tests/test_smali_branches.py  # 44 assertions : branchements réels du smali
+python patch/tests/test_smali_branches.py  # 52 assertions : branchements réels du smali
 python patch/tests/test_update_check.py    # 26 vérifications : logique updater (table de vérité + gardes smali
                                            #   si work/decoded/ existe) — « annonce en retard » -> silence,
                                            #   et les deux préconditions du canal Beta (les deux entrées exigées)
 python patch/tests/test_brand.py           # 14 assertions : identité visuelle (voir plus bas)
-python patch/tests/test_apk.py             # 48 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),
-                                           #   dont l'accord avec update.json et les pages légales embarquées
+python patch/tests/test_apk.py             # 58 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),
+                                           #   dont l'accord avec update.json, les pages légales embarquées,
+                                           #   les types de service de premier plan, le bouton Envoyer du chat
+                                           #   et la connexion au doigt (bandeau d'en-tête -> LoginActivity)
 python patch/tests/test_normalize_apk.py   # 29 vérifications : le normaliseur canonise horodatage
                                            #   et ordre des entrées ZIP sans rien toucher d'autre
 bash   patch/tests/test_analyzer.sh        # 11 verdicts sur captures synthétiques

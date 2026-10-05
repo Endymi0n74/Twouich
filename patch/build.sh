@@ -53,13 +53,13 @@ if [ "$SKIP_SIGNING" != "1" ] && [ -z "$KEY_PASS" ]; then
     exit 1
 fi
 
-VERSION_CODE=164
-VERSION_NAME="v1.0.17"
-APK_NAME="Twouich_v1.0.17.apk"
+VERSION_CODE=165
+VERSION_NAME="v1.0.18"
+APK_NAME="Twouich_v1.0.18.apk"
 # Date AFFICHÉE dans la page « Nouveautés » embarquée — constante figée par
 # version, jamais la date du jour : sinon chaque rebuild change les octets du
 # livrable (build reproductible). À faire évoluer au prochain bump de version.
-VERSION_RELEASE_DATE="2026.10.02"
+VERSION_RELEASE_DATE="2026.10.04"
 
 echo "═══════════════════════════════════════════════"
 echo "  Twouich — build $VERSION_NAME ($VERSION_CODE)"
@@ -103,6 +103,13 @@ if [ -f "$DECODED/apktool.yml" ] && [ "$DECODED_VERSION" != "$VERSION_NAME" ]; t
     echo "♻️  Arbre en $DECODED_VERSION ≠ $VERSION_NAME → désassemblage neuf"
     rm -rf "$DECODED"
 fi
+# Empreinte des greffes (cf. STAMP_SUFFIX dans patch.py) : elle décrit l'arbre
+# qu'elle accompagne. Un désassemblage neuf doit donc emporter l'empreinte de
+# l'ancien arbre — sinon le contrôle de patch.py la compare à des greffes
+# precedentes et refuse l'arbre neuf, qui est pourtant legitime (mesuré le
+# 05/10/2026 : `rm -rf work/decoded` seul suffisait pas, le build echouait sur
+# « arbre décodé périmé » alors que l'arbre venait d'être créé).
+rm -f "$DECODED.twouich-greffes"
 if [ ! -f "$DECODED/apktool.yml" ]; then
     echo "📦 apktool d…"
     java -jar "$APKTOOL" d -f -o "$DECODED" "$UPSTREAM_APK" >/dev/null
@@ -202,9 +209,14 @@ cat <<EOF
 ═══════════════════════════════════════════════
   BUILD TERMINÉ → dist/$APK_NAME
 ═══════════════════════════════════════════════
-Installation (désinstaller d'abord l'app officielle, signature différente) :
-  adb uninstall com.s0und.s0undtv || true
+Mise a jour — CONSERVE la session Twitch (mesure du 05/10 sur BlueStacks :
+  meme signature => upgrade de paquet, \`firstInstallTime\` inchange, \`/data/user/0\`
+  intact ; l'updater de l'app passe par le meme PackageInstaller) :
   adb install -r dist/$APK_NAME
+ Premiere installation, ou app officielle deja installee (signature differente,
+  INSTALL_FAILED_UPDATE_INCOMPATIBLE) — ATTENTION : efface la session, donc la
+  reconnexion Twitch :
+  adb uninstall com.s0und.s0undtv && adb install dist/$APK_NAME
 Suivre le blocage des pubs en direct :
   adb logcat | grep -i twouich
 EOF
