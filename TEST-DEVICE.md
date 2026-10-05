@@ -2316,5 +2316,7 @@ des 4 écrans est celle de la v1.0.18 elle-même — ils n'arriveront qu'en v1.0
   authentifié n'a été vu. Le dialogue d'authentification reste à valider avec un compte.
 - Rien sur la **branche TV** : la 164 de départ est une version téléphone, sur 480 dp.
 - Le parcours a **modifié l'appareil** : appop `REQUEST_INSTALL_PACKAGES` accordé (voir ci-dessus).
-- `check-release.sh` reste à **1** tant que la v1.0.19 n'est pas publiée, pour la seule bonne
-  raison : `update.json` annonce encore 165 / v1.0.18.
+- `check-release.sh` restait à **1** tant que la v1.0.19 n'était pas publiée. **Résolu le
+  05/10** : release v1.0.19 (166) publiée, `publishedAt` `2026-10-05T12:39:02Z`, asset
+  `7edef794…` identique au build local, `update.json` poussé ensuite. La chaîne sort maintenant
+  **0** sur ses quatre étages.
