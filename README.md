@@ -27,10 +27,10 @@ Intégration `TwVodNoAdsJCed` : dé-mute VOD + fallback VaFT dormant, purge code
 
 ## Installation
 
-Télécharger [`Twouich_v1.0.18.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.18/Twouich_v1.0.18.apk) depuis la release publiée.
+Télécharger [`Twouich_v1.0.19.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.19/Twouich_v1.0.19.apk) depuis la release publiée.
 
 ```bash
-adb install -r Twouich_v1.0.18.apk
+adb install -r Twouich_v1.0.19.apk
 ```
 
 
