@@ -1925,3 +1925,396 @@ entière** et le lecteur ne s'ouvre plus. Deux verrous couvrent désormais ce po
 **Non-régression TV.** En 1920×1080 @ 240 dpi (720 dp) : trace `interface : TV`,
 `ExoPlayer` en `0,0-1920,1080` et `SendMessageWindow` GONE — la disposition d'origine est
 intacte. BlueStacks a été rendu à sa configuration d'origine (720×1280).
+
+### 8.20 Rejeu du parcours `165-1 → 165` : protocole (05/10/2026)
+
+La v1.0.18 est publiée et sa chaîne vérifiée jusqu'aux octets, mais **le parcours de mise à
+jour lui-même n'a jamais été rejoué en 165**. C'est la seule preuve qui reste, et elle ne
+suppose pas d'appareil particulier — seulement un **choix d'appareil imposé par la version de
+départ**, expliqué ci-dessous.
+
+#### Le piège qui commande le protocole : la 164 est la version *cassée*
+
+La v1.0.17 (164) est précisément l'APK qui tue l'app sur Android 14+ : son `AutoUpdateService`
+appelle `startForeground` sans type et se fait tuer par la plateforme. **Une rétrogradation
+depuis 165 vers 164 sur un appareil en API ≥ 34 produit donc un appareil qui ne peut pas même
+annoncer la 165** — le service meurt dans `onCreate`, avant le dialogue.
+
+Or l'obligation du type est **liée à la version de l'appareil, pas à celle de la cible**
+(doc Android : *« Starting with Android 14 (API 34), foreground services require an explicit
+`android:foregroundServiceType` »*) — `targetSdk=35` sur un appareil en API 33 n'est pas
+concerné. Conséquence : **la route sans construction n'est jouable que sur un appareil en
+API ≤ 33**. BlueStacks est exactement ce poste (constaté le 05/10 : API 33, Android 13,
+x86_64). Le Xiaomi (API 36) ne peut valider cette route qu'après avoir construit un jetable.
+
+#### Préflight — à jouer avant toute manipulation
+
+```bash
+cd /d/Codex/Twouich
+bash patch/check-release.sh                      # doit sortir 0 : la chaîne est-elle encore cohérente ?
+
+ADB="/c/Users/endymion/AppData/Local/ScrcpyGUI/scrcpy-bin/adb.exe"; DEV=127.0.0.1:5555
+export MSYS_NO_PATHCONV=1                        # obligatoire : sans quoi adb réécrit les chemins
+
+"$ADB" -s "$DEV" shell getprop ro.build.version.sdk          # 33 attendu (sinon -> route B)
+"$ADB" -s "$DEV" shell dumpsys package com.s0und.s0undtv \
+  | grep -E "versionCode|firstInstallTime"                # état de départ à noter
+```
+
+Le binaire 164 est celui **de la release publiée**, pas un build local — le télécharger et
+contrôler son empreinte avant de l'installer :
+
+```bash
+curl -sL -o /tmp/twouich164.apk \
+  https://github.com/Endymi0n74/Twouich/releases/download/v1.0.17/Twouich_v1.0.17.apk
+sha256sum /tmp/twouich164.apk
+# attendu : 4d340f1a049884582018f15df537da6843576b222ee7202637126752888aa184
+```
+
+*Contrôlé le 05/10 : HTTP 200, 11 260 471 o, empreinte conforme — l'asset est toujours
+servi, la route A ne demande aucune construction.*
+
+#### Route A — BlueStacks (API 33), sans rien construire
+
+```bash
+# 1. Rétrograder : l'adb refuse le downgrade (même avec -d, le paquet n'est pas debuggable),
+#    et « ne rien faire » n'est pas une option puisque la 165 est déjà installée.
+"$ADB" -s "$DEV" uninstall com.s0und.s0undtv       # PERD la session — sans conséquence ici
+"$ADB" -s "$DEV" install /tmp/twouich164.apk       # PAS de timeout : l'install n'en termine pas
+
+# 2. Lancement à froid, logcat capturé AVANT (le service parle dans les premières secondes)
+"$ADB" -s "$DEV" logcat -c
+"$ADB" -s "$DEV" shell am start -n com.s0und.s0undtv/.activities.MainActivity
+"$ADB" -s "$DEV" logcat -d -s S0undTV_AutoUpdateSrv Twouich ActivityManager | tail -60
+```
+
+Point de contrôle n° 1, à lire dans la trace :
+
+| Trace lue | Ce qu'elle signifie |
+|---|---|
+| `S0undTV_AutoUpdateSrv onStartCommand: …/v1.0.18/Twouich_v1.0.18.apk` | **le service passe `startForeground`** — c'est exactement le point qui tuait en 164 sur API 34+, et la preuve que la correction porte ; on peut continuer |
+| `MissingForegroundServiceTypeException` | l'appareil est en API ≥ 34 : arrêter, basculer en route B |
+| rien du tout | ne pas conclure trop vite : voir « silence » plus bas (canal, session, réseau) |
+
+Point de contrôle n° 2 — **le dialogue doit s'ouvrir seul**, sans qu'on le demande :
+
+```bash
+"$ADB" -s "$DEV" shell dumpsys activity activities | grep topResumedActivity
+# attendu : com.s0und.s0undtv/.activities.UpdateActivity
+# à l'écran : « New update available! » + « Version: v1.0.18 / Version code: 165 »
+```
+
+⚠️ **Le champ s'appelle `topResumedActivity` sur cet appareil, pas `mResumedActivity`.** La
+commande du § 0.2 (écrite sur Freebox, Android 10) ne renvoie **rien** ici — un `grep` vide
+ressemble à tort à « aucune activité au premier plan ». Grepper les deux, ou `topResumedActivity`
+seul. Et ne pas lui substituer `dumpsys activity top` : sur cette instance il se termine par
+`Failure while dumping the activity: java.io.IOException: Timeout` **et** liste d'autres
+applications, ce qui produit un faux verdict.
+
+Point de contrôle n° 3 — **l'installation aboutit** (« Install update », puis le seul geste
+humain, le « INSTALLER » du système, qu'Android impose) :
+
+```bash
+"$ADB" -s "$DEV" shell dumpsys package com.s0und.s0undtv | grep -E "versionCode|versionName|lastUpdateTime"
+# attendu : versionCode=165 versionName=v1.0.18, lastUpdateTime postérieur au test
+```
+
+Point de contrôle n° 4 — **ce sont nos octets**, mesurés deux fois : sur l'appareil, puis relus
+localement (la forme la plus forte employée sur la Freebox) :
+
+```bash
+BASE=$("$ADB" -s "$DEV" shell pm path com.s0und.s0undtv | tr -d '\r' | sed 's/package://')
+"$ADB" -s "$DEV" shell sha256sum "$BASE"          # attendu : 2d5a88e3a12d6b97…
+"$ADB" -s "$DEV" exec-out cat "$BASE" > /tmp/base165.apk   # PAS « adb pull » : les chemins /d/... echouent
+sha256sum /tmp/base165.apk                        # attendu : 2d5a88e3a12d6b97… (identique)
+```
+
+Point de contrôle n° 5 — **anti-boucle et santé** :
+
+```bash
+"$ADB" -s "$DEV" logcat -c
+"$ADB" -s "$DEV" shell am start -n com.s0und.s0undtv/.activities.MainActivity
+"$ADB" -s "$DEV" shell dumpsys activity activities | grep topResumedActivity   # MainActivity, PAS UpdateActivity
+bash patch/test-selftest.sh --in-app              # attendu : SELFTEST 31/31
+"$ADB" -s "$DEV" logcat -d | grep -c FATAL        # attendu : 0
+```
+
+Une **seconde** relance doit rester muette : 165 égale l'annonce, donc rien à proposer
+(cf. la table de vérité, § 8.15). Un dialogue récurrent = régression de la comparaison.
+
+#### Route B — appareil en API ≥ 34 (Xiaomi) : jetable local
+
+Construire un 164 **depuis l'arbre actuel** (donc porteur du correctif FGS), l'installer, puis
+le laisser remonter vers la 165 publiée. Le jetable sert uniquement de point de départ.
+
+```bash
+cp dist/Twouich_v1.0.17.apk /tmp/Twouich_v1.0.17.apk.orig   # 1. MISE DE CÔTÉ : le build écrase ce nom
+# 2. bump temporaire : VERSION_CODE=164, VERSION_NAME="v1.0.17", APK_NAME="Twouich_v1.0.17.apk"
+rm -rf work/decoded work/build work/decoded.twouich-greffes   # 3. le changement de version redessassemble
+PATH="/c/Program Files/Zulu/zulu-21/bin:$PATH" bash patch/build.sh
+```
+
+**Restaurer impérativement** — sinon `check-release.sh` compare la 165 locale contre un
+`dist/` qui contient le jetable, et l'invariant de reproductibilité est perdu :
+
+```bash
+git checkout -- patch/build.sh
+cp /tmp/Twouich_v1.0.17.apk.orig dist/Twouich_v1.0.17.apk
+rm -rf work/decoded work/build work/decoded.twouich-greffes   # le prochain build repart de zéro
+bash patch/check-release.sh                                    # doit retrouver 2d5a88e3…
+```
+
+#### Quand le dialogue ne vient pas — les trois silences à distinguer
+
+1. **Le canal.** `helpers/a.b()` filtre par canal *avant* la version : sur le canal **Beta**,
+   seule une entrée `ReleaseType: 1` est acceptée, et notre `update.json` n'en publie qu'une
+   stable → aucun dialogue, aucune erreur. Une installation neuve **depuis la v1.0.2** force
+   `b.a = false`, donc Stable par défaut — **à vérifier, pas à supposer**.
+2. **Le premier appui avalé.** Sur Freebox, le premier « Install update » est routé vers
+   `DeleteStagedFileOnResult` (nettoyage du fichier *staged* précédent) et rend la main sans
+   rien installer : l'utilisateur voit « rien ne se passe ». **Re-presser** (~9 s plus tard
+   lors des validations Freebox). Un processus `com.google.android.packageinstaller` resté en
+   cache depuis la veille avale en revanche **toutes** les tentatives, sans écran ni erreur :
+   seul un **reboot** assainit (`ps -A -o PID,STIME,NAME | grep packageinstaller` — l'âge du
+   processus face à l'heure de boot).
+3. **Le réseau.** `raw.githubusercontent.com` injoignable ⇒ aucun fetch, donc aucune comparaison.
+   Vérifier avant de conclure au code : `curl -sI https://raw.githubusercontent.com/…/master/update.json`.
+
+#### Ce que le préflight a déjà validé le 05/10 (rejouer, ne pas refaire)
+
+Contrôlé sur la machine, sans toucher à l'état de l'app :
+
+- `patch/check-release.sh` **exit 0** — la chaîne publication est bien verte, precondition du test ;
+- ADB joignable : `127.0.0.1:5555`, **API 33 / Android 13 / x86_64** → la route A s'applique ;
+- l'asset **164** se télécharge et son empreinte est conforme (`4d340f1a…`, 11 260 471 o) : la
+  route A ne demande **aucune construction** ;
+- **la recette d'extraction du point n° 4 est jouée et correcte** : sur l'app actuellement
+  installée, `base.apk` ressort à `2d5a88e3a12d6b97…` **calculé sur l'appareil** *et* **relu
+  localement** (11 260 648 o dans les deux cas). Au passage, l'APK **installé** sur BlueStacks
+  est donc **byte pour byte l'asset publié** — mais installé par `adb`, ce qui ne dit rien de
+  l'updater ;
+- le filtre `logcat -s S0undTV_AutoUpdateSrv Twouich` répond (tag `Twouich` présent), `FATAL` = 0 ;
+- le champ d'activité au premier plan est `topResumedActivity` (voir l'avertissement du point n° 2) ;
+- état de départ constaté : **165 installée** (`lastUpdateTime` 09:47:49, `firstInstallTime`
+  08:36:20 — donc déjà une installation neuve, sans session) ⇒ **rétrograder exige
+  `uninstall`**, l'adb refusant le downgrade même avec `-d` sur un paquet non debuggable.
+
+Autrement dit : les commandes, les empreintes et le choix de l'appareil sont **acquis**. Ce
+qui manque est le seul geste qui compte — `uninstall`, `install` de la 164, et laisser l'app
+remonter seule.
+
+> **Geste joué, résultat en § 8.22.** Le protocole ci-dessous s'est révélé faux sur un point :
+> `onStartCommand` se lit **après** l'appui sur « Install update », pas au lancement. Deux
+> obstacles de plateforme, absents de la procédure d'origine, y sont consignés avec leur
+> remède (l'appop `REQUEST_INSTALL_PACKAGES` et l'installeur qui rejoue son propre refus).
+
+#### Question ouverte, à trancher par l'observation et non par la mémoire
+
+Faut-il une **session Twitch** pour que le dialogue apparaisse ? Les observations se
+contredisent et le protocole ne tranche pas à leur place : le 16/09, une installation fraîche
+sans session ne déclenchait **aucun** fetch (`/proc/net/tcp` muet) ; le 05/10 sur le Xiaomi,
+une installation fraîche de jetable **sans session** a bien déclenché l'updater
+(`S0undTV_AutoUpdateSrv onStartCommand` à 06:44:04). **Noter ce qui se passe** — c'est une
+donnée manquante, pas une conviction.
+
+> **Tranché par le rejeu (§ 8.22) : niette, aucune session n'est requise.** Le dialogue est
+> apparu tout seul, sans compte, `+108ms` après le lancement.
+
+#### Ce que ce protocole ne prouvera pas
+
+- Rien sur la **connexion Twitch réelle** : le dialogue d'authentification reste à valider avec
+  un compte.
+- Rien sur la **branche TV** de la mise à jour : la 164 de départ est une version téléphone.
+- La **survie de session** reste établie au niveau paquet (§ 8.18), pas par ce protocole — ici la
+  session est perdue d'entrée (`uninstall` obligatoire pour rétrograder).
+
+### 8.21 Paysage : la branche côte à côte, enfin mesurée (05/10/2026)
+
+La branche paysage de `twouichPhoneStackedLayout` était **active dans le code mais jamais
+mesurée** depuis le correctif d'empilement du 05/10 : tout ce qui suit le portrait n'avait été
+observé qu'en portrait. Deux points de mesure, sur BlueStacks (Android 13, 240 dpi, `smallestScreenWidthDp`
+toujours 480 < 600 → la garde reste bien sur la branche téléphone).
+
+**Méthode** (l'orientation logicielle est ignorée sur cet appareil, cf. § 8.10 : on mesure en
+changeant `wm size`, pas en pivotant) :
+
+```bash
+ADB="/c/Users/endymion/AppData/Local/ScrcpyGUI/scrcpy-bin/adb.exe"; DEV=127.0.0.1:5555
+export MSYS_NO_PATHCONV=1
+"$ADB" -s "$DEV" shell wm size 1280x720            # puis relire : « Override size: »
+"$ADB" -s "$DEV" shell am force-stop com.s0und.s0undtv
+"$ADB" -s "$DEV" shell am start -a android.intent.action.VIEW \
+  -d "channel://com.s0und.s0undtv/startstream?channel=xqc" \
+  -n com.s0und.s0undtv/.activities.PlayerActivity
+"$ADB" -s "$DEV" shell dumpsys activity top > /tmp/land.txt 2>&1
+```
+
+`dumpsys activity top` se termine ici par `Failure while dumping the activity:
+java.io.IOException: Timeout` — **mais le dump est complet et exploitable** : ne pas conclure à un
+échec sur ce message. `uiautomator dump`, lui, ne voit pas `ChatRecycleView` (RecyclerView sans
+contenu, faute de session) et ne permet donc pas de mesurer le chat.
+
+**Contrôle en portrait**, avant toute interprétation — la même méthode doit reproduire le § 8.19 :
+
+| Vue | Bornes | Taille |
+|---|---|---|
+| `ExoPlayer` | `0,0-720,405` | 720×405 (16:9) |
+| `ChatRecycleView` | `0,405-720,1168` | 720×763 |
+| `SendMessageWindow` | `0,1168-720,1280` | 720×112 |
+| `BottomBar` | — | GONE |
+
+405 + 763 + 112 = 1280 : identique au § 8.19. La méthode est donc juste avant d'être appliquée au
+paysage.
+
+**Paysage 1280×720 (16:9)** — `interface : telephone (disposition empilee)`, `SELFTEST 31/31`, 0 `FATAL` :
+
+| Vue | Bornes | Taille | Attendu |
+|---|---|---|---|
+| `ExoPlayer` | `0,0-1088,720` | 1088×720 | 1088×720 |
+| `ChatRecycleView` | `1088,0-1280,608` | 192×608 | 192×608 |
+| `SendMessageWindow` | `1088,608-1280,720` | 192×112 | 192×112 |
+| `BottomBar` | — | GONE | GONE |
+
+**Paysage 1560×720 (19,5:9)** — mêmes traces, 0 `FATAL` :
+
+| Vue | Bornes | Taille |
+|---|---|---|
+| `ExoPlayer` | `0,0-1280,720` | 1280×720 (**16:9 exact**) |
+| `ChatRecycleView` | `1280,0-1560,608` | 280×608 |
+| `SendMessageWindow` | `1280,608-1560,720` | 280×112 |
+
+La disposition est donc **exactement celle que le code écrit**, au pixel près, aux deux ratios :
+vidéo `min(hauteur × 16/9, 85 % de la largeur)`, chat = le reste en largeur, saisie 112 px en bas à
+droite, `BottomBar` masqué.
+
+**Ce que la mesure ajoute — le plafond de 85 % mord plus large que le commentaire ne le dit.**
+Le commentaire du code affirme que le garde-fou « ne mord que sur des ratios extrêmes ». Le
+seuil réel est `largeur/hauteur < (16/9)/0,85 = 2,092` : en dessous, la vidéo est amputée. Un
+**16:9 est donc concerné** (1088×720 = 1,51:1 au lieu de 1,78:1), et avec lui le 16:10, le 4:3
+des tablettes, les 3:2 des pliables. Le 19,5:9 et le 20:9 des téléphones actuels passent, ce qui
+explique que la mesure du 21/09 (Xiaomi 2712×1220, soit 2,22:1) n'ait jamais vu le phénomène.
+
+**Ce que la mesure ne prouve pas.** Aucun flux ne joue (aucune session Twitch) :
+`exo_content_frame` occupe toute la place du cadre, donc le **lettrage** qu'implique un cadre de
+1,51:1 contenant une image 16:9 (1088×612, ~54 px de bandes en haut et en bas) est un **calcul**, pas
+une observation. Seule la **disposition** est mesurée. Le besoin de session reste entier.
+
+**Restauration** — le piège du § 7 est bien réel ici : `wm size reset` ne rend PAS BlueStacks à son
+état d'origine. Rétablir explicitement puis **relire** `Override size:` / `Physical density:` :
+
+```bash
+"$ADB" -s "$DEV" shell wm size 720x1280 && "$ADB" -s "$DEV" shell wm density 240
+```
+
+Fait ici, et revérifié : portrait à nouveau conforme (720×405 / 720×763 / 720×112), trace
+`interface : telephone (disposition empilee)`, `SELFTEST 31/31`, 0 `FATAL`.
+
+### 8.22 Rejeu du parcours `165-1 → 165` : **exécuté** (05/10/2026)
+
+Protocole du § 8.20 joué pour de bon sur BlueStacks (API 33, 720×1280 @240 dp = 480 dp).
+**Les 5 points de contrôle passent.** Le parcours n'a pas été joué en 165 parce qu'il ne
+l'avait jamais été — il l'est maintenant.
+
+#### Réponse à la question ouverte du § 8.20 : **niette, aucune session n'est requise**
+
+L'appareil n'avait **aucune session** pendant tout le trajet (accueil = « Login to use the
+app »). Le dialogue est apparu **automatiquement, tout seul**, 0,5 s après le lancement :
+
+```
+14:14:33.712  577 3799 I ActivityTaskManager: START u0 {flg=0x10000000 cmp=com.s0und.s0undtv/.activities.UpdateActivity (has extras)} from uid 10093
+14:14:33.822  577  594 I ActivityTaskManager: Displayed com.s0und.s0undtv/.activities.UpdateActivity: +108ms
+```
+
+Les observations contradictoires du § 8.20 se lisent alors autrement : le fetch du 16/09
+(`/proc/net/tcp` muet) n'a rien à voir avec la session. Ce qui décide est l'**état d'une
+annonce déjà en cache** et le moment du tap, pas la présence d'un compte.
+
+#### Correction du protocole : `onStartCommand` se lit **après** l'appui, pas au lancement
+
+Le § 8.20 attendait la ligne de log au lancement. Elle n'y est pas, et ne peut pas y être :
+`onStartCommand` logue l'URL **que le service a été démarré avec**, or le service ne démarre
+qu'au moment du téléchargement, donc après « Install update ». Vérifié dans
+`AutoUpdateService.smali` : `Log.d("S0undTV_AutoUpdateSrv", "onStartCommand: " + <url>)`
+juste après `getStringExtra("APK")`. Un lancement muet affiche bien `UpdateActivity`, et
+**rien d'autre** — c'est normal, pas un raté.
+
+#### Déroulé et points de contrôle
+
+| # | Contrôle | Attendu | Observé |
+|---|----------|---------|---------|
+| P | Asset 164 | 11 260 471 o, `4d340f1a…` | 11 260 471 o, `4d340f1a049884582018f15df537da6843576b222ee7202637126752888aa184` |
+| P | Version installée | 164 / v1.0.17 | `versionCode=164`, `versionName=v1.0.17`, `firstInstallTime=14:13:09` |
+| 1 | Dialogue auto, sans session | `UpdateActivity` | `topResumedActivity=…/.activities.UpdateActivity`, `+108ms` |
+| 2 | Tap « Install update » | `onStartCommand: …/v1.0.18/Twouich_v1.0.18.apk` | `14:15:07.863 … onStartCommand: https://github.com/Endymi0n74/Twouich/releases/download/v1.0.18/Twouich_v1.0.18.apk` puis `serviceWork: start` |
+| 3 | Pose de la 165 | 165 / v1.0.18, **en place** | `versionCode=165`, `versionName=v1.0.18`, `firstInstallTime=14:13:09` **inchangé**, `lastUpdateTime=14:17:10` |
+| 4 | Octet installé | `2d5a88e3…`, 11 260 648 o | `2d5a88e3a12d6b9779d1c3ef214e5cacc010d46d76eafe8eeead88b4f5c8082e` — **sur appareil *et* relu localement**, identique à l'asset publié |
+| 5 | Relance muette | `SELFTEST 31/31`, `FATAL=0` | `SELFTEST 31/31 verifications, flux filtre : 328 octets`, exit 0 ; relance : `topResumedActivity=…/.activities.MainActivity`, `START.*UpdateActivity` = **0**, `New update available` = **0**, `FATAL EXCEPTION` = **0** |
+
+Le contrôle 3 est le plus parlant : `firstInstallTime` **n'a pas bougé** alors que
+`lastUpdateTime` a avancé de 4 minutes. C'est une **mise à jour en place** — les données de
+l'app survivent, et rien n'est réinstallé.
+
+#### Le dialogue, pour qui veut le rejouer
+
+```
+bounds=[204,260][696,333]  Changelog
+bounds=[204,333][696,406]  Install update      -> (450, 369)
+bounds=[204,406][696,479]  Cancel
+```
+Titre `New update available!`, résumé `Version: v1.0.18` / `Version code: 165`, et la
+mention « You can disable the Auto update in Settings -> Updates -> 'Check for updates' ».
+
+#### Deux pièges rencontrés, absents du § 8.20
+
+1. **`REQUEST_INSTALL_PACKAGES` : l'installeur se refuse alors que l'app déclare la permission.**
+   `dumpsys package` liste bien `android.permission.REQUEST_INSTALL_PACKAGES`, mais l'appop est
+   à `deny; rejectTime=…` et l'installeur affiche « installation d'applis inconnues provenant de
+   cette source n'est pas autorisée ». **Déclarer ne suffit pas** : il faut accorder l'appop
+   avant le parcours, sinon le protocole s'arrête au point 2.
+   ```bash
+   "$ADB" shell appops set com.s0und.s0undtv REQUEST_INSTALL_PACKAGES allow
+   ```
+   **Modification de l'appareil, laissée en l'état** : c'est ce qu'un téléphone réel a après la
+   première mise à jour acceptée. À restaurer par `… appops set … deny` pour revenir à l'état
+   d'avant-test.
+2. **L'installeur se réutilise lui-même** : après un refus, l'appui suivant rouvre le dialogue
+   de refus au lieu de la confirmation, avec le **même** `ActivityRecord` (`65a2ebb` t103). Le
+   protocole le nommait « installeur stale » ; le remède est de fermer le paquet système avant
+   de recommencer, sinon on conclut à tort que l'appop n'a pas été pris en compte :
+   ```bash
+   "$ADB" shell am force-stop com.android.packageinstaller
+   "$ADB" shell am force-stop com.s0und.s0undtv
+   ```
+   Une fois à froid, la confirmation réelle apparaît : `Voulez-vous mettre à jour cette appli ?`,
+   `METTRE À JOUR` en `bounds=[453,695][648,776]` → **(550, 735)**, `ANNULER` en
+   `bounds=[323,695][453,776]`.
+
+#### Ce que le rejeu a révélé sur la v1.0.18 publiée : les 4 écrans tactiles n'y sont pas
+
+L'écran d'arrivée après mise à jour ne montre que **5 éléments cliquables** (Accueil, Parcourir,
+Reglages, l'icône de recherche, la bannière de connexion) et `twouich_phone_nav_bar` mesure
+**87 px ≈ 58 dp** au lieu des 104 dp du gabarit patché : la rangée
+`twouich_phone_act_bar` (48 dp) n'est pas dans l'arbre.
+
+Ce n'est pas une régression de la mise à jour. L'asset publié est simplement **en amont** de
+ces écrans — vérifié sur l'octet installé lui-même :
+
+- `resources.arsc` : `twouich_phone_nav_bar`, `nav_home`, `nav_search`, `nav_settings`,
+  `nav_inactive`, `phone_pip`, `phone_chat_height` — **et pas plus**. Ni `twouich_phone_act_bar`,
+  ni `act_about/privacy/changelog/logout`.
+- dex : `twouichPhoneHome/Search/Settings/ChatToggle/HeadersState/Id/Login/LoginBind/Pip/
+  SendChatMessage/Settings/StackedLayout/View` — **pas** `twouichPhoneAbout`,
+  `twouichPhonePrivacy`, `twouichPhoneChangeLog`, `twouichPhoneLogout`.
+
+Les 7 libellés vus avant le rejeu venaient du **build 166 local** installé pour les mesures, pas
+de la release. La mise à jour a donc bien déposé l'asset publié, à l'octet près, et l'absence
+des 4 écrans est celle de la v1.0.18 elle-même — ils n'arriveront qu'en v1.0.19.
+
+#### Limites de ce rejeu
+
+- Rien sur la **connexion Twitch réelle** : toujours pas de session, donc aucun écran
+  authentifié n'a été vu. Le dialogue d'authentification reste à valider avec un compte.
+- Rien sur la **branche TV** : la 164 de départ est une version téléphone, sur 480 dp.
+- Le parcours a **modifié l'appareil** : appop `REQUEST_INSTALL_PACKAGES` accordé (voir ci-dessus).
+- `check-release.sh` reste à **1** tant que la v1.0.19 n'est pas publiée, pour la seule bonne
+  raison : `update.json` annonce encore 165 / v1.0.18.
