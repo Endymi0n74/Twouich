@@ -2107,6 +2107,15 @@ remonter seule.
 > `onStartCommand` se lit **après** l'appui sur « Install update », pas au lancement. Deux
 > obstacles de plateforme, absents de la procédure d'origine, y sont consignés avec leur
 > remède (l'appop `REQUEST_INSTALL_PACKAGES` et l'installeur qui rejoue son propre refus).
+>
+> **Et l'étape 2 n'est pas fiable telle qu'écrite (§ 8.24).** Ni le tap sur « Install
+> update » ni la confirmation système « Voulez-vous mettre à jour cette appli ? » ne sont
+> nécessaires à chaque fois : le 05/10, la 164 → 165 a demandé les deux, la 165 → 166
+> **s'est enchaînée sans aucune intervention** (14:55:41 dialogue, 14:55:45
+> `InstallStaging`, 14:55:47 `lastUpdateTime`). Cela dépend de l'historique de
+> l'installeur système pour ce paquet. **Il faut donc lire `topResumedActivity` et
+> `lastUpdateTime` plutôt que d'attendre un bouton** : si l'installeur est déjà là,
+> valider ; s'il ne vient pas, ce n'est pas un échec de la chaîne.
 
 #### Question ouverte, à trancher par l'observation et non par la mémoire
 
@@ -2320,3 +2329,288 @@ des 4 écrans est celle de la v1.0.18 elle-même — ils n'arriveront qu'en v1.0
   05/10** : release v1.0.19 (166) publiée, `publishedAt` `2026-10-05T12:39:02Z`, asset
   `7edef794…` identique au build local, `update.json` poussé ensuite. La chaîne sort maintenant
   **0** sur ses quatre étages.
+
+### 8.23 Livraison v1.0.19 (166) : la chaîne au vert, et le verrou qui la protège (05/10/2026)
+
+Le rejeu du § 8.22 laissait une question pratique : la release peut-elle être
+publiée proprement ? Réponse : oui, et la procédure est désormais écrite. Cette
+section est le compte rendu de la livraison, avec les valeurs exactes — elle sert
+de référence si la chaîne doit être rejouée.
+
+#### L'ordre, qui n'est pas négociable
+
+```
+1. commit + push sur master        (6 commits, pas un bloc)
+2. attendre le job « build » VERT  (run 37310819176)
+3. tag v1.0.19 sur le commit testé  -> 4144054
+4. attendre le job de publication   (run 37310921299) VERT
+5. enfin seulement : update.json, avec ReleaseDate = publishedAt EXACT
+```
+
+Le tag est posé **après** le vert du build de `master`, jamais avant : on ne
+publie pas depuis un état cassé. Et `update.json` passe **après** la release,
+jamais avant — l'updater ne lit que ce fichier, et l'annoncer avant que l'asset
+existe enverrait les appareils vers un 404 : ils verraient « mise à jour
+disponible » et n'installeraient rien. C'est le désordre exact que
+`check-release.sh` refuse de laisser passer.
+
+#### Ce qui a été vérifié
+
+| Contrôle | Valeur |
+|----------|--------|
+| Tag | `v1.0.19` sur `4144054` (léger, comme v1.0.17 et v1.0.18) |
+| Runs CI | `37310819176` (build) · `37310921299` (publication) — **tous deux verts** |
+| Signature | v1 + v2 + v3 |
+| Release | « Twouich v1.0.19 », `publishedAt` **2026-10-05T12:39:02Z** |
+| Assets | `Twouich_v1.0.19.apk` (11 260 648 o) + `changelog.html` (2 065 o) |
+| Empreinte servie | `7edef794d155a64c1f8065ce01a05d00e3bf379a5b9619366200c09b2ad0e261` = **build local** |
+| `update.json` | 166 / v1.0.19 / `Twouich_v1.0.19.apk`, `2026-10-05T12:39:02.000Z` |
+| `check-release.sh` | **exit 0** sur les quatre étages |
+
+Cinquième release reproductible de suite (local ↔ CI). La CI vérifie ses propres
+octets servis avant de conclure.
+
+#### `check-release.sh` ne mentait plus sur un 404 — ni sur un corps vide
+
+L'étage 4 comparait l'empreinte du livrable à celle de `releases/latest/download/`
+**sans lire le code HTTP**. Sur un 404, GitHub renvoie sa page d'erreur : le script
+publiait un « SHA-256 servi » qui n'était celui d'aucun APK, pris précisément dans
+la situation où l'updater ne téléchargerait rien. Le code est maintenant lu avant
+toute empreinte ; hors 200, le script dit « aucun octet servi » et échoue sur le
+404 lui-même.
+
+**Le même piège, un cran plus bas, est apparu le jour même.** La chaîne est repassée
+rouge après publication sur un **HTTP 200 au corps vide** — une coupure réseau. Le
+script calculait alors l'empreinte du vide, `e3b0c442…`, et l'affichait comme une
+mesure alors qu'elle ne désigne rien. Trois tentatives de suite repassaient, la
+panne était transitoire : c'est bien le signe d'un réseau, pas d'un asset cassé.
+Un APK de plusieurs mégaoctets ne peut pas faire zéro octet — l'étage 4 le nomme
+maintenant au lieu de le chiffrer.
+
+**Morsure prouvée sur les trois branches.** D'abord, sur la v1.0.18 réellement
+publiée, dans un worktree jetable : étages 2, 3 et 4 au vert — le garde **peut**
+verdir, il n'est pas rouge par construction — puis un octet changé dans le
+livrable, et l'étage 4 tombe en rouge (sortie 1). Ensuite, les deux branches
+nouvelles, contre un serveur HTTP local qui servait exactement les cas fautifs :
+
+| Réponse servie | Ce que dit l'étage 4 | Sortie |
+|---------------|----------------------|--------|
+| 200, corps vide | « HTTP 200 mais corps vide — rien n'a été servi » | 1 |
+| 200, contenu faux | « SHA-256 servi = … » (comparaison faite) | 1 |
+| 200, contenu juste | « SHA-256 servi = SHA-256 local » | 0 |
+
+Worktree supprimé, `git worktree prune` fait ; serveur local arrêté, copies de morsure
+effacées.
+
+#### Les quatre actions tactiles : le verrou qui manquait
+
+Le rejeu du § 8.22 a révélé que la v1.0.18 publiée ne contenait pas les quatre
+écrans tactiles. Une fois la v1.0.19 en ligne, deux verdicts `test_apk` ont été
+ajoutés, parce que les deux déjà présents ne vérifiaient que le **layout livré** —
+les quatre identifiants dans `resources.arsc` et les quatre `android:onClick` dans
+l'AXML — plus l'absence de fuite dans les variantes TV.
+
+Or c'est exactement le défaut qu'un audit de layout ne voit pas : un
+`android:onClick` qui nomme une méthode absente du dex passe tous ces contrôles.
+Le bouton s'affiche, et l'app meurt au moment du tap, sur l'appareil. Deux verdicts
+ont donc été ajoutés dans le même geste que « connexion au doigt » — les quatre
+méthodes dans le dex livré, les quatre activités déclarées dans le manifeste — et
+`_ENTRY` porte désormais le triplet (identifiant, méthode, activité).
+
+**Morsure prouvée par deux mutations de l'APK livré**, faites sur des **copies**,
+le livrable restant à `7edef794…` :
+
+| Mutation | Verdict qui tombe | Sortie |
+|----------|-------------------|--------|
+| `twouichPhoneLogout` neutralisé dans `classes.dex` (UTF-8, octet 2232759) | « les 4 méthodes sont dans le dex livré » | 1 |
+| `LogoutDialogActivity` neutralisé dans le manifeste (UTF-16LE, octet 11686) | « les 4 activités sont déclarées » | 1 |
+
+Dans les deux cas, le verdict « les 4 actions sont dans le layout LIVRÉ » est
+**resté vert** : la rangée déclarait toujours `twouichPhoneLogout` alors que la
+méthode avait disparu. C'est la démonstration que le trou était réel, et non
+théorique.
+
+`test_apk` passe de 60 à **62** verdicts. La documentation annonçait 58 — elle était
+**déjà fausse de 2** avant ces ajouts, les verdicts des quatre écrans ayant été
+écrits sans mettre à jour le compteur. Rectifié dans `AGENTS.md` et `memory.md`.
+
+**Piège d'AXML, seconde fois dans la journée** : le manifeste livré est binaire et son
+pool de chaînes est en **UTF-16LE**. Une recherche ASCII conclut à tort que les
+quatre activités sont absentes. `holds()` teste les deux encodages, c'est pourquoi
+le verdict est juste — mais la leçon vaut d'être notée deux fois.
+
+#### Ce que cette livraison ne prouve pas
+
+- **`test_apk` reste un contrôle de mainteneur** : il exige un APK signé et n'est
+  pas câblé dans les jobs de CI. Ces deux verdicts ne tourneront que sur le poste
+  du mainteneur tant qu'on ne l'y ajoutera pas.
+- **Rien sur la connexion Twitch réelle** : toujours pas de session, donc aucun
+  écran authentifié n'a été vu. Le dialogue de connexion reste à valider avec un
+  compte.
+- **La branche TV de la mise à jour** n'est pas couverte : la 164 de départ est
+  une version téléphone, jouée à 480 dp.
+- **Rien n'a été rejoué en 165→166** : l'appareil de test est resté en 165.
+
+### 8.24 Session enfin établie : tout ce qui n'avait jamais été observé (05/10/2026)
+
+Le § 8.22 se terminait sur un aveu : **aucun écran authentifié n'avait jamais été vu**. Une
+session Twitch a été établie sur l'appareil de référence, et la campagne a suivi. Huit
+résultats, dont deux qui ferment une dette de mesure longue.
+
+#### L'appareil s'est mis à jour tout seul — et c'est une correction du protocole
+
+Contre toute attente, le passage **165 → 166 s'est joué sans une seule intervention** :
+
+```
+14:55:41  UpdateActivity (dialogue)
+14:55:44  S0undTV_AutoUpdateSrv: onStartCommand: …/v1.0.19/Twouich_v1.0.19.apk
+14:55:45  packageinstaller/.InstallStart puis /.InstallStaging
+14:55:47  lastUpdateTime  →  versionCode=166 / v1.0.19
+          firstInstallTime INCHANGÉ (14:13:09)
+```
+
+Ni le tap sur « Install update » (que le § 8.20 inscrit à l'étape 2), ni la confirmation
+« Voulez-vous mettre à jour cette appli ? » que le § 8.22 a dû faire apparaître et
+valider. **Le protocole du § 8.20 est donc trop exigeant sur ce point**, et c'est un
+résultat à une observation près : la confirmation n'est pas acquise, elle dépend de
+l'historique de l'installeur système pour ce paquet. Nous l'avons rencontrée deux fois
+dans la même journée — absente à 14:55, présente à 14:17. Une procédure qui l'attend
+bloquerait ; une procédure qui la rend facultative ne peut pas l'oublier. Les deux
+versions sont bonnes côté octets : `base.apk` relu sur
+l'appareil vaut `7edef794d155a64c1f8065ce01a05d00e3bf379a5b9619366200c09b2ad0e261`,
+**identique à l'asset publié** — deuxième rejeu de la chaîne, à l'octet près.
+
+#### Le tutoriel s'interpose après une nouvelle session
+
+Piège de navigation, non documenté : **juste après une connexion, l'app ouvre
+`OnboardingActivity`**. Ce tutoriel s'est interposé deux fois et a détourné des taps
+destinés à l'accueil et au lecteur — on croyait à tort que l'app ouvrait
+`ChangeLogActivity` ou la fiche chaîne. Il se ferme par **retour arrière**, pas par un
+bouton (aucun libellé n'y est exposé par `uiautomator`, seulement `page_indicator`).
+
+#### Accueil authentifié : 9 éléments, et la géométrie au pixel
+
+L'accueil est passé de 5 à **9 éléments cliquables**, avec les bornes mesurées :
+
+| Élément | Bornes | Taille |
+|---------|--------|--------|
+| `title_orb` | `[53,47][131,125]` | 78 × 78 px (52 dp) |
+| `twouich_phone_act_about` | `[0,1126][180,1198]` | 180 × 72 px (**120 × 48 dp**) |
+| `twouich_phone_act_privacy` | `[180,1126][360,1198]` | 180 × 72 px |
+| `twouich_phone_act_changelog` | `[360,1126][540,1198]` | 180 × 72 px |
+| `twouich_phone_act_logout` | `[540,1126][720,1198]` | 180 × 72 px |
+| `twouich_phone_nav_home` / `search` / `settings` | `[0,1200][720,1280]` | 3 × 240 × 80 px |
+
+Les quatre actions font exactement 120 × 48 dp, comme le gabarit, et les sept se
+coupent exactement à 1126 / 1198 / 1200 / 1280. Le contenu est bien authentifié :
+`Followed (3)`, `Followed Channels (22)`, `502 viewers`, `Niniste`, `Just Chatting`.
+
+#### Les quatre taps ouvrent la bonne activité — 4/4, mesuré sur l'APK publié
+
+| Tap | Activité attendue | Observé |
+|-----|-------------------|---------|
+| A propos | `AboutActivity` | ✅ `AboutActivity` |
+| Vie privée | `PrivacyPolicyActivity` | ✅ `PrivacyPolicyActivity` |
+| Nouveautés | `ChangeLogActivity` | ✅ `ChangeLogActivity` |
+| Déconnexion | `LogoutDialogActivity` | ✅ `LogoutDialogActivity` |
+
+`LogoutDialogActivity` ouvert mais **jamais confirmé** : la session est intacte. C'est la
+première fois que ces quatre écrans sont atteints par un doigt — jusque-là, leur
+présence ne reposait que sur l'audit statique du dex et du manifeste, et sur des
+mutations de l'APK. **0 `FATAL` sur l'ensemble.**
+
+#### Le portrait reproduit le § 8.19, avec un vrai flux en marche
+
+Contrôle préalable avant toute mesure paysage, comme l'exige la méthode du § 8.21 :
+`ExoPlayer` **0,0-720,405** (16:9 exact), `ChatRecycleView` **0,405-720,1168**, saisie
+**0,1168-720,1280**. 405 + 763 + 112 = 1280. Le correctif d'empilement tient donc avec
+du contenu réel, pas seulement sur un squelette vide.
+
+#### Le lettrage 16:9 passe enfin du calcul à l'observation
+
+C'est la dette que le § 8.21 assumait explicitement : le lettrage « (~54 px de bandes)
+reste un **calcul**, pas une observation ». Avec une session, un flux joue, et
+`exo_content_frame` — le cadre réel de l'image — devient mesurable :
+
+| Écran | `ExoPlayer` | `exo_content_frame` (image) | `ChatRecycleView` |
+|-------|-------------|------------------------------|-------------------|
+| 1280×720 (16:9) | 0,0-1088,720 | **0,54-1088,666** → 54 px en haut, 54 px en bas | 1088,0-1280,608 |
+| 1560×720 (19,5:9) | 0,0-1280,720 | **0,0-1280,720** → **aucune bande** | 1280,0-1560,608 |
+
+Les deux dispositions sont celles que le § 8.21 avait mesurées, et le calcul des ~54 px
+était **juste**. Trace dans les deux cas :
+`interface : telephone (disposition empilee)`. Le seuil `largeur/hauteur < 2,092` se
+confirme donc par son effet visible : un 16:9 est bien concerné, un 19,5:9 non.
+
+#### L'appui long sur une carte : mesuré NÉGATIF
+
+L'item d'audit qui restait « une hypothèse, pas un faux positif démontré » est maintenant
+**tranché, et dans l'autre sens**. Trois gestes, aucun effet :
+
+| Geste | Activité | Nœuds de menu | Traces `ContextMenu` |
+|-------|----------|---------------|---------------------|
+| appui long fixe 1200 ms sur une carte | `MainActivity` | 0 | 0 |
+| appui long glissé 2 px, 1500 ms | `MainActivity` | 0 | 0 |
+| appui long sur la grande carte | `MainActivity` | 0 | 0 |
+
+Et le fait structurel : les champs de carte rapportent **`longClickable: false`**. Le
+chemin `K6/d` → `LK6/a` → `K6/d.m` existe dans le dex, mais **l'appui long sur une carte
+n'ouvre aucun menu contextuel**. Ce n'est donc pas un faux positif à corriger, c'est un
+chemin mort en l'état — à trancher un jour : câbler le gestuel, ou retirer le code.
+
+#### Le chat, enfin avec du vrai contenu
+
+La hauteur de 763 px n'avait été mesurée que sur un flux vide. Rejoué sur un flux
+**réellement en marche**, avec les messages qui arrivent :
+
+```
+app:id/ExoPlayer         0,0-720,405
+app:id/ChatRecyclerView  0,405-720,1168      <- 763 px
+app:id/ET_SendMessage    8,25-628,86         <- champ, dans la saisie 1168-1280
+```
+
+Neuf lignes de message sont présentes dans le `ChatRecyclerView`, de 720 px de large,
+en position relatives au conteneur : `0,268-720,307`, puis `0,307-720,357`,
+`0,357-720,407`, `0,407-720,457`… soit des lignes de **50 px**, la première faisant
+39 px (son texte est plus court). Elles s'empilent dans les 763 px **sans débordement**.
+La correction du § 8.19 tient donc avec du contenu réel : la zone duchat commence exactement sous la vidéo et s'arrête exactement sur la barre de saisie.
+
+Les bornes ci-dessus sont un **instantané** : la liste défile à mesure que les messages
+arrivent, et les valeurs absolues des lignes glissent avec elle (on les relit à
+`1073740818…`, même espacements). C'est la **structure** — 39 px puis 50 px, 720 px de
+large, contenus dans les 763 px — qui est le résultat, pas les valeurs.
+
+Au passage, **troisième confirmation** d'une limite déjà consignée : `uiautomator dump`
+ne voit **aucun** message de chat — il ne rapporte que « Envoyer un message ». C'est
+`dumpsys activity top` qui les fait apparaître, par les nœuds `app:id/txtMessage`. Toute
+mesure du chat doit passer par là.
+
+#### Ce que je n'ai pas pu vérifier : les commandes du lecteur
+
+Ni le tap sur l'image ni `DPAD_CENTER` ne font apparaître les contrôles
+`exo_play`/`exo_pause`/`exo_ffwd`, qui restent à `0,0-0,0` (GONE) — alors que la trace
+confirme la réception du geste (`PlayerActivity: onKeyUp: can do short press:true`).
+Les touches `MEDIA_PLAY`/`MEDIA_PAUSE` ne produisent pas davantage de trace lisible.
+L'app utilise donc des contrôles qui ne sont pas ceux d'ExoPlayer, ou une couche que
+`dumpsys activity top` ne restitue pas. **Non vérifié, donc.** Ce qui est vérifié :
+la lecture démarre (`startStream: play()`), le cadre de l'image est correctement posé
+(`exo_content_frame` 0,0-720,405) et aucun crash.
+
+#### Fin de campagne
+
+`SELFTEST 31/31` **exit 0**, **0 `FATAL EXCEPTION`** sur toute la session,
+`versionCode=166 / v1.0.19`, et surtout **`firstInstallTime` inchangé à 14:13:09** malgré
+les trois mises à jour de la journée : la session a survécu, ce qui confirme par la
+mesure ce que le § 8.18 établissait au niveau paquet. Orientation restaurée en portrait
+(`wm size 720x1280` + `wm density 240`, revérifiés) — `wm size reset` n'ayant pas
+suffit.
+
+#### Ce qui reste non couvert
+
+- **L'envoi d'un message de chat** n'a pas été tenté, volontairement : cela publierait
+  un message sur Twitch. Le bouton existe, sa voie d'envoi est compilée et verrouillée
+  par `test_apk`, mais le geste n'a pas été exercé.
+- **L'aperçu audio** au survol d'une carte, et le `MenuBar` de la télécommande, n'ont pas
+  été testés.
+- Le **tutoriel** n'a été franchi que par retour arrière ; son contenu (captures
+  remappées) n'a pas été contrôlé.
