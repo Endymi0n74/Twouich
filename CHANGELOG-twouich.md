@@ -2,6 +2,8 @@
 
 ## v1.0.20 — 5 octobre 2026
 
+> **Publié le 5 octobre 2026** (versionCode 167) : tag `v1.0.20`, release « Twouich v1.0.20 » avec l'APK et `changelog.html`, annonce `update.json` poussée après la release (`ReleaseDate` = `publishedAt`, `2026-10-05T18:06:17Z`). Livrable 11 265 296 o, SHA-256 `3b31a5c0fc10364ab70af39540f4ceafbb5e71f31323cd538bb7b25fce3b0085` — identique aux octets servis, CI signée verte.
+
 - **Le chat reste visible pendant la lecture sur téléphone.** Le fondu amont ramenait son opacité à zéro, laissant une zone noire malgré les messages présents. Le lecteur téléphone garde désormais le chat opaque et visible ; l'affichage TV conserve son comportement d'origine.
 
 ## v1.0.19 — 5 octobre 2026
