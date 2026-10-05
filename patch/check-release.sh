@@ -119,9 +119,22 @@ done
 # exactement ce qui a été testé, et pas un fichier remplacé après coup.
 echo
 echo "4. Octets servis"
-SERVED="$(curl -sL --max-time 300 "https://github.com/$REPO/releases/latest/download/$APK_NAME" | sha256sum | cut -d' ' -f1)"
-[ "$SERVED" = "$LOCAL_SHA" ] && ok "SHA-256 servi = SHA-256 local" \
-    || { ko "SHA-256 servi = $SERVED"; info "            local = $LOCAL_SHA"; }
+# Le code HTTP est lu AVANT toute empreinte : sur un 404, GitHub renvoie sa
+# page d'erreur, et lui calculer un SHA-256 ferait croire qu'un APK a été
+# servi — un chiffre qui n'a aucun rapport avec le fichier cherché. On le dit
+# donc, et on échoue sur le 404 lui-même.
+SERVE_TMP="$(mktemp)"
+SERVE_CODE="$(curl -sL -o "$SERVE_TMP" -w '%{http_code}' --max-time 300 \
+    "https://github.com/$REPO/releases/latest/download/$APK_NAME")"
+if [ "$SERVE_CODE" != "200" ]; then
+    ko "HTTP $SERVE_CODE sur releases/latest/download/$APK_NAME — aucun octet servi"
+    info "local = $LOCAL_SHA"
+else
+    SERVED="$(sha256sum "$SERVE_TMP" | cut -d' ' -f1)"
+    [ "$SERVED" = "$LOCAL_SHA" ] && ok "SHA-256 servi = SHA-256 local" \
+        || { ko "SHA-256 servi = $SERVED"; info "            local = $LOCAL_SHA"; }
+fi
+rm -f "$SERVE_TMP"
 
 echo
 if [ "$FAIL" -eq 0 ]; then
