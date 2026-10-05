@@ -67,7 +67,10 @@ fi
 # ── 2. Ce que l'app lit ─────────────────────────────────────────────────
 echo
 echo "2. update.json publié sur master (ce que l'app interroge)"
-REMOTE_JSON="$(curl -sSL --max-time 60 "https://raw.githubusercontent.com/$REPO/master/update.json")"
+REMOTE_JSON="$(git show "origin/master:update.json" 2>/dev/null)"
+if [ -z "$REMOTE_JSON" ]; then
+    REMOTE_JSON="$(curl -sSL --max-time 60 "https://raw.githubusercontent.com/$REPO/master/update.json")"
+fi
 if [ -z "$REMOTE_JSON" ]; then
     ko "raw.githubusercontent.com/$REPO/master/update.json injoignable"
     REMOTE_JSON='[]'
