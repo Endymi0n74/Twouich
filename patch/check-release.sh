@@ -123,11 +123,22 @@ echo "4. Octets servis"
 # page d'erreur, et lui calculer un SHA-256 ferait croire qu'un APK a été
 # servi — un chiffre qui n'a aucun rapport avec le fichier cherché. On le dit
 # donc, et on échoue sur le 404 lui-même.
+#
+# Un 200 au corps VIDE est le même piège, un cran plus bas : c'est ce qu'a
+# renvoie `releases/latest/download/` lors d'une coupure réseau le 05/10, et
+# l'empreinte du vide (e3b0c442…) se lit comme une mesure alors qu'elle ne
+# désigne rien. Un APK de plusieurs mégaoctets ne peut pas faire zéro octet :
+# le nommer vaut mieux que le chiffrer.
 SERVE_TMP="$(mktemp)"
 SERVE_CODE="$(curl -sL -o "$SERVE_TMP" -w '%{http_code}' --max-time 300 \
     "https://github.com/$REPO/releases/latest/download/$APK_NAME")"
+SERVE_SIZE="$(stat -c%s "$SERVE_TMP" 2>/dev/null || echo 0)"
 if [ "$SERVE_CODE" != "200" ]; then
     ko "HTTP $SERVE_CODE sur releases/latest/download/$APK_NAME — aucun octet servi"
+    info "local = $LOCAL_SHA"
+elif [ "$SERVE_SIZE" -eq 0 ]; then
+    ko "HTTP 200 mais corps vide sur releases/latest/download/$APK_NAME — "
+    info "rien n'a ete servi (coupure reseau ?), pas d'empreinte a comparer"
     info "local = $LOCAL_SHA"
 else
     SERVED="$(sha256sum "$SERVE_TMP" | cut -d' ' -f1)"
