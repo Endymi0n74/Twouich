@@ -2585,6 +2585,33 @@ ne voit **aucun** message de chat — il ne rapporte que « Envoyer un message �
 `dumpsys activity top` qui les fait apparaître, par les nœuds `app:id/txtMessage`. Toute
 mesure du chat doit passer par là.
 
+#### Chat entièrement noir malgré 9 lignes — accepté sur candidat local (05/10)
+
+Le lecteur publie la liste et ses messages dans la hiérarchie, mais la bande peut
+rester noire : lire l'arbre n'est pas une preuve qu'Android a dessiné les pixels.
+Procédure reproductible : installer le candidat signé, lancer directement un stream,
+confirmer `topResumedActivity=PlayerActivity`, capturer l'écran, puis compter les pixels
+non noirs dans le rectangle `[0,405)-[720,1168)` ; lire aussi `dumpsys activity top`
+pour `ChatRecycleView` et `txtMessage`. Ne pas utiliser la capture prise après
+`test-selftest.sh --in-app` sans relancer le lecteur : ce test ramène l'app à l'accueil.
+
+Avant le correctif, le lecteur `niniste` avait neuf nœuds `txtMessage`,
+`ChatRecycleView` visible en `[0,405][720,1168]`, mais **549 360 pixels noirs sur
+549 360**. La cause repérée dans l'amont est l'alpha du RecyclerView : initialisé à
+0, puis le fade `V0()`/son callback de fin le masque. Le candidat téléphone annule
+ce fade et force alpha 1/visible dans la disposition empilée ; les branches TV,
+PiP et chat replié restent distinctes.
+
+Mesure après installation du candidat : à 12 s, **1 772 pixels non noirs** ; à 47 s,
+**20 920 pixels non noirs**. La vue est encore `[0,405][720,1168]`, avec 5 lignes
+`txtMessage` au second instant (le flux défile). Cela confirme que les pixels de la
+zone sont peints, contrairement au noir uniforme précédent. **Limite** : le comptage
+ne prouve pas à lui seul la lisibilité de chaque caractère ; vérifier aussi la capture
+à l'écran. Aucun message n'a été envoyé sur Twitch.
+
+Le candidat testé est local, non publié ; l'APK dans `dist/` a ensuite été remis aux
+octets publiés (SHA-256 `7edef794d155a64c1f8065ce01a05d00e3bf379a5b9619366200c09b2ad0e261`).
+
 #### Ce que je n'ai pas pu vérifier : les commandes du lecteur
 
 Ni le tap sur l'image ni `DPAD_CENTER` ne font apparaître les contrôles

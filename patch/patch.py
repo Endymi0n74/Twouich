@@ -697,6 +697,7 @@ PHONE_CHAT_RESUME_ANCHOR = (
 PHONE_CHAT_RESUME_CALL = (
     PHONE_CHAT_RESUME_ANCHOR
     + "\n    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatRestore()V\n"
+    + "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V\n"
 )
 # L'appel lui-même, sans indentation imposée : sert aux contrôles du livrable.
 CHAT_RESTORE_CALL_LINE = (
@@ -706,6 +707,58 @@ CHAT_RESTORE_CALL_LINE = (
 # polarité inversée (if-eqz sur un champ faux = sortie immédiate, sans journal).
 PHONE_CHAT_RESTORE_GUARD_OLD = "if-eqz v0, :restore_done"
 PHONE_CHAT_RESTORE_GUARD_NEW = "if-nez v0, :restore_done"
+
+# Le lecteur amont fait deux choses qui sont correctes sur TV/surimpression,
+# mais rendent le chat téléphone intégralement noir : le RecyclerView démarre
+# avec alpha=0, puis V0() anime sa disparition quand le chat est au repos. Le
+# téléphone possède sa disposition; il annule ce fade et conserve la liste visible
+# (sauf pendant PiP ou si l'utilisateur l'a repliée). La TV suit V0() upstream.
+PHONE_CHAT_OWN_FADE_METHOD = _smali_lines(
+    "",
+    ".method private twouichPhoneChatOwnsFade()Z",
+    "    .locals 2",
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichTvInterface()Z",
+    "    move-result v0",
+    "    if-nez v0, :phone_chat_fade_tv",
+    "    iget-boolean v0, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPipActive:Z",
+    "    if-nez v0, :phone_chat_fade_phone",
+    "    iget-boolean v0, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatHidden:Z",
+    "    if-nez v0, :phone_chat_fade_phone",
+    "    iget-object v0, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->E:Lcom/s0und/s0undtv/chat/ChatRecyclerView;",
+    "    if-eqz v0, :phone_chat_fade_phone",
+    "    invoke-virtual {v0}, Landroid/view/View;->animate()Landroid/view/ViewPropertyAnimator;",
+    "    move-result-object v1",
+    "    invoke-virtual {v1}, Landroid/view/ViewPropertyAnimator;->cancel()V",
+    "    const/4 v1, 0x0",
+    "    invoke-virtual {v0, v1}, Landroid/view/View;->setVisibility(I)V",
+    "    const/high16 v1, 0x3f800000",
+    "    invoke-virtual {v0, v1}, Landroid/view/View;->setAlpha(F)V",
+    "    :phone_chat_fade_phone",
+    "    const/4 v0, 0x1",
+    "    return v0",
+    "    :phone_chat_fade_tv",
+    "    const/4 v0, 0x0",
+    "    return v0",
+    ".end method",
+)
+PHONE_CHAT_FADE_ANCHOR = _smali_lines(".method V0()V", "    .locals 9")
+PHONE_CHAT_FADE_GUARD = PHONE_CHAT_FADE_ANCHOR + _smali_lines(
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneChatOwnsFade()Z",
+    "    move-result v0",
+    "    if-eqz v0, :twouich_upstream_chat_fade",
+    "    return-void",
+    "    :twouich_upstream_chat_fade",
+)
+PHONE_CHAT_LAYOUT_ANCHOR = _smali_lines("    if-eqz v6, :return_phone_layout")
+PHONE_CHAT_LAYOUT_VISIBLE = _smali_lines(
+    "    # Le layout téléphone n'est pas une surimpression : le RecyclerView",
+    "    # upstream démarre à alpha=0. Ici il reste affiché tant qu'il n'est",
+    "    # ni replié (garde plus haut), ni en PiP (garde en tête de méthode).",
+    "    const/high16 v9, 0x3f800000",
+    "    invoke-virtual {v5, v9}, Landroid/view/View;->setAlpha(F)V",
+    "    const/4 v9, 0x0",
+    "    invoke-virtual {v5, v9}, Landroid/view/View;->setVisibility(I)V",
+)
 
 # Empreinte des greffes du lecteur, écrite À CÔTÉ de l'arbre décodé (jamais
 # dedans : apktool empaquette les fichiers inconnus dans l'APK).
@@ -1442,6 +1495,41 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     rend le chat du layout téléphone large et ancré en bas : il devient visible
     sans le geste de balayage découvert lors de l'observation du 19/09.
     """
+
+    # Les bulles upstream ont un fond noir semi-transparent. L'item déclaré
+
+    # android:textColor=@color/black reçoit en réalité des spans colorés par le
+    # formateur; cette valeur de base reste néanmoins illisible pour les parties
+    # non stylées. Garde les trois qualifiers TV d'origine et force une base
+    # blanche sur les seules deux variantes téléphone.
+    for filename in ("chat_message_vertical.xml", "chat_message_horizontal.xml"):
+        tv_source = here / "res-tv" / filename
+        phone_target = decoded / "res" / "layout" / filename
+        if not tv_source.is_file() or not phone_target.is_file():
+            fail(f"layout de message chat absent : {tv_source} / {phone_target}")
+        original = tv_source.read_text(encoding="utf-8").replace(chr(13) + chr(10), chr(10))
+        if 'android:textColor="@color/black"' not in original:
+            fail(f"couleur chat TV upstream absente : {tv_source}")
+        for qualifier in ("layout-television", "layout-sw600dp", "layout-sw540dp"):
+            tv_target = decoded / "res" / qualifier / filename
+            tv_target.parent.mkdir(parents=True, exist_ok=True)
+            if not tv_target.is_file() or tv_target.read_bytes() != tv_source.read_bytes():
+                shutil.copy2(tv_source, tv_target)
+                log(f"chat TV restauré : res/{qualifier}/{filename}")
+            if tv_target.read_bytes() != tv_source.read_bytes():
+                fail(f"couleur chat TV non conforme : {tv_target}")
+
+        phone_text = phone_target.read_text(encoding="utf-8").replace(chr(13) + chr(10), chr(10))
+        if 'android:textColor="@color/black"' in phone_text:
+            phone_text = phone_text.replace(
+                'android:textColor="@color/black"', 'android:textColor="@color/white"', 1
+            )
+            phone_target.write_text(phone_text, encoding="utf-8", newline=chr(10))
+            log(f"smartphone : texte contrasté dans {filename}")
+        elif 'android:textColor="@color/white"' not in phone_text:
+            fail(f"couleur de texte chat introuvable : {phone_target}")
+
+
     print("[1d/5] UX smartphone (orientation multi-capteur + chat tactile visible)")
     manifest = decoded / "AndroidManifest.xml"
     text = manifest.read_text(encoding="utf-8")
@@ -1566,9 +1654,18 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         fichier, celui de la methode.
         """
         final, lowered = use_tv_interface_guard(final)
-        if ".method private twouichTvInterface()Z" not in final:
-            final = (final.rstrip() + "\n\n"
-                     + TV_INTERFACE_METHOD.rstrip() + "\n")
+        signature = ".method private twouichTvInterface()Z"
+        if signature not in final:
+            final = final.rstrip() + "\n\n" + TV_INTERFACE_METHOD.rstrip() + "\n"
+        # Une ancienne réparation de garde ajoutait des copies entières de la
+        # méthode TV à chaque build. Canonise cette méthode dans le point unique
+        # d'écriture, sans toucher aux autres callbacks ni à l'arbre généré.
+        match = re.search(r"(?ms)^" + re.escape(signature) + r".*?^\.end method$", final)
+        if match is None:
+            fail("methode twouichTvInterface absente apres insertion")
+        canonical = TV_INTERFACE_METHOD.strip()
+        if match.group(0) != canonical:
+            final = final[:match.start()] + canonical + final[match.end():]
         if final.count("smallestScreenWidthDp:I") != 1:
             fail("le seuil de dp garde encore l'interface ailleurs que dans "
                  "twouichTvInterface : le mode TV ne serait plus fiable")
@@ -1758,6 +1855,13 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     player_methods = player_methods.replace(PHONE_CHAT_GATE_ANCHOR, PHONE_CHAT_GATE, 1)
     if ":stacked_chat_shown" not in player_methods:
         fail("garde du chat replié non posé dans le gabarit")
+    if player_methods.count(PHONE_CHAT_LAYOUT_ANCHOR) != 1:
+        fail("ancre de visibilité alpha du chat absente/ambiguë dans le gabarit")
+    player_methods = player_methods.replace(
+        PHONE_CHAT_LAYOUT_ANCHOR,
+        PHONE_CHAT_LAYOUT_ANCHOR + PHONE_CHAT_LAYOUT_VISIBLE,
+        1,
+    )
     # Le chat s'arrête au-dessus de la saisie, jamais au bas du parent : la
     # géométrie du gabarit est réécrite ici (même idiome que PHONE_GEO_TAIL).
     if PHONE_CHAT_BELOW_OLD not in player_methods:
@@ -1767,7 +1871,7 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     if PHONE_CHAT_RESTORE_ANCHOR not in player_methods:
         fail("rappel de focus introuvable dans le gabarit — état du chat non relu au démarrage")
     player_methods = player_methods.replace(PHONE_CHAT_RESTORE_ANCHOR, PHONE_CHAT_RESTORE_CALL, 1)
-        # Picture-in-picture (API 26) : bouton dans le lecteur téléphone, fenêtre
+    # Picture-in-picture (API 26) : bouton dans le lecteur téléphone, fenêtre
     # 16:9, et disparition du chat pendant que la vidéo est en incrustation.
     # Les trois overrides de callback du framework sont PUBLICS : Activity
     # implémente Window.Callback, un override plus faible fait rejeter la classe
@@ -1944,6 +2048,18 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     return-void
 .end method
 '''
+    # Répare d'abord les arbres historiques où PHONE_GEO_TAIL/ROOM_BLOCK
+    # avait été ajouté trois fois en regardant les références de labels au lieu
+    # des seules déclarations. Retirer les copies exactes avant toute nouvelle
+    # correction garde l'arbre compilable; la disposition canonique est ensuite
+    # réinjectée par le bloc lecteur unique ci-dessous.
+    player_text = player_text.replace(
+        PHONE_GEO_TAIL + PHONE_GEO_TAIL + PHONE_GEO_TAIL,
+        PHONE_GEO_TAIL,
+    ).replace(
+        PHONE_GEO_ROOM_BLOCK + PHONE_GEO_ROOM_BLOCK + PHONE_GEO_ROOM_BLOCK,
+        PHONE_GEO_ROOM_BLOCK,
+    )
     player_fixed = player_text.replace(
         'invoke-direct {v0, -1, v10}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V',
         'const/4 v9, -0x1\n    invoke-direct {v0, v9, v10}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V',
@@ -2146,6 +2262,38 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     # dans un commentaire fait passer une méthode pour présente (constaté le
     # 21/09 : CHAT_METHODS mentionne la disposition empilée, le bloc lecteur
     # n'était plus jamais écrit, onPictureInPictureModeChanged disparaissait).
+    # Le fade upstream masque un RecyclerView déjà noir sur fond noir. Le téléphone
+    # reprend la main sur cette animation; les variantes TV gardent V0() intact.
+    # On répare aussi les arbres de travail déjà greffés avant cette correction.
+    phone_chat_guard_patched = False
+    if ".method private twouichPhoneChatOwnsFade()Z" not in player_fixed:
+        player_fixed = player_fixed.rstrip() + "\n" + PHONE_CHAT_OWN_FADE_METHOD.rstrip() + "\n"
+        phone_chat_guard_patched = True
+    fade_anchor = PHONE_CHAT_FADE_ANCHOR
+    fade_guard = PHONE_CHAT_FADE_GUARD
+    if player_fixed.count(fade_anchor) != 1:
+        fail("ancre du fade chat V0() absente/ambiguë")
+    fade_start = player_fixed.index(fade_anchor)
+    fade_end = player_fixed.index(".end method", fade_start)
+    fade_method = player_fixed[fade_start:fade_end]
+    if "twouichPhoneChatOwnsFade()Z" not in fade_method:
+        player_fixed = player_fixed.replace(fade_anchor, fade_guard, 1)
+        phone_chat_guard_patched = True
+    phone_chat_layout_patched = False
+    if ".method private twouichPhoneStackedLayout()V" in player_fixed:
+        signature = ".method private twouichPhoneStackedLayout()V"
+        pattern = re.compile(
+            r"(?ms)^" + re.escape(signature) + r".*?^\.end method$"
+        )
+        current_layout = pattern.search(player_fixed)
+        canonical_layout = pattern.search(player_methods)
+        if current_layout is None or canonical_layout is None:
+            fail("méthode de disposition téléphone impossible à extraire")
+        if current_layout.group(0) != canonical_layout.group(0):
+            player_fixed = (player_fixed[:current_layout.start()]
+                            + canonical_layout.group(0)
+                            + player_fixed[current_layout.end():])
+            phone_chat_layout_patched = True
     # Veille : le service de premier plan suit la vie du lecteur.
     player_fixed, service_calls = _patch_playback_calls(player_fixed)
 
@@ -2168,7 +2316,8 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         write_player(player_fixed)
         log("smartphone : chat repliable rebranché sur le lecteur (réparation)")
     elif (player_fixed != player_text or tv_guard_count or screen_off_patched
-          or service_calls or send_added):
+          or service_calls or send_added or phone_chat_guard_patched
+          or phone_chat_layout_patched):
         write_player(player_fixed)
         log("smartphone : correction des paramètres du lecteur empilé")
     else:
@@ -2180,7 +2329,9 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     global GREFFE_FINGERPRINT
     GREFFE_FINGERPRINT = hashlib.sha256(
         "\n".join((CHAT_METHODS, player_methods, pip_methods, TV_INTERFACE_METHOD,
-                    PHONE_SCREEN_OFF_GUARD, PHONE_SCREEN_OFF_KEPT)).encode("utf-8")
+                    PHONE_CHAT_OWN_FADE_METHOD, PHONE_CHAT_FADE_GUARD,
+                    PHONE_CHAT_LAYOUT_VISIBLE, PHONE_SCREEN_OFF_GUARD,
+                    PHONE_SCREEN_OFF_KEPT)).encode("utf-8")
     ).hexdigest()
 
     values = decoded / "res/values/dimens.xml"
@@ -3471,6 +3622,8 @@ def main() -> int:
     resume_body = player_src[resume_head:player_src.find(".end method", resume_head)]
     if CHAT_RESTORE_CALL_LINE not in resume_body:
         fail("contrôle échoué : onResume ne relit pas l'état du chat au démarrage")
+    if "twouichPhoneStackedLayout()V" not in resume_body:
+        fail("contrôle échoué : onResume ne réapplique pas la visibilité du chat phone")
     checks += 1
     # Polarité du garde de relecture : la faute qui a coûté une session (le
     # corps ne s'exécutait jamais, sans le moindre journal — 21/09).
@@ -3491,13 +3644,18 @@ def main() -> int:
     # Garde-fou : la vidéo 16:9 est calculée depuis la largeur ; sans plafond,
     # le chat reçoit une hauteur négative sur un écran plus large que haut
     # (mesuré le 20/09 : chat à 0 px, disposition inutilisable en paysage).
+    source_player_start = player_src.find(".method private twouichPhoneStackedLayout()V")
+    if source_player_start < 0:
+        fail("contrôle échoué : layout téléphone absent")
+    source_player_end = player_src.find(".end method", source_player_start)
+    layout_declaration = player_src[source_player_start:source_player_end]
     for marker in (":twouich_phone_video_fits", ":twouich_phone_room", PHONE_GEO_TAIL):
-        if marker not in player_src:
+        if marker not in layout_declaration:
             fail(f"contrôle échoué : géométrie du lecteur téléphone incomplète ({marker!r})")
         checks += 1
     # Les deux formes fautives (sans plafond, puis sans test de place) sont des
     # préfixes de la forme corrigée : les chercher dans une copie élaguée.
-    pruned = player_src.replace(PHONE_GEO_TAIL, "")
+    pruned = layout_declaration.replace(PHONE_GEO_TAIL, "")
     for faulty in (PHONE_GEO_OLD_TAIL, PHONE_GEO_CLAMPED_TAIL):
         if faulty in pruned:
             fail("contrôle échoué : une géométrie fautive du lecteur est revenue")
@@ -3510,15 +3668,21 @@ def main() -> int:
         ("    if-ge v7, v3, :twouich_phone_room",
          "l'empilement doit se faire quand le chat a un tiers de l'écran"),
     ):
-        if expected not in player_src:
+        if expected not in layout_declaration:
             fail(f"contrôle échoué : {what}")
         checks += 1
     # Un label en double fait échouer apktool tard, sur un message qui ne dit pas
     # quelle méthode est en cause : on le refuse ici, à la source.
+    # La forme de réparations anciennes peut rester plus d'une fois dans un arbre
+    # déjà patché; ce qui doit être unique est la déclaration réellement livrée.
+    # L'extraction s'arrête à .end method, à la fois source et invariant de l'APK.
     for label in (":twouich_phone_video_fits", ":twouich_phone_room"):
-        if player_src.count(label) != 2:
-            fail(f"contrôle échoué : label {label} attendu 1 fois "
-                 f"(déclaration + saut), trouvé {player_src.count(label)}")
+        declaration_count = sum(
+            1 for line in layout_declaration.splitlines() if line.strip() == label
+        )
+        if declaration_count != 1:
+            fail(f"contrôle échoué : déclaration du label {label} attendue 1 fois, "
+                 f"trouvée {declaration_count}")
         checks += 1
     # Garde-fou : l'entrée/sortie d'incrustation doit avoir ses propres overrides
     # publics, et l'activité doit continuer d'appliquer sa disposition quand elle

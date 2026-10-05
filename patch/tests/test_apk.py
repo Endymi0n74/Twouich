@@ -750,9 +750,50 @@ def main() -> int:
                             f"mutation non vue ({what})")
         ok &= check("dimension chat smartphone compilée",
                     holds(arsc, "twouich_phone_chat_height"))
+        phone_chat_messages = (
+            "res/layout/chat_message_vertical.xml",
+            "res/layout/chat_message_horizontal.xml",
+        )
+        tv_chat_messages = (
+            "res/layout-television/chat_message_vertical.xml",
+            "res/layout-television/chat_message_horizontal.xml",
+            "res/layout-sw600dp/chat_message_vertical.xml",
+            "res/layout-sw600dp/chat_message_horizontal.xml",
+            "res/layout-sw540dp/chat_message_vertical.xml",
+            "res/layout-sw540dp/chat_message_horizontal.xml",
+        )
+        shipped_resource_names = _arsc_id_names(arsc)
+
+        def chat_text_color(layout_name: str) -> str | None:
+            if layout_name not in names:
+                return None
+            attrs = view_attributes(z.read(layout_name), "TextView")
+            color_ref = attrs.get("textColor")
+            if color_ref is None or color_ref[0] != TYPE_REFERENCE:
+                return None
+            return shipped_resource_names.get(color_ref[1])
+
+        phone_chat_text_ok = all(chat_text_color(entry) == "color/white"
+                                 for entry in phone_chat_messages)
+        tv_chat_text_ok = all(chat_text_color(entry) == "color/black"
+                              for entry in tv_chat_messages)
+        ok &= check("messages chat smartphone contrastés", phone_chat_text_ok,
+                    "les layouts téléphone doivent rendre le texte blanc")
+        ok &= check("couleur chat TV conservée", tv_chat_text_ok,
+                    "les layouts TV doivent conserver la ressource amont")
         ok &= check("saisie chat smartphone compilée",
                     holds(arsc, "ET_SendMessage"))
         dex_blob = b"".join(z.read(name) for name in names if name.endswith(".dex"))
+        ok &= check("garde alpha chat smartphone compilé",
+                    holds(dex_blob, "twouichPhoneChatOwnsFade")
+                    and holds(dex_blob, "twouichPhoneStackedLayout"),
+                    "la logique phone-only qui garde le RecyclerView visible manque du dex")
+        ok &= check("fade téléphone conserve visibilité et alpha du chat",
+                    holds(dex_blob, "twouichPhoneChatOwnsFade")
+                    and holds(dex_blob, "ViewPropertyAnimator")
+                    and holds(dex_blob, "setAlpha")
+                    and holds(dex_blob, "setVisibility"),
+                    "le garde phone-only ou ses appels de contrôle manque du dex")
         ok &= check("navigation smartphone compilée",
                     holds(arsc, "twouich_phone_nav_search")
                     and holds(dex_blob, "twouichPhoneSearch"))
