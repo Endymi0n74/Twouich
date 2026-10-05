@@ -2708,14 +2708,48 @@ def patch_smartphone_navigation(decoded: pathlib.Path, here: pathlib.Path) -> No
     android:background="@color/black">
     <fragment android:name="com.s0und.s0undtv.fragments.MainFragment"
         android:id="@id/main_browse_fragment" android:layout_width="match_parent"
-        android:layout_height="match_parent" android:layout_marginBottom="64dp" />
+        android:layout_height="match_parent" android:layout_marginBottom="110dp" />
     <LinearLayout android:id="@+id/twouich_phone_nav_bar"
-        android:layout_width="match_parent" android:layout_height="58dp"
+        android:layout_width="match_parent" android:layout_height="104dp"
         android:layout_gravity="bottom" android:orientation="vertical"
         android:background="#0e0e10" android:elevation="16dp">
         <View android:layout_width="match_parent" android:layout_height="1dp"
             android:background="#2a2a2e" />
-        <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
+        <LinearLayout android:id="@+id/twouich_phone_act_bar"
+            android:layout_width="match_parent" android:layout_height="48dp"
+            android:orientation="horizontal" android:baselineAligned="false">
+            <TextView android:id="@+id/twouich_phone_act_about"
+                android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                android:gravity="center" android:text="A propos" android:textSize="11sp"
+                android:textColor="@color/twouich_phone_nav_inactive"
+                android:background="?android:attr/selectableItemBackground"
+                android:clickable="true" android:focusable="true"
+                android:contentDescription="A propos" android:onClick="twouichPhoneAbout" />
+            <TextView android:id="@+id/twouich_phone_act_privacy"
+                android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                android:gravity="center" android:text="Vie privee" android:textSize="11sp"
+                android:textColor="@color/twouich_phone_nav_inactive"
+                android:background="?android:attr/selectableItemBackground"
+                android:clickable="true" android:focusable="true"
+                android:contentDescription="Vie privee" android:onClick="twouichPhonePrivacy" />
+            <TextView android:id="@+id/twouich_phone_act_changelog"
+                android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                android:gravity="center" android:text="Nouveautes" android:textSize="11sp"
+                android:textColor="@color/twouich_phone_nav_inactive"
+                android:background="?android:attr/selectableItemBackground"
+                android:clickable="true" android:focusable="true"
+                android:contentDescription="Nouveautes" android:onClick="twouichPhoneChangeLog" />
+            <TextView android:id="@+id/twouich_phone_act_logout"
+                android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                android:gravity="center" android:text="Deconnexion" android:textSize="11sp"
+                android:textColor="@color/twouich_phone_nav_inactive"
+                android:background="?android:attr/selectableItemBackground"
+                android:clickable="true" android:focusable="true"
+                android:contentDescription="Deconnexion" android:onClick="twouichPhoneLogout" />
+        </LinearLayout>
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#2a2a2e" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="55dp"
             android:orientation="horizontal" android:baselineAligned="false">
             <TextView android:id="@+id/twouich_phone_nav_home"
                 android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
@@ -2780,6 +2814,57 @@ def patch_smartphone_navigation(decoded: pathlib.Path, here: pathlib.Path) -> No
     invoke-direct {v0}, Landroid/content/Intent;-><init>()V
     const-string v1, "com.s0und.s0undtv"
     const-string v2, "com.s0und.s0undtv.activities.SettingsActivity"
+    invoke-virtual {v0, v1, v2}, Landroid/content/Intent;->setClassName(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;
+    invoke-virtual {p0, v0}, Landroid/app/Activity;->startActivity(Landroid/content/Intent;)V
+    return-void
+.end method
+
+# Les quatre ecrans qui existent deja dans l'amont mais vers lesquels aucun
+# chemin tactile ne menait (05/10/2026) : mesure sur appareil, l'accueil
+# n'exposait que 5 elements cliquables et « Application info » ne montrait que
+# le build amont. Ils ne sont PAS exportes (un `am start` externe echoue), mais
+# un Intent explicite emis par l'application elle-meme n'a pas cette contrainte :
+# c'est exactement le mecanisme deja employe par twouichPhoneSearch/Settings, donc
+# aucune logique d'authentification n'est reecrite ici.
+.method public twouichPhoneAbout(Landroid/view/View;)V
+    .locals 3
+    new-instance v0, Landroid/content/Intent;
+    invoke-direct {v0}, Landroid/content/Intent;-><init>()V
+    const-string v1, "com.s0und.s0undtv"
+    const-string v2, "com.s0und.s0undtv.activities.AboutActivity"
+    invoke-virtual {v0, v1, v2}, Landroid/content/Intent;->setClassName(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;
+    invoke-virtual {p0, v0}, Landroid/app/Activity;->startActivity(Landroid/content/Intent;)V
+    return-void
+.end method
+
+.method public twouichPhonePrivacy(Landroid/view/View;)V
+    .locals 3
+    new-instance v0, Landroid/content/Intent;
+    invoke-direct {v0}, Landroid/content/Intent;-><init>()V
+    const-string v1, "com.s0und.s0undtv"
+    const-string v2, "com.s0und.s0undtv.activities.PrivacyPolicyActivity"
+    invoke-virtual {v0, v1, v2}, Landroid/content/Intent;->setClassName(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;
+    invoke-virtual {p0, v0}, Landroid/app/Activity;->startActivity(Landroid/content/Intent;)V
+    return-void
+.end method
+
+.method public twouichPhoneChangeLog(Landroid/view/View;)V
+    .locals 3
+    new-instance v0, Landroid/content/Intent;
+    invoke-direct {v0}, Landroid/content/Intent;-><init>()V
+    const-string v1, "com.s0und.s0undtv"
+    const-string v2, "com.s0und.s0undtv.activities.ChangeLogActivity"
+    invoke-virtual {v0, v1, v2}, Landroid/content/Intent;->setClassName(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;
+    invoke-virtual {p0, v0}, Landroid/app/Activity;->startActivity(Landroid/content/Intent;)V
+    return-void
+.end method
+
+.method public twouichPhoneLogout(Landroid/view/View;)V
+    .locals 3
+    new-instance v0, Landroid/content/Intent;
+    invoke-direct {v0}, Landroid/content/Intent;-><init>()V
+    const-string v1, "com.s0und.s0undtv"
+    const-string v2, "com.s0und.s0undtv.activities.LogoutDialogActivity"
     invoke-virtual {v0, v1, v2}, Landroid/content/Intent;->setClassName(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;
     invoke-virtual {p0, v0}, Landroid/app/Activity;->startActivity(Landroid/content/Intent;)V
     return-void

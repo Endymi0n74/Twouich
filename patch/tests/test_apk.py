@@ -809,6 +809,30 @@ def main() -> int:
         ok &= check("bouton Envoyer : icône et identifiant compilés",
                     holds(arsc, "twouich_ic_send") and holds(arsc, "twouich_chat_send"),
                     "icône ou identifiant du bouton absents des ressources")
+        # Les quatre écrans qui n'avaient AUCUN chemin tactile (05/10/2026) :
+        # verrou sur le LIVRABLE, pas seulement sur patch.py — une régression
+        # qui les retirait du layout se verrait ici alors qu'un simple audit de
+        # la source ne la verrait pas.
+        phone_main = "res/layout/activity_main.xml"
+        phone_bytes = z.read(phone_main) if phone_main in names else b""
+        _ENTRY = (("about", "twouichPhoneAbout"), ("privacy", "twouichPhonePrivacy"),
+                  ("changelog", "twouichPhoneChangeLog"), ("logout", "twouichPhoneLogout"))
+        ok &= check("écrans sans tactile : les 4 actions sont dans le layout LIVRÉ",
+                    # Les identifiants sont résolus en ENTIERS dans l'AXML : leur
+                    # nom ne vit que dans resources.arsc. Les valeurs d'attribut,
+                    # elles (android:onClick), restent dans le layout compilé.
+                    # Chercher les deux au même endroit donnerait un verdict faux
+                    # dans un sens comme dans l'autre.
+                    all(holds(arsc, f"twouich_phone_act_{i}") for i, _ in _ENTRY)
+                    and all(holds(phone_bytes, h) for _, h in _ENTRY),
+                    f"absent du {phone_main} livré ou de resources.arsc : "
+                    "identifiant d'action ou android:onClick correspondant")
+        # Non-régression TV : la copie layout-television/ est la sienne, elle ne
+        # doit surtout pas hériter de la rangée d'actions.
+        _tv_main = [n for n in names if n.endswith("/activity_main.xml") and n != phone_main]
+        ok &= check("écrans sans tactile : aucune fuite dans les variantes TV / sw600dp",
+                    all(not holds(z.read(n), "twouich_phone_act_about") for n in _tv_main),
+                    f"rangée d'actions presente dans une des variantes : {_tv_main}")
         # Le bouton emprunte la MÊME voie d'envoi que la touche ENTER du clavier :
         # le callback asynchrone Ly6/i0(PlayerActivity, String) est ce qui partage
         # la file d'attente, le garde auth et les followers-only. Sans lui, le

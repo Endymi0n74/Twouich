@@ -685,6 +685,28 @@ def main():
           and "if-ge v1, v2, :cond_twouich_tv_headers" in patcher,
           "l'etat du panneau etait calcule sur les seuls dp : la TV perdait sa "
           "colonne de navigation (HEADERS_HIDDEN).")
+    # Les quatre ecrans qui n'avaient AUCUN chemin tactile (05/10/2026).
+    # Mesure sur BlueStacks a 480 dp : l'accueil n'exposait que 5 elements
+    # cliquables, et « Application info » ne montrait que le build amont
+    # (beta_144) — ni A propos, ni mentions legales, ni changelog, ni deconnexion.
+    # Ces quatre activites ne sont PAS exportees (un `am start` externe echoue),
+    # mais un Intent explicite emis par l'application n'a pas cette contrainte.
+    _ACTIONS = ("About", "Privacy", "ChangeLog", "Logout")
+    _ACTIVITIES = ("AboutActivity", "PrivacyPolicyActivity",
+                   "ChangeLogActivity", "LogoutDialogActivity")
+    check("ecrans sans tactile : les 4 methodes demarrent une activite existante",
+          all(f".method public twouichPhone{n}(Landroid/view/View;)V" in patcher
+              for n in _ACTIONS)
+          and all(f'"com.s0und.s0undtv.activities.{a}"' in patcher for a in _ACTIVITIES)
+          and all(f'android:onClick="twouichPhone{n}"' in patcher for n in _ACTIONS),
+          "sans la methode ET son android:onClick, le bouton du layout ne trouve "
+          "aucun gestionnaire : le tap ne fait rien, silencieusement.")
+    check("ecrans sans tactile : la rangee d'actions est dans le layout telephone",
+          all(f"@+id/twouich_phone_act_{i}" in patcher
+              for i in ("about", "privacy", "changelog", "logout"))
+          and 'android:layout_height="104dp"' in patcher,
+          "sans la rangee, les quatre methodes existent mais aucun doigt ne "
+          "peut les atteindre.")
     # Connexion au doigt : le bandeau d'en-tete devient le bouton. Mesure du
     # 05/10/2026 sur le Xiaomi (Android 16) : tap, appui long et touche MENU
     # ouvraient autre chose, le titre n'etait pas cliquable, et les entrees
