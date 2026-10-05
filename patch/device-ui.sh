@@ -82,7 +82,10 @@ case "${1:-}" in
     ""|-h|--help|help) show_help; exit 0 ;;
 esac
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Pas de ROOT ici, volontairement : ce script ne touche aucun fichier du depot
+# (il parle a l'appareil, et n'ecrit que la ou l'utilisateur le demande : `shot
+# <f.png>`, `/sdcard/...`). Une racine calculee puis jamais utilisee promet un
+# ancrage qu'elle n'assure pas — `patch/tests/test_script_paths.py` la refuse.
 PKG="${PKG:-com.s0und.s0undtv}"
 UI_KEY="${UI_KEY:-20}"   # 20 = DPAD_DOWN, 19 = DPAD_UP, 21 = DPAD_LEFT, 22 = DPAD_RIGHT
 UI_MAX="${UI_MAX:-30}"

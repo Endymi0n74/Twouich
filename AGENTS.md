@@ -117,6 +117,9 @@ python patch/tests/test_smali_branches.py  # 52 assertions : branchements réels
 python patch/tests/test_update_check.py    # 26 vérifications : logique updater (table de vérité + gardes smali
                                            #   si work/decoded/ existe) — « annonce en retard » -> silence,
                                            #   et les deux préconditions du canal Beta (les deux entrées exigées)
+python patch/tests/test_script_paths.py    # 50 vérifications : aucun script ne dépend du répertoire courant —
+                                           #   racine morte, littéral de chemin non ancré, et rejeu depuis un
+                                           #   répertoire étranger (le cas shell peut être « non applicable »)
 python patch/tests/test_brand.py           # 14 assertions : identité visuelle (voir plus bas)
 python patch/tests/test_apk.py             # 58 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),
                                            #   dont l'accord avec update.json, les pages légales embarquées,

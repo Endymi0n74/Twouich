@@ -69,6 +69,10 @@ jobs:
           python patch/tests/test_sanitizer.py
           python patch/tests/test_smali_branches.py
           python patch/tests/test_update_check.py
+          # Un script qui dépend du répertoire courant n'est pas un script :
+          # relu ici, parce qu'un chemin résolu depuis le mauvais endroit écrit
+          # là où personne n'attend le fichier (vu le 05/10/2026).
+          python patch/tests/test_script_paths.py
           # test_brand.py exige les polices Windows du mot-symbole (ARLRDBD.TTF,
           # non redistribuables) et test_apk.py exige un APK SIGNÉ : tous deux
           # restent des contrôles du mainteneur. La CI prouve la recette, pas
@@ -156,6 +160,10 @@ jobs:
           python patch/tests/test_sanitizer.py
           python patch/tests/test_smali_branches.py
           python patch/tests/test_update_check.py
+          # Un script qui dépend du répertoire courant n'est pas un script :
+          # relu ici, parce qu'un chemin résolu depuis le mauvais endroit écrit
+          # là où personne n'attend le fichier (vu le 05/10/2026).
+          python patch/tests/test_script_paths.py
 
       - name: Aucun secret en clair dans le dépôt
         shell: bash
