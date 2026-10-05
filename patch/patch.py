@@ -30,7 +30,7 @@ UPSTREAM = "S0und/S0undTV"
 # manuel de patch.py — build.sh passe toujours --version-code/--version-name/
 # --apk-name. Ils suivent donc le dernier bump (le nom d'APK finit dans l'URL
 # que l'app interroge : un défaut en retard pointerait sur un asset inexistant).
-DEFAULT_APK_NAME = "Twouich_v1.0.18.apk"
+DEFAULT_APK_NAME = "Twouich_v1.0.20.apk"
 
 # ── Étape 1 : greffon anti-pub ────────────────────────────────────────────
 # Libellés de l'UX smartphone. Le champ de saisie reprend celui de l'interface
