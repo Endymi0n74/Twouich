@@ -815,18 +815,35 @@ def main() -> int:
         # la source ne la verrait pas.
         phone_main = "res/layout/activity_main.xml"
         phone_bytes = z.read(phone_main) if phone_main in names else b""
-        _ENTRY = (("about", "twouichPhoneAbout"), ("privacy", "twouichPhonePrivacy"),
-                  ("changelog", "twouichPhoneChangeLog"), ("logout", "twouichPhoneLogout"))
+        _ENTRY = (("about", "twouichPhoneAbout", "AboutActivity"),
+                  ("privacy", "twouichPhonePrivacy", "PrivacyPolicyActivity"),
+                  ("changelog", "twouichPhoneChangeLog", "ChangeLogActivity"),
+                  ("logout", "twouichPhoneLogout", "LogoutDialogActivity"))
         ok &= check("écrans sans tactile : les 4 actions sont dans le layout LIVRÉ",
                     # Les identifiants sont résolus en ENTIERS dans l'AXML : leur
                     # nom ne vit que dans resources.arsc. Les valeurs d'attribut,
                     # elles (android:onClick), restent dans le layout compilé.
                     # Chercher les deux au même endroit donnerait un verdict faux
                     # dans un sens comme dans l'autre.
-                    all(holds(arsc, f"twouich_phone_act_{i}") for i, _ in _ENTRY)
-                    and all(holds(phone_bytes, h) for _, h in _ENTRY),
+                    all(holds(arsc, f"twouich_phone_act_{i}") for i, _, _ in _ENTRY)
+                    and all(holds(phone_bytes, h) for _, h, _ in _ENTRY),
                     f"absent du {phone_main} livré ou de resources.arsc : "
                     "identifiant d'action ou android:onClick correspondant")
+        # Un `android:onClick` qui nomme une méthode absente du dex ne se voit
+        # dans AUCUN audit de layout : le bouton s'affiche, et l'app meurt au
+        # moment du tap. C'est le défaut que ce second verrou couvre — les deux
+        # premiers ne le verraient pas.
+        ok &= check("écrans sans tactile : les 4 méthodes sont dans le dex livré",
+                    all(holds(dex_blob, h) for _, h, _ in _ENTRY),
+                    "méthode d'action absente du dex : "
+                    + ", ".join(h for _, h, _ in _ENTRY if not holds(dex_blob, h)))
+        # Même raison pour la cible : une activité non déclarée ouvre « app
+        # introuvable ». Le manifeste livré est en AXML binaire, son pool de
+        # chaînes est en UTF-16 — `holds` teste les deux encodages.
+        ok &= check("écrans sans tactile : les 4 activités sont déclarées",
+                    all(holds(manifest, a) for _, _, a in _ENTRY),
+                    "activité absente du manifeste livré : "
+                    + ", ".join(a for _, _, a in _ENTRY if not holds(manifest, a)))
         # Non-régression TV : la copie layout-television/ est la sienne, elle ne
         # doit surtout pas hériter de la rangée d'actions.
         _tv_main = [n for n in names if n.endswith("/activity_main.xml") and n != phone_main]

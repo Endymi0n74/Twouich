@@ -121,7 +121,7 @@ python patch/tests/test_script_paths.py    # 50 vérifications : aucun script ne
                                            #   racine morte, littéral de chemin non ancré, et rejeu depuis un
                                            #   répertoire étranger (le cas shell peut être « non applicable »)
 python patch/tests/test_brand.py           # 14 assertions : identité visuelle (voir plus bas)
-python patch/tests/test_apk.py             # 58 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),
+python patch/tests/test_apk.py             # 62 verdicts sur l'APK LIVRÉ (pas sur l'arbre de travail),
                                            #   dont l'accord avec update.json, les pages légales embarquées,
                                            #   les types de service de premier plan, le bouton Envoyer du chat
                                            #   et la connexion au doigt (bandeau d'en-tête -> LoginActivity)
