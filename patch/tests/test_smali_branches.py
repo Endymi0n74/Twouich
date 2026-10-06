@@ -892,11 +892,14 @@ def main():
           "player_methods + pip_methods" in patcher
           and "twouichPhoneWindow()V" in patcher,
           "un lecteur déjà doté de PiP doit tout de même recevoir les helpers ajoutés")
+    # Le décompte ne porte que sur la partie MESURE : l'épilogue clavier/veille
+    # (§22) a lui-même un check-cast légitime (le parent de la saisie).
+    metrics_impl = layout_impl.split("    :twouich_phone_epilogue\n", 1)[0]
     check("conteneur système : la mesure garde les registres de dimensions entiers",
-          layout_impl.count("check-cast v0, Landroid/view/View;") == 1
-          and "invoke-virtual {v0}, Landroid/view/View;->getHeight()I" in layout_impl
-          and "invoke-virtual {v0}, Landroid/view/View;->getPaddingTop()I" in layout_impl
-          and "move-result-object v0\n    instance-of v3, v0, Landroid/view/View;" in layout_impl
+          metrics_impl.count("check-cast v0, Landroid/view/View;") == 1
+          and "invoke-virtual {v0}, Landroid/view/View;->getHeight()I" in metrics_impl
+          and "invoke-virtual {v0}, Landroid/view/View;->getPaddingTop()I" in metrics_impl
+          and "move-result-object v0\n    instance-of v3, v0, Landroid/view/View;" in metrics_impl
           and "move-result-object v1\n    instance-of v2, v0, Landroid/view/View;" not in layout_impl,
           "le parent doit rester dans v0, sans ecraser les identifiants entiers v1/v2")
     check("conteneur système : les insets sont déduits des dimensions mesurées",
@@ -1029,6 +1032,84 @@ def main():
           != f"const-wide v1, 0x{patch_module.build_time_epoch_ms('2026.10.07'):x}L",
           "un today() dans la date affichée changerait l'affichage d'un rebuild "
           "à l'autre (build non reproductible).")
+
+    # --- 22. Rotation en cours de lecture, clavier sous la saisie --------------
+    # Mesures du 06/10 sur le Xiaomi (Android 16, cible 35 edge-to-edge), deux
+    # defauts dates, tous deux hors des chemins mesures avant :
+    # (a) portrait -> paysage EN LECTURE : onConfigurationChanged arrive avant la
+    #     re-mesure de l'arbre, la branche portrait s'appliquait avec la largeur
+    #     perimee — video pleine largeur de 686 px (image lettree au MILIEU de
+    #     l'ecran), chat en lambeau de 144 px, saisie pleine largeur en bas ;
+    # (b) clavier ouvert : saisie 0,2452-1220,2660 pour un IME
+    #     frame=[0,1687][1220,2712] — la barre entierement SOUS les touches.
+    epilogue = layout_impl.split("    :twouich_phone_epilogue\n", 1)[1].split(
+        ":return_phone_layout", 1)[0]
+    check("rotation : la disposition est reapplee quand la boite change",
+          ".method public twouichPhoneRelayout()V" in layout_impl
+          and "invoke-direct {p0}, Lcom/s0und/s0undtv/activities/"
+              "PlayerActivity;->twouichPhoneStackedLayout()V" in layout_impl
+          and "goto :twouich_phone_epilogue" in layout_impl
+          and layout_impl.count("goto :twouich_phone_epilogue") == 1
+          and constant("PHONE_GEO_ROOM_BLOCK").count("goto :return_phone_layout") == 1,
+          "attendu : la branche paysage rejoint l'epilogue (veille posee, "
+          "clavier gere) tandis que le refus d'empilement reste seul a sauter "
+          "vers :return_phone_layout — sans la passerelle publique "
+          "twouichPhoneRelayout, la veille ne peut pas rappeler la disposition.")
+    watch_path = (HERE.parent / "smali" / "com" / "twouich" / "phone"
+                  / "PhoneLayoutWatch.smali")
+    watch_src = watch_path.read_text(encoding="utf-8") if watch_path.is_file() else ""
+    check("rotation : la veille compare largeur, hauteur utile et clavier",
+          ".implements Landroid/view/ViewTreeObserver$OnGlobalLayoutListener;" in watch_src
+          and ".implements Landroid/view/View$OnApplyWindowInsetsListener;" in watch_src
+          and "addOnGlobalLayoutListener" in watch_src
+          and "setOnApplyWindowInsetsListener" in watch_src
+          and "if-ne v3, v1, :watch_changed" in watch_src
+          and "if-ne v3, v2, :watch_changed" in watch_src
+          and "if-ne v3, v5, :watch_changed" in watch_src
+          and "getWindowVisibleDisplayFrame" in watch_src
+          and "goto :watch_done" in watch_src
+          and "twouichPhoneRelayout" in watch_src
+          and "shutil.copy2(watch_source, watch)" in patcher,
+          "attendu : deux declencheurs — OnGlobalLayoutListener (boite de mise "
+          "en page, une fois la mesure faite) et OnApplyWindowInsetsListener "
+          "(clavier, inset pris dans le rappel) — et une garde sur largeur, "
+          "hauteur utile et clavier : sans garde, chaque setLayoutParams "
+          "relancerait la disposition en boucle.")
+    check("rotation : la veille est posee une seule fois (garde de champ)",
+          ".field private twouichLayoutWatch:Lcom/twouich/phone/PhoneLayoutWatch;" in patcher
+          and "if-nez v0, :twouich_phone_watch_ready" in epilogue
+          and "new-instance v0, Lcom/twouich/phone/PhoneLayoutWatch;" in epilogue,
+          "le rappel de disposition passe par l'epilogue a chaque application : "
+          "sans le champ de garde, chaque passage ajouterait un ecouteur.")
+    check("clavier : la saisie remonte de la zone visible (marge basse)",
+          "getWindowVisibleDisplayFrame(Landroid/graphics/Rect;)V" in epilogue
+          and "Landroid/view/ViewGroup$MarginLayoutParams;->bottomMargin:I" in epilogue
+          and "check-cast v0, Landroid/view/ViewGroup$MarginLayoutParams;" in epilogue
+          and "invoke-virtual {v6, v0}" in epilogue,
+          "attendu : bottomMargin = ecart au bas de la zone VISIBLE sur la "
+          "saisie (v6) — les insets IME ne rendaient rien sur le Xiaomi du "
+          "06/10 (getRootWindowInsets ET le rappel d'insets a 0, clavier ouvert) "
+          "et la barre restait sous les touches (IME frame=[0,1687][1220,2712]).")
+    check("clavier : la marge IME deduit le padding bas du conteneur",
+          "invoke-virtual {v3}, Landroid/view/View;->getPaddingBottom()I" in epilogue
+          and "getLocationOnScreen([I)V" in epilogue
+          and "sub-int/2addr v7, v8" in epilogue
+          and "if-lez v7, :twouich_phone_ime_ready" in epilogue,
+          "le conteneur est deja decale sous la barre de navigation : sans la "
+          "deduction, la saisie flotterait de cette hauteur au-dessus du clavier.")
+    check("clavier : le chat reste entre la video et la saisie",
+          "add-int/2addr v3, v11" in epilogue
+          and "iget v3, v0, Landroid/view/ViewGroup$LayoutParams;->height:I" in epilogue
+          and "sub-int/2addr v3, v11" in epilogue
+          and "if-ltz v3, :twouich_phone_ime_chat_ready" in epilogue
+          and "invoke-virtual {v5, v0}" in epilogue
+          and "invoke-virtual {v4, v0}" not in epilogue,
+          "attendu : la marge basse du chat (deja egale a la hauteur de la "
+          "saisie) recoit la marge du clavier, et sa hauteur raccourcit "
+          "d'autant — les deux concordent : l'ancre gagne sur le Xiaomi du "
+          "06/10 (la hauteur seule ne raccourcissait pas le chat), plancher a "
+          "zero contre les hauteurs negatives lues match/wrap, et la video (v4) "
+          "n'est jamais retouchee a l'ouverture du clavier.")
 
     # --- rapport ----------------------------------------------------------------
     width = max(len(label) for label, _, _ in checks)

@@ -1694,6 +1694,17 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     if not send_drawable_source.is_file():
         fail(f"icône Envoyer absente : {send_drawable_source}")
     shutil.copy2(send_drawable_source, send_drawable)
+    # Veille de disposition (rotation + clavier) : classe annexe copiée comme
+    # PhoneLoginOnClick, référencée par l'épilogue de twouichPhoneStackedLayout.
+    watch_source = (here / "smali" / "com" / "twouich" / "phone"
+                    / "PhoneLayoutWatch.smali")
+    if not watch_source.is_file():
+        fail(f"veille de disposition absente : {watch_source}")
+    watch = (decoded / "smali_classes2" / "com" / "twouich" / "phone"
+             / "PhoneLayoutWatch.smali")
+    watch.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(watch_source, watch)
+    log("copié : PhoneLayoutWatch.smali")
 
     player_smali = decoded / "smali/com/s0und/s0undtv/activities/PlayerActivity.smali"
     if not player_smali.is_file():
@@ -1772,6 +1783,7 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
             ".method private twouichPhoneWindow()V",
             ".method private twouichPhoneControlsAttach()V",
             ".method public twouichPhoneToggleControls(Landroid/view/View;)V",
+            ".method public twouichPhoneRelayout()V",
         ):
             if helper_signature in final:
                 continue
@@ -2004,7 +2016,7 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     invoke-virtual {v6, v7}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V
     const/4 v2, 0x0
     invoke-virtual {v6, v2}, Landroid/view/View;->setVisibility(I)V
-    goto :return_phone_layout
+    goto :twouich_phone_epilogue
 
     :portrait_layout
     # Le 16:9 est calcule depuis la LARGEUR : sur un écran plus large que haut il
@@ -2045,7 +2057,99 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     invoke-virtual {v6, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V
     const/4 v9, 0x0
     invoke-virtual {v6, v9}, Landroid/view/View;->setVisibility(I)V
+    :twouich_phone_epilogue
+    # Veille de disposition : la rotation arrive AVANT la re-mesure de l'arbre.
+    # Mesure du 06/10 sur le Xiaomi : en passant de portrait en paysage en cours
+    # de lecture, la branche portrait s'appliquait avec la largeur perimee —
+    # video pleine largeur de 686 px (image lettree au MILIEU de l'ecran), chat
+    # en lambeau de 144 px sous la video, saisie pleine largeur en bas. La
+    # veille (PhoneLayoutWatch) note la boite de mise en page et reappelle cette
+    # disposition quand elle change, une fois la mesure faite. Posee une seule
+    # fois, gardee par un champ.
+    iget-object v0, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichLayoutWatch:Lcom/twouich/phone/PhoneLayoutWatch;
+    if-nez v0, :twouich_phone_watch_ready
+    new-instance v0, Lcom/twouich/phone/PhoneLayoutWatch;
+    invoke-direct {v0, p0, v6}, Lcom/twouich/phone/PhoneLayoutWatch;-><init>(Lcom/s0und/s0undtv/activities/PlayerActivity;Landroid/view/View;)V
+    iput-object v0, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichLayoutWatch:Lcom/twouich/phone/PhoneLayoutWatch;
+    :twouich_phone_watch_ready
+    const-string v0, "Twouich"
+    const-string v3, "clavier : disposition posee (epilogue)"
+    invoke-static {v0, v3}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I
+    # Clavier : fenetre edge-to-edge (cible 35), le gestionnaire de fenetres ne
+    # redimensionne plus rien — la saisie restait SOUS le clavier (mesure du
+    # 06/10 : saisie 0,2452-1220,2660 pour un IME frame=[0,1687][1220,2712], la
+    # barre 913 px sous la premiere touche). La saisie remonte de marge = ecart
+    # entre le bas du contenu et le bas de la zone VISIBLE (le clavier la
+    # reduit), et le chat raccourcit d'autant : la video ne bouge pas, comme sur
+    # l'interface de reference. La frame visible fait foi, pas les insets IME :
+    # getRootWindowInsets() ET le rappel d'insets rendaient 0 clavier ouvert
+    # (trace du 06/10 : « disposition posee » sans « saisie remontee »).
+    # Sans clavier, la frame visible s'arrete au bas du contenu : marge nulle,
+    # rien ne bouge. Avant l'API 35 la fenetre se redimensionne seule
+    # (adjustResize) : meme resultat, marge nulle.
+    const/4 v11, 0x0
+    new-instance v0, Landroid/graphics/Rect;
+    invoke-direct {v0}, Landroid/graphics/Rect;-><init>()V
+    invoke-virtual {v6, v0}, Landroid/view/View;->getWindowVisibleDisplayFrame(Landroid/graphics/Rect;)V
+    invoke-virtual {v6}, Landroid/view/View;->getParent()Landroid/view/ViewParent;
+    move-result-object v3
+    instance-of v7, v3, Landroid/view/View;
+    if-eqz v7, :twouich_phone_ime_ready
+    check-cast v3, Landroid/view/View;
+    const/4 v7, 0x2
+    new-array v7, v7, [I
+    invoke-virtual {v3, v7}, Landroid/view/View;->getLocationOnScreen([I)V
+    const/4 v8, 0x1
+    aget v7, v7, v8
+    invoke-virtual {v3}, Landroid/view/View;->getHeight()I
+    move-result v8
+    add-int/2addr v7, v8
+    invoke-virtual {v3}, Landroid/view/View;->getPaddingBottom()I
+    move-result v8
+    sub-int/2addr v7, v8
+    iget v8, v0, Landroid/graphics/Rect;->bottom:I
+    sub-int/2addr v7, v8
+    if-lez v7, :twouich_phone_ime_ready
+    move v11, v7
+    const-string v0, "Twouich"
+    const-string v3, "clavier : saisie remontee au-dessus du clavier"
+    invoke-static {v0, v3}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I
+    # Saisie : marge basse = hauteur du clavier au-dessus du contenu.
+    invoke-virtual {v6}, Landroid/view/View;->getLayoutParams()Landroid/view/ViewGroup$LayoutParams;
+    move-result-object v0
+    check-cast v0, Landroid/view/ViewGroup$MarginLayoutParams;
+    iput v11, v0, Landroid/view/ViewGroup$MarginLayoutParams;->bottomMargin:I
+    invoke-virtual {v6, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V
+    # Chat : il reste entre la video et la saisie. Sa marge basse porte deja la
+    # hauteur de la saisie (geometrie) : on y ajoute la marge du clavier, et sa
+    # hauteur raccourcit d'autant. Les deux concordent et couvrent les deux
+    # comportements de RelativeLayout (l'ancre gagne sur l'appareil du 06/10 :
+    # la hauteur seule ne raccourcissait pas le chat, mesure oblige). Le
+    # plafond a zero evite une hauteur negative lue comme match/wrap.
+    invoke-virtual {v5}, Landroid/view/View;->getLayoutParams()Landroid/view/ViewGroup$LayoutParams;
+    move-result-object v0
+    check-cast v0, Landroid/view/ViewGroup$MarginLayoutParams;
+    iget v3, v0, Landroid/view/ViewGroup$MarginLayoutParams;->bottomMargin:I
+    add-int/2addr v3, v11
+    iput v3, v0, Landroid/view/ViewGroup$MarginLayoutParams;->bottomMargin:I
+    iget v3, v0, Landroid/view/ViewGroup$LayoutParams;->height:I
+    sub-int/2addr v3, v11
+    if-ltz v3, :twouich_phone_ime_chat_ready
+    const/4 v3, 0x0
+    :twouich_phone_ime_chat_ready
+    iput v3, v0, Landroid/view/ViewGroup$LayoutParams;->height:I
+    invoke-virtual {v5, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V
+    :twouich_phone_ime_ready
 :return_phone_layout
+    return-void
+.end method
+
+.method public twouichPhoneRelayout()V
+    .locals 0
+    # Passerelle PUBLIQUE pour la veille de disposition (PhoneLayoutWatch est
+    # une autre classe) : twouichPhoneStackedLayout reste privee, seule cette
+    # entree la rend atteignable sans changer la visibilite de la disposition.
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V
     return-void
 .end method
 
@@ -2511,7 +2615,9 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     # sans toggle se retrouvait avec 2 méthodes et 0 champ.)
     fields_block = ("\n\n.field private twouichPipActive:Z"
                     "\n.field private twouichChatHidden:Z"
-                    "\n.field private twouichChatRestored:Z")
+                    "\n.field private twouichChatRestored:Z"
+                    "\n.field private twouichLayoutWatch:"
+                    "Lcom/twouich/phone/PhoneLayoutWatch;")
     if ".field private twouichPipActive:Z" not in player_fixed:
         player_fixed = player_fixed.replace(
             ".super Landroid/app/Activity;",
@@ -2531,6 +2637,15 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         player_fixed = player_fixed.replace(
             ".field private twouichChatHidden:Z",
             ".field private twouichChatHidden:Z\n.field private twouichChatRestored:Z",
+            1,
+        )
+    # Veille de disposition : un arbre déjà patché par la version sans veille
+    # n'a pas le champ — la disposition qui le lit rejetterait la classe entière.
+    if ".field private twouichLayoutWatch:Lcom/twouich/phone/PhoneLayoutWatch;" not in player_fixed:
+        player_fixed = player_fixed.replace(
+            ".field private twouichChatRestored:Z",
+            ".field private twouichChatRestored:Z\n"
+            ".field private twouichLayoutWatch:Lcom/twouich/phone/PhoneLayoutWatch;",
             1,
         )
     # Toggle du chat : un arbre déjà patché par la version précédente ne
@@ -2611,6 +2726,10 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     # donc ce passage ne peut plus ajouter un second démarrage du service.
     player_fixed, service_calls = _patch_playback_calls(player_fixed)
 
+    # Passerelle publique de la veille : un arbre déjà canonique mais qui ne
+    # l'aurait pas recevrait un invoke non résolu (NoSuchMethodError) au
+    # premier changement de boîte — forcer l'écriture quand elle manque.
+    relayout_missing = ".method public twouichPhoneRelayout()V" not in player_fixed
     if ".method private twouichPhoneStackedLayout()V" not in player_fixed:
         write_player(player_fixed.rstrip() + "\n"
                      + player_methods.replace("\r\n", "\n").rstrip() + "\n"
@@ -2631,7 +2750,7 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         log("smartphone : chat repliable rebranché sur le lecteur (réparation)")
     elif (player_fixed != player_text or tv_guard_count or screen_off_patched
           or service_calls or resume_normalized or send_added or phone_chat_guard_patched
-          or phone_chat_layout_patched):
+          or phone_chat_layout_patched or relayout_missing):
         write_player(player_fixed)
         log("smartphone : correction des paramètres du lecteur empilé")
     else:
@@ -3951,6 +4070,25 @@ def main() -> int:
          "invoke-direct {p0}, Lcom/s0und/s0undtv/fragments/MainFragment;->v4()V"),
         ("smali_classes2/com/twouich/phone/PhoneLoginOnClick.smali",
          ".implements Landroid/view/View$OnClickListener;"),
+        # Rotation et clavier : la veille reappelle la disposition quand la
+        # boîte de mise en page change (rotation en cours de lecture), et
+        # l'épilogue remonte la saisie au-dessus de l'IME (edge-to-edge).
+        ("smali_classes2/com/twouich/phone/PhoneLayoutWatch.smali",
+         ".implements Landroid/view/ViewTreeObserver$OnGlobalLayoutListener;"),
+        ("smali_classes2/com/twouich/phone/PhoneLayoutWatch.smali",
+         "twouichPhoneRelayout"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".method public twouichPhoneRelayout()V"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".field private twouichLayoutWatch:Lcom/twouich/phone/PhoneLayoutWatch;"),
+        ("smali_classes2/com/twouich/phone/PhoneLayoutWatch.smali",
+         "getWindowVisibleDisplayFrame"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         "getWindowVisibleDisplayFrame"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         "Landroid/view/ViewGroup$MarginLayoutParams;->bottomMargin:I"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         "goto :twouich_phone_epilogue"),
         ("res/values/dimens.xml", "twouich_phone_chat_height"),
         ("smali_classes2/com/twouich/adblock/TapClick.smali",
          ".method public static touch(Landroid/view/View;Landroid/view/MotionEvent;)Z"),

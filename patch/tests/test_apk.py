@@ -883,6 +883,21 @@ def main() -> int:
                     and holds(dex_blob, "WindowInsets$Type")
                     and holds(dex_blob, "I2"),
                     "l'APK doit appliquer les insets du système au contenu et conserver le chemin TV")
+        # Rotation en cours de lecture et clavier sous la saisie : la veille
+        # reappelle la disposition quand la boite de mise en page change (les
+        # mesures du 06/10 montraient la disposition portrait aux dimensions
+        # perimes en paysage), et l'epilogue remonte la saisie au-dessus de l'IME
+        # (edge-to-edge : adjustResize ne redimensionne plus rien).
+        ok &= check("rotation et clavier : veille et épilogue IME compilés",
+                    holds(dex_blob, "PhoneLayoutWatch")
+                    and holds(dex_blob, "twouichPhoneRelayout")
+                    and holds(dex_blob, "twouichLayoutWatch")
+                    and holds(dex_blob, "OnGlobalLayoutListener")
+                    and holds(dex_blob, "WindowInsets$Type")
+                    and holds(dex_blob, "bottomMargin"),
+                    "la veille de rotation ou l'épilogue clavier manque du dex : "
+                    "le lecteur garderait la disposition périmée en paysage et "
+                    "la saisie sous le clavier")
 
         candidate_apk = apk.name != DEFAULT_APK.name
         lag_allowed = os.environ.get("ALLOW_UPDATE_JSON_LAG") == "1"
