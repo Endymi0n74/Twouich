@@ -27,10 +27,10 @@ La page « Application info » affiche désormais la version, le code, la branch
 
 ## Installation
 
-Télécharger [`Twouich_v1.0.22.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.22/Twouich_v1.0.22.apk) depuis la release publiée.
+Télécharger [`Twouich_v1.0.23.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.23/Twouich_v1.0.23.apk) depuis la release publiée.
 
 ```bash
-adb install -r Twouich_v1.0.22.apk
+adb install -r Twouich_v1.0.23.apk
 ```
 
 

@@ -1,5 +1,13 @@
 # Journal des modifications — Twouich
 
+## v1.0.23 — 6 octobre 2026
+
+> **Non publié** — candidat local `versionCode 170` construit, vérifié et installé sur le Xiaomi de référence (`dist/Twouich_v1.0.23.apk`, 11 265 379 o, SHA-256 `144b440cb162a0603146907a3ac70e0773853c3874af0dff11c228ad4b183309`). `update.json` reste en 169/v1.0.22 tant qu'aucune release n'est demandée ; `dist/Twouich_v1.0.22.apk` (`d041dbef…`) est inchangé.
+
+- **La rotation pendant la lecture ne disloque plus le lecteur téléphone.** Au passage portrait → paysage, la vidéo garde un 16:9 exact (`1845×1038` dans un écran 2712×1220 simulé) et le chat avec la barre de saisie se rangent en colonne à sa droite — la branche paysage est rejouée avec la géométrie **re-mesurée**, au lieu de la configuration périmée que `onConfigurationChanged` trouvait encore en place.
+- **La barre « Envoyer un message » monte au-dessus du clavier.** Mesurée collée au bord haut de l'IME (`y=1687` avec un clavier ouvert jusqu'à 2712), avec le chat qui se raccourcit d'autant ; clavier fermé, l'empilement portrait d'origine est inchangé. La fenêtre étant edge-to-edge (cible 35), `adjustResize` ne suffit pas — et **les insets IME ne rendent rien sur ce MIUI** : la hauteur du clavier est lue par `getWindowVisibleDisplayFrame`, seule source fiable mesurée sur l'appareil. Une veille de disposition (`PhoneLayoutWatch`) rejoue la géométrie à chaque changement de frame visible, avec garde anti-boucle.
+- Aucun message n'a été envoyé pendant la validation ; aucune session n'a été perdue (`adb install -r`, `firstInstallTime` préservé). Détail des mesures et recettes : `TEST-DEVICE.md` § 8.26.
+
 ## v1.0.22 — 6 octobre 2026
 
 > **Publié le 6 octobre 2026** (`versionCode 169`) : tag `v1.0.22`, release avec l’APK et `changelog.html`, CI signée verte (run `37510883456`), annonce `update.json` poussée après publication (`ReleaseDate` = `publishedAt`, `2026-10-06T18:23:36Z`). APK publié : 11 265 379 o, SHA-256 `d041dbef874bd0b4e94b146d82834750f5fd95c88883d5c37b9beca143b83bab` — **identique aux octets servis, et reproduit par le build local** ; la CI a revérifié `local = servi`. Le build nettoie aussi un descripteur smali invalide (`startActivity(v0)V`) hérité de l’ancienne greffe, qui empêchait `apktool b` sur un arbre réutilisé.

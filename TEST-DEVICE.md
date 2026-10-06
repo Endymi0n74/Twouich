@@ -1493,7 +1493,7 @@ direct ouvert, écran allumé. L'arbre des vues est lu par `uiautomator dump` (�
 
 | Point | Mesure | Verdict |
 |---|---|---|
-| Barre de saisie au-dessus du clavier | barre `y 2600→2712` ; clavier `InsetSource id=3 type=ime frame=[0,1687][1220,2712]` | **échec** — la barre est 913 px **sous** la première touche |
+| Barre de saisie au-dessus du clavier | barre `y 2600→2712` ; clavier `InsetSource id=3 type=ime frame=[0,1687][1220,2712]` | **échec** (21/09) — la barre est 913 px **sous** la première touche. **Corrigé en v1.0.23, mesuré au pixel : § 8.26.** |
 | Bouton de chat à côté du PiP | un seul `ImageButton` dans la zone vidéo (`twouich_phone_pip`) ; **zéro** vue `twouich_phone_chat` | conforme |
 | Page « Application info » | `v1.0.12`, code `159`, branche `Twouich (fork de S0undTV)`, date `2026.09.21` | 4 champs sur 5 — `Build variant: standalone` reste |
 | Lecture écran éteint | lecture poursuivie ~10 s, puis `UnknownHostException (no network)` | **échec** |
@@ -2762,3 +2762,66 @@ adb -s emulator-5556 shell dumpsys window | grep -E "type=(statusBars|navigation
 adb -s emulator-5556 shell uiautomator dump /sdcard/ui.xml   # bornes des vues
 adb -s emulator-5556 exec-out screencap -p > f.png           # rendu réel (SwiftShader)
 ```
+
+### 8.26 Rotation en cours de lecture et clavier : les deux défauts UX téléphone, corrigés et mesurés (06/10/2026)
+
+Capture utilisateur à l'appui (vidéo en haut, chat, barre « Envoyer un message », clavier tout en
+bas), deux défauts rapportés sur le Xiaomi `24095PCADG` (1220×2712 @520 dpi, Android 16) :
+
+1. **Au passage portrait → paysage en cours de lecture**, la vidéo se retrouvait au milieu de
+   l'écran et le chat « n'importe comment ».
+2. **Quand on tape un message**, la barre de saisie devait monter **au-dessus du clavier** — elle
+   restait sous les touches (l'échec du § 8.11, 913 px sous la première touche).
+
+**État avant (mesuré, build 169)** :
+
+- Rotation (`wm size 2712x1220`, § 8.10) : vidéo `0,130-2712,816` — hauteur 686 **figée**, le 16:9
+  du portrait —, chat `0,816-2712,960` (lambeau de 144 px), saisie `0,960-2712,1168` pleine
+  largeur. C'est la **branche portrait appliquée avec des dimensions périmées** :
+  `onConfigurationChanged` arrive **avant** la re-mesure, la disposition lit encore l'ancienne
+  géométrie.
+- Clavier ouvert : IME `frame=[0,1687][1220,2712]`, saisie restée `0,2452-1220,2660` — 913 px sous
+  les touches. La fenêtre est **edge-to-edge** (cible 35) : `adjustResize` ne redimensionne plus
+  rien, l'inset doit être consommé par l'app (§ 8.11).
+
+**Leçon centrale — les insets IME ne rendent RIEN sur ce Xiaomi.** `getRootWindowInsets()` **et**
+`setOnApplyWindowInsetsListener` renvoient 0 clavier ouvert, prouvé par les traces logcat
+(`clavier : disposition posee` sans `clavier : saisie remontee`). La seule source fiable de la
+hauteur du clavier est **`getWindowVisibleDisplayFrame(Rect)`** : c'est elle qui fait foi, partout
+dans cette correction.
+
+**Piège de `RelativeLayout` payé** : sur ce conteneur, l'**ancre** (le `bottomMargin` du chat =
+hauteur de la saisie) gagne sur la hauteur fixe — modifier la seule `height` du chat ne le
+raccourcit **pas**. Il faut **deux** mouvements coordonnés : ajouter la marge clavier au
+`bottomMargin` du chat **et** réduire sa hauteur d'autant (plancher 0).
+
+**Correction livrée (v1.0.23 / 170)** : nouvelle classe `PhoneLayoutWatch`
+(`OnGlobalLayoutListener` + `OnApplyWindowInsetsListener`, garde `(lastW, lastH, lastVb)` où
+`lastVb` = `Rect.bottom` de la frame visible — sans garde, chaque `setLayoutParams` relance la
+disposition et boucle). L'épilogue `:twouich_phone_epilogue` de `twouichPhoneStackedLayout` calcule
+la marge clavier par frame visible (`marge = (y de la vue + hauteur parent - paddingBottom) -
+visibleFrame.bottom`, appliquée si `> 0`) : saisie `bottomMargin += marge`, chat `bottomMargin +=
+marge` **et** `height -= marge`. **La vidéo n'est jamais touchée.** La veille est posée une seule
+fois (garde sur champ `twouichLayoutWatch`) et renvoie par `twouichPhoneRelayout()`.
+
+**État après (mesuré au pixel, build v1.0.23 installé par `install -r`)** :
+
+| Situation | Vidéo | Chat | Saisie | Verdict |
+|---|---|---|---|---|
+| Clavier ouvert (1220×2712) | `0,130-1220,816` | `0,816-1220,1479` | `0,1479-1220,1687` | saisie **collée au clavier** (`1687` = bord haut de l'IME) — conforme à la capture jointe |
+| Clavier fermé | `0,130-1220,816` | `0,816-1220,2452` | `0,2452-1220,2660` | empilement portrait d'origine, inchangé |
+| Paysage (`wm size 2712x1220`) | `0,130-1845,1168` (1845×1038 = **16:9 exact**) | `1845,130-2712,960` | `1845,960-2712,1168` | côte à côte, vidéo pleine hauteur utile |
+
+**Recette clavier sur ce MIUI** (pièges rencontrés) : `input tap 200 2540` **deux fois** ouvre la
+saisie (le premier tap ne fait que révéler les contrôles) ; le tap sur la vidéo **ne ferme pas** le
+clavier ; `keyevent 4` (BACK) le ferme ; `keyevent 111` (ESC) ferme le player. Orientation toujours
+forcée par `wm size` (§ 8.10), restaurée par `wm size reset` — jamais `wm size reset` sur BlueStacks,
+appareil différent (§ 8.21).
+
+**Preuves** : capture `work/captures/10-clavier-saisie-170.png` ; dumps de bornes
+`work/tmp/ime-v3.txt`, `work/tmp/land-fixed.txt`, `work/tmp/ime-final2.txt`. Batterie § 5 verte
+(`test_smali_branches` **73/73** dont la section 22 rotation/veille/clavier, `test_apk` verrou
+« rotation et clavier : veille et épilogue IME compilés », `ALLOW_UPDATE_JSON_LAG=1` car
+`update.json` reste en 169/v1.0.22 tant qu'aucune release n'est demandée). Traces logcat
+`clavier :` / `veille :` laissées dans le livrable, cohérentes avec la trace
+`interface : telephone`.
