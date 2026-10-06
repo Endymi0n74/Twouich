@@ -1770,8 +1770,18 @@ contournable depuis `adb` : ils sont payés par un réglage ou par une action hu
 | Symptôme exact | Cause réelle | Contournement |
 |---|---|---|
 | `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user`, session marquée en échec en ~26 ms pendant que `com.miui.global.packageinstaller.activity.RiskDialogActivity` est créée puis annulée seule | **« Installation via USB » désactivée** dans les options pour les développeurs | la réactiver sur le téléphone ; en attendant, `adb push` vers `/sdcard/Download/` puis installation manuelle depuis Fichiers. Aucun réglage shell ne débloque : `settings put global adb_install_need_confirm 0` a été essayé sans effet (la clé n'existe pas sur cette build) |
-| `INSTALL_FAILED_VERSION_DOWNGRADE` **même avec** `adb install -r -d` ; `--downgrade` est inconnu de `pm install` ; `pm install --user 10` échoue aussi | le `versionCode` est une propriété **globale** du paquet : un utilisateur secondaire ne crée pas de version distincte | désinstaller puis installer l'APK de test — **ça efface les données de l'app** (session Twitch), donc prévenir avant |
+| `INSTALL_FAILED_VERSION_DOWNGRADE` **même avec** `adb install -r -d` (mesuré sur **ce** Xiaomi) ; `--downgrade` est inconnu de `pm install` ; `pm install --user 10` échoue aussi | le `versionCode` est une propriété **globale** du paquet (un utilisateur secondaire ne crée pas de version distincte) ; et le refus du `-d` est une propriété de **la build de l'appareil**, pas une règle d'Android — note sous la table | sur **cet** appareil : désinstaller puis installer l'APK de test — **ça efface les données de l'app** (session Twitch), donc prévenir avant. Ailleurs, essayer **d'abord** `adb install -r -d` : sur les images qui l'autorisent il passe, sans toucher aux données (note ci-dessous, Route A) |
 | l'appareil est passé de la 150 à la 164 publiée en ~80 s pendant un test, sans que personne ne l'ait demandé | le parcours d'updater télécharge **et installe** seul après « Install update » | lire `dumpsys package com.s0und.s0undtv \| grep lastUpdateTime` **avant** d'attribuer un crash au build testé — et `pm path` + `pull` pour vérifier les octets réellement installés |
+
+> **Note du 06/10 : le refus du `-d` n'est pas une règle d'Android, c'est une propriété de la build.**
+> Sur BlueStacks (API 33, `ro.debuggable=1` / `ro.secure=0`, mesurés), `adb install -r -d`
+> **réussit avec un APK de release non debuggable** : rejeu 168 → 167 avec
+> `dist/Twouich_v1.0.20.apk` → `Success`, `versionCode=167`, `lastUpdateTime=13:55:19`,
+> `firstInstallTime` **inchangé** (2026-10-05 14:13:09) — session Twitch **intacte** à 167
+> (`Followed (3)`, `Deconnexion`, pas de `Login to use`), puis remontée 167 → 168 par
+> l'updater (14:02:17, `firstInstallTime` toujours inchangé, `base.apk` relu =
+> `162e460a…` = asset publié). La Route A du § 8.20 est corrigée en conséquence. Le refus
+> mesuré le 05/10 vaut pour ce Xiaomi de production, pas pour l'image BlueStacks.
 
 Deux corollaires de méthode :
 
@@ -1977,10 +1987,19 @@ servi, la route A ne demande aucune construction.*
 #### Route A — BlueStacks (API 33), sans rien construire
 
 ```bash
-# 1. Rétrograder : l'adb refuse le downgrade (même avec -d, le paquet n'est pas debuggable),
-#    et « ne rien faire » n'est pas une option puisque la 165 est déjà installée.
-"$ADB" -s "$DEV" uninstall com.s0und.s0undtv       # PERD la session — sans conséquence ici
-"$ADB" -s "$DEV" install /tmp/twouich164.apk       # PAS de timeout : l'install n'en termine pas
+# 1. Rétrograder EN PLACE : sur cette image (BlueStacks, ro.debuggable=1), l'adb accepte
+#    le downgrade — prouvé le 06/10 par le rejeu 168 → 167 → 168 : Success, données et
+#    session conservées. Le « l'adb refuse même avec -d, le paquet n'est pas debuggable »
+#    écrit le 05/10 était FAUX, généralisé à tort depuis le Xiaomi (§ 8.16).
+#    « Ne rien faire » n'est pas une option : la 165 est déjà installée.
+"$ADB" -s "$DEV" install -r -d /tmp/twouich164.apk # rétrogradation en place, session conservée
+"$ADB" -s "$DEV" shell dumpsys package com.s0und.s0undtv | grep -E "versionCode|firstInstallTime"
+# attendu : versionCode=164, firstInstallTime INCHANGÉ
+#
+# Variante exécutée le 05/10 (§ 8.22) sur la foi de l'ancienne croyance — toujours jouable,
+# mais elle efface les données pour rien :
+# "$ADB" -s "$DEV" uninstall com.s0und.s0undtv
+# "$ADB" -s "$DEV" install /tmp/twouich164.apk     # PAS de timeout : l'install n'en termine pas
 
 # 2. Lancement à froid, logcat capturé AVANT (le service parle dans les premières secondes)
 "$ADB" -s "$DEV" logcat -c
@@ -2096,12 +2115,16 @@ Contrôlé sur la machine, sans toucher à l'état de l'app :
 - le filtre `logcat -s S0undTV_AutoUpdateSrv Twouich` répond (tag `Twouich` présent), `FATAL` = 0 ;
 - le champ d'activité au premier plan est `topResumedActivity` (voir l'avertissement du point n° 2) ;
 - état de départ constaté : **165 installée** (`lastUpdateTime` 09:47:49, `firstInstallTime`
-  08:36:20 — donc déjà une installation neuve, sans session) ⇒ **rétrograder exige
-  `uninstall`**, l'adb refusant le downgrade même avec `-d` sur un paquet non debuggable.
+  08:36:20 — donc déjà une installation neuve, sans session) ⇒ une rétrogradation est
+  nécessaire. **Corrigé le 06/10** : « l'adb refuse le downgrade même avec `-d` sur un paquet
+  non debuggable » était **faux sur cette image** (généralisé à tort depuis le Xiaomi) —
+  `adb install -r -d` y réussit avec données conservées : voir la Route A ci-dessus et la
+  note du § 8.16.
 
 Autrement dit : les commandes, les empreintes et le choix de l'appareil sont **acquis**. Ce
-qui manque est le seul geste qui compte — `uninstall`, `install` de la 164, et laisser l'app
-remonter seule.
+qui manque est le seul geste qui compte — rétrograder en place (`install -r -d`, corrigé le
+06/10 ; `uninstall` + `install` comme joué le 05/10 reste possible, mais perd la session) —
+et laisser l'app remonter seule.
 
 > **Geste joué, résultat en § 8.22.** Le protocole ci-dessous s'est révélé faux sur un point :
 > `onStartCommand` se lit **après** l'appui sur « Install update », pas au lancement. Deux
@@ -2134,8 +2157,10 @@ donnée manquante, pas une conviction.
 - Rien sur la **connexion Twitch réelle** : le dialogue d'authentification reste à valider avec
   un compte.
 - Rien sur la **branche TV** de la mise à jour : la 164 de départ est une version téléphone.
-- La **survie de session** reste établie au niveau paquet (§ 8.18), pas par ce protocole — ici la
-  session est perdue d'entrée (`uninstall` obligatoire pour rétrograder).
+- La **survie de session** reste établie au niveau paquet (§ 8.18), pas par ce protocole — la
+  voie exécutée le 05/10 passait par `uninstall`, la session était perdue d'entrée. Depuis la
+  correction du 06/10 (§ 8.16 et Route A), la rétrogradation se fait **en place** avec
+  `install -r -d` et conserve la session — non jouée ici avec un compte connecté.
 
 ### 8.21 Paysage : la branche côte à côte, enfin mesurée (05/10/2026)
 
@@ -2641,3 +2666,103 @@ suffit.
   été testés.
 - Le **tutoriel** n'a été franchi que par retour arrière ; son contenu (captures
   remappées) n'a pas été contrôlé.
+
+### 8.25 Branche edge-to-edge API 35 : première exécution runtime, et sa limite (06/10/2026)
+
+La v1.0.21 a ajouté dans `twouichPhoneWindow` le padding manuel conditionné à
+`SDK_INT >= 0x23` — le seul cas où Android 15+ impose l'edge-to-edge malgré
+`setDecorFitsSystemWindows(true)`. Jusqu'ici cette branche n'avait jamais été
+**exécutée** (limite assumée : « n'a pas été exécutée sur un appareil API 35+ »).
+Elle l'est maintenant, sur émulateur ; le contenu réel reste hors champ (ci-dessous).
+
+#### Environnement, monté pour l'occasion
+
+- SDK absent de la machine : installation sur `D:\Android\Sdk` —
+  `commandlinetools-win-16111833`, image `system-images/android-35/google_apis/x86_64`,
+  AVD `twouich-api35` (Pixel 6), Android 15 (**API 35 REL**), 1080×2400 @420 dpi
+  (411 dp → branche téléphone), accélération WHPX. Lancement
+  `-no-window -port 5556 -gpu swiftshader_indirect` (5554/5555 sont BlueStacks),
+  adb = `emulator-5556` ; adb projet = celui de ScrcpyGUI.
+- **Piège Windows** : `sdkmanager` éclate la syntaxe `system-images;android-35;…`
+  (le `;` sépare les arguments pour le `.bat`) et refuse « Package system-images not
+  found » — il faut le chemin style sdk : `system-images/android-35/google_apis/x86_64`.
+  `avdmanager -k` accepte encore les `;`.
+- APK release `dist/Twouich_v1.0.21.apk` installé, **SHA-256 revérifié après install**
+  (via `pm path` + pull) : `162e460a…0e8b5`, octets publiés.
+
+#### Entrée dans le lecteur sans session
+
+L'accueil est verrouillé (« Login to use the app »), mais le deep link que construit
+`RecommendationWorker` ouvre le lecteur directement :
+
+```
+am start -a android.intent.action.VIEW -d "channel://com.s0und.s0undtv/startstream/kenbogard"
+```
+
+→ `topResumedActivity=PlayerActivity`, logs `interface : telephone (disposition
+empilee)`, `chat affiche`, `veille : service de premier plan actif (mediaPlayback)`.
+
+#### La mesure : insets système et bornes de vues se répondent au pixel
+
+| Source | Valeur |
+|---|---|
+| `dumpsys window` — `InsetsSource type=statusBars` | `frame=[0,0][1080,128]` |
+| `dumpsys window` — `type=displayCutout` | `frame=[0,0][1080,128]` |
+| `dumpsys window` — `type=navigationBars` | `frame=[0,2337][1080,2400]` |
+| `container` (uiautomator) | `[0,0][1080,2400]` — plein écran, decorFits **ignoré** |
+| `ExoPlayer` | `[0,128][1080,735]` — top **= 128 = inset haut exact** |
+| `SendMessageWindow` | `[0,2169][1080,2337]` — bottom **= 2337 = bord bas exact** |
+
+Le padding appliqué au conteneur vaut donc `(0, 128, 0, 63)` = union
+`systemBars | displayCutout` que la branche calcule : **ni cumul** (256 px apparaîtrait
+si decorFits avait aussi agi), **ni recouvrement** (0, barres par-dessus la vidéo, si le
+`if-lt 0x23` avait sauté). Référence du régime opposé, même jour sur BlueStacks API 33 :
+container **inset** `[0,36][720,1280]`, padding nul — les deux régimes se lisent côte à
+côte. Santé : `SELFTEST 31/31` **exit 0**, **0 `FATAL EXCEPTION`**.
+
+#### Ce qui n'a PAS été validé : le contenu réel (flux + chat)
+
+Sans session Twitch, l'app ne demande **aucune donnée de flux** : aucune socket ouverte
+par le uid de l'app dans `/proc/net/tcp` à l'instant de la mesure, et
+`RecyclerView: No adapter attached` (le chat IRC authentifié n'a jamais branché son
+adaptateur) ; capture d'écran noire, zéro mouvement sur 4 frames à 3 s d'intervalle.
+Le réseau de l'app fonctionne par ailleurs (le `SELFTEST 31/31` au démarrage s'est
+exécuté).
+
+La session BlueStacks n'est pas transférable — **quatre voies mesurées, toutes
+bloquées** :
+
+- `adb backup` : dialogue de consentement accepté sur l'appareil, fichier final de
+  **47 octets** = en-tête `ANDROID BACKUP` seul. Règle Android 12+ : une app qui cible
+  API 31+ (Twouich cible 35) est exclue d'`adb backup`, **quel que soit**
+  `allowBackup` — les `flags` du paquet montrent pourtant `ALLOW_BACKUP`.
+- `run-as` : cassé sur cette image (adbd en uid 2000, `setegid(AID_PACKAGE_INFO)`),
+  indépendamment du flag debuggable de l'app.
+- `adb root` : annonce « restarting adbd as root » mais `id` reste `uid=2000(shell)`
+  sur les **deux** serials (`emulator-5554` et `127.0.0.1:5555`).
+- aucun `su` (`/system/{xbin,bin}/su`, `/sbin/su` absents) ; SELinux `Disabled` ne
+  compense pas la DAC : `Permission denied` sur `shared_prefs`.
+
+**Conséquence assumée** : la branche d'insets est validée en API 35, le rendu du flux
+et du chat en API 35 reste à faire avec une session saisie à la main — `LoginActivity`
+(WebView Twitch) prête derrière un miroir `scrcpy -s emulator-5556`. Au moment de cette
+mesure, rappeler le piège du § 8.24 : `uiautomator dump` ne voit **jamais** les messages
+de chat ; ici de toute façon l'adaptateur n'est jamais monté (mesure faite sur les
+bords des vues et sur `/proc/net/tcp`, pas sur l'absence de texte).
+
+#### Recette réutilisable
+
+```bash
+# une fois : SDK sur D:\Android\Sdk (cmdline-tools dézipés dans cmdline-tools/latest)
+export ANDROID_HOME='D:\Android\Sdk'
+$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat "system-images/android-35/google_apis/x86_64"
+$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager.bat create avd -n twouich-api35 \
+  -k "system-images;android-35;google_apis;x86_64" -d pixel_6 --force
+# lancement détaché (PID à garder), port libre imposé :
+emulator.exe -avd twouich-api35 -port 5556 -no-window -no-audio -no-boot-anim \
+  -gpu swiftshader_indirect -no-snapshot
+# preuves :
+adb -s emulator-5556 shell dumpsys window | grep -E "type=(statusBars|navigationBars|displayCutout)"
+adb -s emulator-5556 shell uiautomator dump /sdcard/ui.xml   # bornes des vues
+adb -s emulator-5556 exec-out screencap -p > f.png           # rendu réel (SwiftShader)
+```
