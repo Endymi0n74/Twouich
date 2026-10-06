@@ -20,17 +20,17 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 - **Fallback VaFT** `v1.0.16` : si `stitched-ad` survit au stripping (nouveau format), tentative flux propre `GQL PlaybackAccessToken embed` → `usher v2` → variante (5s timeout, repli stripping) (`VaftFallback`, dormant tant que `lastCut>0`)
 - **Build reproductible** : ZIP canonisé (horodatage + ordre), `SELFTEST 31/31`, `check-release.sh` 4/4
 
-## Nouveautés v1.0.20 — 5 octobre 2026
+## Nouveautés v1.0.21 — 6 octobre 2026
 
-Le chat reste visible pendant la lecture sur téléphone : le correctif neutralise le fondu alpha amont qui rendait sa zone noire, sans modifier l'affichage TV. Voir [`CHANGELOG-twouich.md`](CHANGELOG-twouich.md) et [`memory.md`](memory.md).
+Le lecteur téléphone respecte les barres système et adapte la géométrie vidéo/chat à l’espace utilisable. Un bouton du compositeur ouvre désormais les commandes existantes du lecteur. Le layout TV reste inchangé. Voir [`CHANGELOG-twouich.md`](CHANGELOG-twouich.md) et [`memory.md`](memory.md).
 
 
 ## Installation
 
-Télécharger [`Twouich_v1.0.20.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.20/Twouich_v1.0.20.apk) depuis la release publiée.
+Télécharger [`Twouich_v1.0.21.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.21/Twouich_v1.0.21.apk) depuis la release publiée.
 
 ```bash
-adb install -r Twouich_v1.0.20.apk
+adb install -r Twouich_v1.0.21.apk
 ```
 
 

@@ -30,7 +30,7 @@ UPSTREAM = "S0und/S0undTV"
 # manuel de patch.py — build.sh passe toujours --version-code/--version-name/
 # --apk-name. Ils suivent donc le dernier bump (le nom d'APK finit dans l'URL
 # que l'app interroge : un défaut en retard pointerait sur un asset inexistant).
-DEFAULT_APK_NAME = "Twouich_v1.0.20.apk"
+DEFAULT_APK_NAME = "Twouich_v1.0.21.apk"
 
 # ── Étape 1 : greffon anti-pub ────────────────────────────────────────────
 # Libellés de l'UX smartphone. Le champ de saisie reprend celui de l'interface
@@ -53,36 +53,44 @@ PHONE_GEO_CLAMPED_TAIL_OLD = PHONE_GEO_OLD_TAIL.replace(
     "    if-ge v10, v7, :twouich_phone_video_fits\n    move v10, v7\n"
     ":twouich_phone_video_fits\n",
 )
-# La forme du 20/09 calculait la hauteur du CHAT avec `sub-int v7, v9, v11`
-# (hauteur totale moins la seule barre de saisie), en ignorant la vidéo : le
-# chat, ancré SOUS la vidéo et en bas, débordait alors de la hauteur de la vidéo.
-# La place du chat se déduit donc de la vidéo APRÈS son plafond.
-PHONE_GEO_CLAMPED_TAIL = PHONE_GEO_OLD_TAIL.replace(
-    "    const/16 v11, 0x70\n",
-    "    const/16 v11, 0x70\n"
-    # v7 reçoit d'abord un ENTIER : `v7` portait encore la référence
-    # DisplayMetrics issue de getDisplayMetrics(), et le test de plafond qui suit le
-    # lirait sinon une référence — `VerifyError: args to 'if'
-    # (Integer, Reference: android.util.DisplayMetrics) must be integral`
-    # (mesuré le 05/10/2026 sur le lecteur au lancement).
-    "    sub-int v7, v9, v10\n    sub-int/2addr v7, v11\n"
-    "    if-ge v10, v7, :twouich_phone_video_fits\n    move v10, v7\n"
-    ":twouich_phone_video_fits\n"
-    # v7 = hauteur totale − vidéo plafonnée − barre de saisie : la place réelle
-    # du chat, et la valeur que le test du tiers doit regarder.
-    "    sub-int v7, v9, v10\n    sub-int/2addr v7, v11\n",
-)
-# if-lt : on SAUTE le plafond quand la vidéo tient déjà (v10 < v7) ;
-# if-ge : on empile quand il reste au moins un tiers de la hauteur pour le chat.
 PHONE_GEO_ROOM_BLOCK = ("    const/4 v3, 0x3\n"
                         "    div-int v3, v9, v3\n"
                         "    if-ge v7, v3, :twouich_phone_room\n"
                         "    goto :return_phone_layout\n"
                         ":twouich_phone_room\n")
-PHONE_GEO_TAIL = PHONE_GEO_CLAMPED_TAIL.replace(
-    "    if-ge v10, v7, :twouich_phone_video_fits",
-    "    if-lt v10, v7, :twouich_phone_video_fits",
-) + PHONE_GEO_ROOM_BLOCK
+PHONE_GEO_COMPOSER_HEIGHT = (
+    "    invoke-virtual {v6}, Landroid/view/View;->getHeight()I\n"
+    "    move-result v11\n"
+    "    if-nez v11, :phone_composer_height_ready\n"
+    "    iget v11, v7, Landroid/util/DisplayMetrics;->density:F\n"
+    "    const/high16 v3, 0x42800000\n"  # repli 64dp avant la première mesure
+    "    mul-float v11, v11, v3\n"
+    "    float-to-int v11, v11\n"
+    "    :phone_composer_height_ready\n"
+)
+PHONE_GEO_COMPOSER_HEIGHT_LANDSCAPE = PHONE_GEO_COMPOSER_HEIGHT.replace(
+    ":phone_composer_height_ready", ":phone_landscape_composer_height_ready")
+PHONE_GEO_CLAMPED_TAIL = (
+    PHONE_GEO_COMPOSER_HEIGHT
+    + "    sub-int v7, v9, v11\n"
+    "    if-lt v10, v7, :twouich_phone_video_fits\n"
+    "    move v10, v7\n"
+    "    :twouich_phone_video_fits\n"
+    "    sub-int v7, v9, v10\n"
+    "    sub-int/2addr v7, v11\n"
+)
+PHONE_GEO_TAIL = PHONE_GEO_CLAMPED_TAIL + PHONE_GEO_ROOM_BLOCK
+# Variante à hauteur de saisie fixe : uniquement pour migrer un arbre déjà patché.
+PHONE_GEO_PREVIOUS_CLAMPED_TAIL = (
+    "    const/16 v11, 0x70\n"
+    "    sub-int v7, v9, v11\n"
+    "    if-lt v10, v7, :twouich_phone_video_fits\n"
+    "    move v10, v7\n"
+    "    :twouich_phone_video_fits\n"
+    "    sub-int v7, v9, v10\n"
+    "    sub-int/2addr v7, v11\n"
+)
+PHONE_GEO_PREVIOUS_TAIL = PHONE_GEO_PREVIOUS_CLAMPED_TAIL + PHONE_GEO_ROOM_BLOCK
 
 # --- Incrustation (picture-in-picture) ---------------------------------------
 # Le 20/09, l'acceptation PiP sur le téléphone a montré la barre « Envoyer un
@@ -707,6 +715,19 @@ CHAT_RESTORE_CALL_LINE = (
 # polarité inversée (if-eqz sur un champ faux = sortie immédiate, sans journal).
 PHONE_CHAT_RESTORE_GUARD_OLD = "if-eqz v0, :restore_done"
 PHONE_CHAT_RESTORE_GUARD_NEW = "if-nez v0, :restore_done"
+
+# I2() masque les barres système sur tout appareil. Sur téléphone, on le
+# détourne vers la méthode qui restaure status/navigation bar; le chemin TV
+# continue d'exécuter le corps upstream à l'identique.
+PHONE_WINDOW_CALL_ANCHOR = ".method public I2()V\n    .locals 2\n"
+PHONE_WINDOW_CALL = (
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichTvInterface()Z\n"
+    "    move-result v0\n"
+    "    if-nez v0, :twouich_i2_tv\n"
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneWindow()V\n"
+    "    return-void\n"
+    "    :twouich_i2_tv\n"
+)
 
 # Le lecteur amont fait deux choses qui sont correctes sur TV/surimpression,
 # mais rendent le chat téléphone intégralement noir : le RecyclerView démarre
@@ -1666,6 +1687,30 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         canonical = TV_INTERFACE_METHOD.strip()
         if match.group(0) != canonical:
             final = final[:match.start()] + canonical + final[match.end():]
+        # Les helpers de commandes ont historiquement vécu avec les méthodes
+        # PiP. Ils doivent toutefois aussi être posés lors d'une réparation d'un
+        # lecteur qui possède déjà PiP : sans eux la nouvelle disposition aurait
+        # un invoke non résolu. Extraire les méthodes exactes du bloc partagé.
+        for helper_signature in (
+            ".method private twouichPhoneView(Ljava/lang/String;)Landroid/view/View;",
+            ".method private twouichPhoneWindow()V",
+            ".method private twouichPhoneControlsAttach()V",
+            ".method public twouichPhoneToggleControls(Landroid/view/View;)V",
+        ):
+            if helper_signature in final:
+                continue
+            helper_match = re.search(
+                r"(?ms)^" + re.escape(helper_signature) + r".*?^\.end method$",
+                player_methods + pip_methods,
+            )
+            if helper_match is None:
+                fail(f"helper téléphone absent du gabarit : {helper_signature}")
+            final = final.rstrip() + "\n\n" + helper_match.group(0) + "\n"
+        if PHONE_WINDOW_CALL not in final:
+            if final.count(PHONE_WINDOW_CALL_ANCHOR) != 1:
+                fail("appel I2() du lecteur introuvable pour rétablir les barres téléphone")
+            final = final.replace(PHONE_WINDOW_CALL_ANCHOR,
+                                  PHONE_WINDOW_CALL_ANCHOR + PHONE_WINDOW_CALL, 1)
         if final.count("smallestScreenWidthDp:I") != 1:
             fail("le seuil de dp garde encore l'interface ailleurs que dans "
                  "twouichTvInterface : le mode TV ne serait plus fiable")
@@ -1685,6 +1730,63 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     invoke-virtual {v0, p1, v1, v2}, Landroid/content/res/Resources;->getIdentifier(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)I
     move-result v0
     return v0
+.end method
+
+.method private twouichPhoneWindow()V
+    .locals 7
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichTvInterface()Z
+    move-result v0
+    if-nez v0, :phone_window_done
+    invoke-virtual {p0}, Landroid/app/Activity;->getWindow()Landroid/view/Window;
+    move-result-object v1
+    const/16 v2, 0x400
+    invoke-virtual {v1, v2}, Landroid/view/Window;->clearFlags(I)V
+    invoke-virtual {v1}, Landroid/view/Window;->getDecorView()Landroid/view/View;
+    move-result-object v2
+    const/4 v0, 0x0
+    invoke-virtual {v2, v0}, Landroid/view/View;->setSystemUiVisibility(I)V
+    const/high16 v0, -0x1000000
+    invoke-virtual {v1, v0}, Landroid/view/Window;->setStatusBarColor(I)V
+    invoke-virtual {v1, v0}, Landroid/view/Window;->setNavigationBarColor(I)V
+    # Window.setDecorFitsSystemWindows n'existe qu'à partir de l'API 30.
+    # La cible minimale reste Android 6 : ne jamais résoudre cet appel en dessous.
+    sget v0, Landroid/os/Build$VERSION;->SDK_INT:I
+    const/16 v2, 0x1e
+    if-lt v0, v2, :phone_window_done
+    const/4 v0, 0x1
+    invoke-virtual {v1, v0}, Landroid/view/Window;->setDecorFitsSystemWindows(Z)V
+    # Cible 35 : Android 15+ reste edge-to-edge malgré le réglage ci-dessus.
+    # Appliquer explicitement l'inset système au conteneur noir, sans le cumuler
+    # lors des rappels répétés (on le remplace à chaque passage).
+    invoke-virtual {v1}, Landroid/view/Window;->getDecorView()Landroid/view/View;
+    move-result-object v3
+    invoke-virtual {v3}, Landroid/view/View;->getRootWindowInsets()Landroid/view/WindowInsets;
+    move-result-object v4
+    if-eqz v4, :phone_window_done
+    invoke-static {}, Landroid/view/WindowInsets$Type;->systemBars()I
+    move-result v5
+    invoke-static {}, Landroid/view/WindowInsets$Type;->displayCutout()I
+    move-result v6
+    or-int/2addr v5, v6
+    invoke-virtual {v4, v5}, Landroid/view/WindowInsets;->getInsets(I)Landroid/graphics/Insets;
+    move-result-object v4
+    const-string v3, "container"
+    invoke-direct {p0, v3}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneView(Ljava/lang/String;)Landroid/view/View;
+    move-result-object v3
+    if-eqz v3, :phone_window_done
+    # Avant Android 15, decorFitsSystemWindows decale deja le contenu sous les
+    # barres. Sur 15+ (cible 35), edge-to-edge est impose : seul ce cas exige un
+    # padding manuel, sinon le haut serait inset deux fois.
+    sget v0, Landroid/os/Build$VERSION;->SDK_INT:I
+    const/16 v2, 0x23
+    if-lt v0, v2, :phone_window_done
+    iget v5, v4, Landroid/graphics/Insets;->left:I
+    iget v6, v4, Landroid/graphics/Insets;->top:I
+    iget v0, v4, Landroid/graphics/Insets;->right:I
+    iget v2, v4, Landroid/graphics/Insets;->bottom:I
+    invoke-virtual {v3, v5, v6, v0, v2}, Landroid/view/View;->setPadding(IIII)V
+    :phone_window_done
+    return-void
 .end method
 
 .method private twouichPhoneStackedLayout()V
@@ -1732,10 +1834,46 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     invoke-virtual {v11, v10}, Landroid/view/View;->setVisibility(I)V
     :skip_bottom_bar_hide
 
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneControlsAttach()V
+
     invoke-virtual {v0}, Landroid/content/res/Resources;->getDisplayMetrics()Landroid/util/DisplayMetrics;
     move-result-object v7
     iget v8, v7, Landroid/util/DisplayMetrics;->widthPixels:I
     iget v9, v7, Landroid/util/DisplayMetrics;->heightPixels:I
+    # Le parent du contenu a deja les insets status/navigation systeme.
+    # v1/v2 gardent les ids ExoPlayer/ChatRecycleView utilises plus bas ; v0
+    # garde la vue parent et v10 sert de scratch entier avant son ratio 16:9.
+    invoke-virtual {v6}, Landroid/view/View;->getParent()Landroid/view/ViewParent;
+    move-result-object v0
+    instance-of v3, v0, Landroid/view/View;
+    if-eqz v3, :phone_metrics_ready
+    check-cast v0, Landroid/view/View;
+    invoke-virtual {v0}, Landroid/view/View;->getHeight()I
+    move-result v10
+    if-lez v10, :phone_metrics_ready
+    invoke-virtual {v0}, Landroid/view/View;->getPaddingTop()I
+    move-result v3
+    sub-int/2addr v10, v3
+    move v9, v10
+    invoke-virtual {v0}, Landroid/view/View;->getPaddingBottom()I
+    move-result v3
+    move v10, v9
+    sub-int/2addr v10, v3
+    move v9, v10
+    invoke-virtual {v0}, Landroid/view/View;->getWidth()I
+    move-result v10
+    if-lez v10, :phone_metrics_ready
+    invoke-virtual {v0}, Landroid/view/View;->getPaddingLeft()I
+    move-result v3
+    sub-int/2addr v10, v3
+    move v8, v10
+    invoke-virtual {v0}, Landroid/view/View;->getPaddingRight()I
+    move-result v3
+    move v10, v8
+    sub-int/2addr v10, v3
+    move v8, v10
+    :phone_metrics_ready
+
     mul-int/lit8 v10, v8, 0x9
     div-int/lit8 v10, v10, 0x10
 
@@ -1743,7 +1881,7 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     if-le v8, v9, :portrait_layout
 
     # -- Paysage : video a gauche (toute la hauteur), chat et saisie a droite --
-    # v11 = hauteur de la saisie (112 px), v0 = largeur video, v1 = largeur du
+    # v11 = hauteur mesuree de la saisie, v0 = largeur video, v1 = largeur du
     # chat, v10 = hauteur du chat. La video vise la largeur 16:9 de la HAUTEUR
     # d'ecran : elle occupe alors tout le bord gauche jusqu'en bas, sans bande
     # noire (mesure du 21/09 : video 16:9 centree, bandes noires de chaque
@@ -1751,8 +1889,7 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     # 19,5:9 la largeur 16:9 de la hauteur vaut 80 % et passe donc telle quelle
     # (aucune bande noire) ; le garde-fou ne mord que sur des ratios extremes,
     # ou mieux vaut une bande qu'un chat de quelques pixels.
-    const/16 v11, 0x70
-    mul-int/lit8 v0, v9, 0x10
+''' + PHONE_GEO_COMPOSER_HEIGHT_LANDSCAPE + r'''    mul-int/lit8 v0, v9, 0x10
     div-int/lit8 v0, v0, 0x9
     mul-int/lit8 v10, v8, 0x55
     div-int/lit8 v10, v10, 0x64
@@ -1839,6 +1976,7 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
 .method public onWindowFocusChanged(Z)V
     .locals 1
     invoke-super {p0, p1}, Landroid/app/Activity;->onWindowFocusChanged(Z)V
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneWindow()V
     if-eqz p1, :return_focus
     invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V
 :return_focus
@@ -1899,6 +2037,89 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     const/4 v1, 0x0
 
     return-object v1
+.end method
+
+
+.method private twouichPhoneControlsAttach()V
+    .locals 6
+    # On Window attend que RelativeLayout.LayoutParams pour l'ancrage au-dessus
+    # de SendMessageWindow (constante ABOVE=2), dans la zone utilisable.
+    # Si le parent réel diffère, ne pas retirer la grille par erreur.
+    const-string v0, "container"
+    invoke-direct {p0, v0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneView(Ljava/lang/String;)Landroid/view/View;
+    move-result-object v0
+    instance-of v0, v0, Landroid/widget/RelativeLayout;
+    if-eqz v0, :phone_controls_done
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichTvInterface()Z
+    move-result v0
+    if-nez v0, :phone_controls_done
+    const-string v0, "ButtonGrid"
+    invoke-direct {p0, v0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneView(Ljava/lang/String;)Landroid/view/View;
+    move-result-object v0
+    if-eqz v0, :phone_controls_done
+    const-string v1, "container"
+    invoke-direct {p0, v1}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneView(Ljava/lang/String;)Landroid/view/View;
+    move-result-object v1
+    if-eqz v1, :phone_controls_done
+    check-cast v1, Landroid/widget/RelativeLayout;
+    invoke-virtual {v0}, Landroid/view/View;->getParent()Landroid/view/ViewParent;
+    move-result-object v2
+    if-ne v2, v1, :phone_controls_attach
+    return-void
+    :phone_controls_attach
+    # Copier les dimensions resolues de ConstraintLayout avant le detachement:
+    # wrap_content sur GridLayout masque se mesure a 0 px (reproduit sur BlueStacks).
+    invoke-virtual {v0}, Landroid/view/View;->getLayoutParams()Landroid/view/ViewGroup$LayoutParams;
+    move-result-object v3
+    if-eqz v3, :phone_controls_default_size
+    iget v4, v3, Landroid/view/ViewGroup$LayoutParams;->width:I
+    iget v5, v3, Landroid/view/ViewGroup$LayoutParams;->height:I
+    goto :phone_controls_size_ready
+    :phone_controls_default_size
+    const/4 v4, -0x2
+    const/4 v5, -0x2
+    :phone_controls_size_ready
+    if-eqz v2, :phone_controls_no_parent
+    check-cast v2, Landroid/view/ViewGroup;
+    invoke-virtual {v2, v0}, Landroid/view/ViewGroup;->removeView(Landroid/view/View;)V
+    :phone_controls_no_parent
+    new-instance v2, Landroid/widget/RelativeLayout$LayoutParams;
+    invoke-direct {v2, v4, v5}, Landroid/widget/RelativeLayout$LayoutParams;-><init>(II)V
+    const/16 v3, 0x15
+    invoke-virtual {v2, v3}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(I)V
+    const-string v3, "SendMessageWindow"
+    invoke-direct {p0, v3}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneId(Ljava/lang/String;)I
+    move-result v3
+    const/4 v4, 0x2
+    invoke-virtual {v2, v4, v3}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(II)V
+    invoke-virtual {v1, v0, v2}, Landroid/view/ViewGroup;->addView(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V
+    const/16 v2, 0x8
+    invoke-virtual {v0, v2}, Landroid/view/View;->setVisibility(I)V
+    :phone_controls_done
+    return-void
+.end method
+
+
+.method public twouichPhoneToggleControls(Landroid/view/View;)V
+    .locals 2
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichTvInterface()Z
+    move-result v0
+    if-nez v0, :phone_toggle_controls_done
+    const-string v0, "ButtonGrid"
+    invoke-direct {p0, v0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneView(Ljava/lang/String;)Landroid/view/View;
+    move-result-object v0
+    if-eqz v0, :phone_toggle_controls_done
+    invoke-virtual {v0}, Landroid/view/View;->getVisibility()I
+    move-result v1
+    if-eqz v1, :phone_controls_hide
+    const/4 v1, 0x0
+    goto :phone_controls_visibility
+    :phone_controls_hide
+    const/16 v1, 0x8
+    :phone_controls_visibility
+    invoke-virtual {v0, v1}, Landroid/view/View;->setVisibility(I)V
+    :phone_toggle_controls_done
+    return-void
 .end method
 
 
@@ -2092,9 +2313,13 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     # depuis la largeur sans plafond, puis empilement tenté en paysage faute de
     # place pour le chat.
     ).replace(
+        PHONE_GEO_PREVIOUS_TAIL, PHONE_GEO_TAIL,
+    ).replace(
+        PHONE_GEO_PREVIOUS_CLAMPED_TAIL, PHONE_GEO_TAIL,
+    ).replace(
         PHONE_GEO_CLAMPED_TAIL_OLD + PHONE_GEO_ROOM_BLOCK, PHONE_GEO_TAIL,
     ).replace(
-        PHONE_GEO_CLAMPED_TAIL_OLD, PHONE_GEO_CLAMPED_TAIL,
+        PHONE_GEO_CLAMPED_TAIL_OLD, PHONE_GEO_TAIL,
     ).replace(
         PHONE_GEO_CLAMPED_TAIL, PHONE_GEO_TAIL,
     ).replace(
@@ -3243,8 +3468,23 @@ def install_branding(decoded: pathlib.Path, here: pathlib.Path, version_name: st
     changelog_new = CHANGELOG_NEW.format(
         version=version_name, date=release_date
     )
-    if f"<h1>Twouich {version_name}" in changelog.read_text(encoding="utf-8"):
-        log("déjà appliqué : page Nouveautés : entrée Twouich")
+    changelog_source = changelog.read_text(encoding="utf-8")
+    heading_start = f"<h1>Twouich {version_name} ("
+    date_start = changelog_source.find(heading_start)
+    date_end = changelog_source.find(")</h1>", date_start)
+    if date_start >= 0 and date_end >= 0:
+        current_heading = changelog_source[date_start + len(heading_start):date_end]
+        changelog_updated = (
+            changelog_source[:date_start + len(heading_start)]
+            + release_date + changelog_source[date_end:]
+        )
+        if changelog_updated != changelog_source:
+            changelog.write_text(changelog_updated, encoding="utf-8", newline="\n")
+            log(f"mis à jour : page Nouveautés : date {current_heading} → {release_date}")
+        else:
+            log("déjà appliqué : page Nouveautés : entrée Twouich")
+    elif f"<h1>Twouich {version_name}" in changelog_source:
+        fail(f"page Nouveautés : date de {version_name} introuvable pour mise à jour")
     else:
         replace_once(
             changelog,
@@ -3426,8 +3666,8 @@ def main() -> int:
     here = pathlib.Path(__file__).resolve().parent
     parser = argparse.ArgumentParser()
     parser.add_argument("--decoded", required=True, type=pathlib.Path)
-    parser.add_argument("--version-code", type=int, default=162)
-    parser.add_argument("--version-name", default="v1.0.15")
+    parser.add_argument("--version-code", type=int, default=168)
+    parser.add_argument("--version-name", default="v1.0.21")
     parser.add_argument("--apk-name", default=DEFAULT_APK_NAME)
     parser.add_argument("--release-date", default=None,
                         help="date affichée dans la page Nouveautés (AAA.MM.JJ). "
@@ -3498,9 +3738,28 @@ def main() -> int:
         ("res/layout/activity_player.xml", "SendMessageWindow"),
         ("res/layout/include_send_chat_message_window_phone.xml", "ET_SendMessage"),
         ("res/layout/include_send_chat_message_window_phone.xml", "twouich_chat_send"),
+        ("res/layout/include_send_chat_message_window_phone.xml", "twouich_chat_options"),
+        ("res/layout/include_send_chat_message_window_phone.xml", "Options du lecteur"),
+        ("res/layout/include_send_chat_message_window_phone.xml", "twouichPhoneToggleControls"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".method private twouichPhoneWindow()V"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".method public I2()V"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".method private twouichPhoneControlsAttach()V"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".method public twouichPhoneToggleControls(Landroid/view/View;)V"),
         ("res/drawable/twouich_ic_send.xml", "<vector"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhoneWindow"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhoneControlsAttach"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "twouichPhoneToggleControls"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "setDecorFitsSystemWindows(Z)V"),
         ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
          ".method public twouichPhoneSendChatMessage(Landroid/view/View;)V"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".method public twouichPhoneToggleControls(Landroid/view/View;)V"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".method private twouichPhoneControlsAttach()V"),
         ("res/layout-sw600dp/activity_player.xml", "ChatRecycleView"),
         ("res/layout/activity_main.xml", "twouich_phone_nav_search"),
         ("res/layout-sw600dp/activity_main.xml", "main_browse_fragment"),

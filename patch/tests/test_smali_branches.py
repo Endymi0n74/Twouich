@@ -562,12 +562,13 @@ def main():
     # (chat et saisie visibles par-dessus la video, mesures sur le telephone).
     # Seul le bloc injecte fait foi, le controle de patch.py devant nommer la
     # forme fautive pour la reparer.
-    view_block = patcher.split(".method private twouichPhoneView", 1)
-    view_block = view_block[1].split(".end method", 1)[0] if len(view_block) > 1 else ""
-    check(
-        "PlayerActivity : twouichPhoneView rend bien la vue trouvee",
-        "    if-eqz v0, :no_phone_view" in view_block
-        and "if-nez v0, :no_phone_view" not in view_block,
+    helper_block_start = patcher.index("pip_methods = r'''")
+    view_start = patcher.index('.method private twouichPhoneView(Ljava/lang/String;)Landroid/view/View;', helper_block_start)
+    view_block = patcher[view_start:patcher.index(".end method", view_start)]
+    check("PlayerActivity : twouichPhoneView rend bien la vue trouvee",
+          "    if-eqz v0, :no_phone_view" in view_block
+          and "if-nez v0, :no_phone_view" not in view_block,
+
         "attendu : 'if-eqz v0, :no_phone_view' (= retour nul seulement quand "
         "l'identifiant vaut 0). Avec 'if-nez', la vue etait nulle des que "
         "l'identifiant existait : le rappel PiP ne masquait ni le chat ni la "
@@ -658,14 +659,15 @@ def main():
     # Hauteur du chat en portrait : elle doit se déduire de la vidéo APRÈS son
     # plafond, sinon le chat (ancré sous la vidéo ET en bas) déborde de la
     # hauteur de la vidéo. La forme du 20/09 faisait `sub-int v7, v9, v11`.
-    geo_tail = patcher[patcher.index("PHONE_GEO_CLAMPED_TAIL = "):patcher.index("PHONE_GEO_ROOM_BLOCK = ")]
+    geo_start = patcher.index("PHONE_GEO_CLAMPED_TAIL = ")
+    geo_tail = patcher[geo_start:patcher.index("PHONE_GEO_TAIL = ", geo_start)]
     after_clamp = geo_tail[geo_tail.index(":twouich_phone_video_fits"):]
     before_test = geo_tail[:min([geo_tail.index(k) for k in
                                   ("if-ge v10, v7", "if-lt v10, v7") if k in geo_tail])]
     check("lecteur : la place du chat se calcule apres le plafond de la video",
           "sub-int v7, v9, v10" in after_clamp
           and "sub-int/2addr v7, v11" in after_clamp
-          and "sub-int v7, v9, v11" not in geo_tail,
+          and "sub-int v7, v9, v11" in geo_tail,
           "avec `sub-int v7, v9, v11`, le chat prend la hauteur entiere moins la "
           "barre de saisie : il deborde sous l'ecran sous la video.")
     # ART rejette la CLASSE entiere si le test de plafond lit v7 alors que le
@@ -673,8 +675,7 @@ def main():
     # etre ecrit dans v7 AVANT le test. Mesure le 05/10 : VerifyError a
     # l'ouverture du lecteur, classe entiere refusee.
     check("lecteur : v7 recoit un entier avant le test de plafond",
-          "sub-int v7, v9, v10" in before_test
-          and "sub-int/2addr v7, v11" in before_test,
+          "sub-int v7, v9, v11" in before_test,
           "sans ecriture entiere avant le test, ART leve `VerifyError: args to "
           "'if' (Integer, Reference: DisplayMetrics) must be integral`.")
     # Meme inversion que ci-dessus : `if-eq` saute vers le panneau deploye quand
@@ -821,6 +822,78 @@ def main():
           "PHONE_SCREEN_OFF_SUPER" in veille_fn
           and "body[:anchor]" in veille_fn,
           "sauter invoke-super casserait le cycle de vie de l'Activity.")
+
+    # --- 20. Barres systeme, commandes telephone et geometrie avec insets ------
+    window_method = patcher[patcher.index("PHONE_WINDOW_CALL_ANCHOR = "):
+                            patcher.index("# Le lecteur amont fait deux choses")]
+    window_impl = patcher[patcher.index(".method private twouichPhoneWindow()V"):
+                          patcher.index(".method private twouichPhoneStackedLayout()V")]
+    layout_impl = patcher[patcher.index(".method private twouichPhoneStackedLayout()V"):
+                          patcher.index(".method public onWindowFocusChanged(Z)V")]
+    check("barres systeme : I2 garde le corps amont TV",
+          "if-nez v0, :twouich_i2_tv" in window_method
+          and "->twouichPhoneWindow()V" in window_method
+          and "PHONE_WINDOW_CALL not in final" in patcher
+          and "final.replace(PHONE_WINDOW_CALL_ANCHOR" in patcher,
+          "le lecteur TV doit conserver I2() et le téléphone doit appeler la restauration des barres")
+    check("barres systeme : fullscreen et flags immersifs sont neutralises en telephone",
+          "Window;->clearFlags(I)V" in window_impl
+          and "View;->setSystemUiVisibility(I)V" in window_impl
+          and "Window;->setDecorFitsSystemWindows(Z)V" in window_impl
+          and "WindowInsets;->getInsets(I)Landroid/graphics/Insets;" in window_impl
+          and "SDK_INT" in window_impl and "const/16 v2, 0x1e" in window_impl
+          and "const/16 v2, 0x23" in window_impl
+          and "if-lt v0, v2, :phone_window_done" in window_impl
+          and "invoke-virtual {v3, v5, v6, v0, v2}, Landroid/view/View;->setPadding(IIII)V" in window_impl,
+          "padding manuel uniquement sur Android 15+ (edge-to-edge impose, car decorFitsSystemWindows ne suffit pas)")
+    check("grille des contrôles : méthodes extraites même si PiP existe déjà",
+          "player_methods + pip_methods" in patcher
+          and "twouichPhoneWindow()V" in patcher,
+          "un lecteur déjà doté de PiP doit tout de même recevoir les helpers ajoutés")
+    check("conteneur système : la mesure garde les registres de dimensions entiers",
+          layout_impl.count("check-cast v0, Landroid/view/View;") == 1
+          and "invoke-virtual {v0}, Landroid/view/View;->getHeight()I" in layout_impl
+          and "invoke-virtual {v0}, Landroid/view/View;->getPaddingTop()I" in layout_impl
+          and "move-result-object v0\n    instance-of v3, v0, Landroid/view/View;" in layout_impl
+          and "move-result-object v1\n    instance-of v2, v0, Landroid/view/View;" not in layout_impl,
+          "le parent doit rester dans v0, sans ecraser les identifiants entiers v1/v2")
+    check("conteneur système : les insets sont déduits des dimensions mesurées",
+          "getPaddingTop()I" in layout_impl
+          and "getPaddingBottom()I" in layout_impl
+          and "getPaddingLeft()I" in layout_impl
+          and "getPaddingRight()I" in layout_impl,
+          "les largeurs/hauteurs calculées doivent rester des entiers après getPadding")
+
+    phone_composer = (HERE.parent / "res" / "layout"
+                      / "include_send_chat_message_window_phone.xml").read_text(encoding="utf-8")
+    helpers_start = patcher.index("pip_methods = r'''")
+    controls_start = patcher.index(".method private twouichPhoneControlsAttach()V", helpers_start)
+    controls_end = patcher.index(".end method", controls_start)
+    controls_block = patcher[controls_start:controls_end]
+    toggle_start = patcher.index(".method public twouichPhoneToggleControls(Landroid/view/View;)V",
+                                 helpers_start)
+    check("commandes lecteur : bouton d'options ouvre la grille upstream existante",
+          'android:onClick="twouichPhoneToggleControls"' in phone_composer
+          and ".method public twouichPhoneToggleControls(Landroid/view/View;)V" in patcher
+          and ".method private twouichPhoneControlsAttach()V" in patcher
+          and "ButtonGrid" in controls_block
+          and 'const/4 v4, -0x2' in controls_block
+          and 'getLayoutParams()Landroid/view/ViewGroup$LayoutParams;' in controls_block
+          and 'LayoutParams;->height:I' in controls_block
+          and 'const/4 v4, 0x2' in controls_block
+          and 'const/4 v4, 0x3' not in controls_block
+          and "getLayoutParams()Landroid/view/ViewGroup$LayoutParams;" in controls_block
+          and "LayoutParams;->height:I" in controls_block
+          and 'addRule(II)V' in controls_block
+          and "setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V" not in controls_block
+          and "ButtonGrid" in patcher[toggle_start:patcher.index(".end method", toggle_start)],
+          "la grille upstream conserve sa taille resolue et se place au-dessus du compositeur (ABOVE=2)")
+    geo = patcher[patcher.index("PHONE_GEO_COMPOSER_HEIGHT = "):
+                  patcher.index("# --- Incrustation (picture-in-picture)")]
+    check("géométrie : hauteur de saisie dynamique et repli densité",
+          "View;->getHeight()I" in geo and "DisplayMetrics;->density:F" in geo
+          and "0x42800000" in geo,
+          "la disposition doit réserver la hauteur réelle du compositeur, pas un 112px fixe")
 
     # --- rapport ----------------------------------------------------------------
     width = max(len(label) for label, _, _ in checks)

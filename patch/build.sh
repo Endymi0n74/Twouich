@@ -53,13 +53,13 @@ if [ "$SKIP_SIGNING" != "1" ] && [ -z "$KEY_PASS" ]; then
     exit 1
 fi
 
-VERSION_CODE=167
-VERSION_NAME="v1.0.20"
-APK_NAME="Twouich_v1.0.20.apk"
+VERSION_CODE=168
+VERSION_NAME="v1.0.21"
+APK_NAME="Twouich_v1.0.21.apk"
 # Date AFFICHÉE dans la page « Nouveautés » embarquée — constante figée par
 # version, jamais la date du jour : sinon chaque rebuild change les octets du
 # livrable (build reproductible). À faire évoluer au prochain bump de version.
-VERSION_RELEASE_DATE="2026.10.05"
+VERSION_RELEASE_DATE="2026.10.06"
 
 echo "═══════════════════════════════════════════════"
 echo "  Twouich — build $VERSION_NAME ($VERSION_CODE)"
@@ -183,7 +183,7 @@ EOF
     exit 0
 fi
 echo "🔐 Alignement + signature…"
-rm -f dist/*.apk dist/*.idsig
+rm -f "dist/$APK_NAME" "dist/twouich_unsigned-aligned-signed.apk" "dist/$APK_NAME.idsig"
 java -jar "$SIGNER" \
     --apks "$BUILD_DIR/twouich_unsigned.apk" \
     --ks "$KEYSTORE" --ksAlias "$KEY_ALIAS" \
@@ -194,7 +194,7 @@ java -jar "$SIGNER" \
 SIGNED="dist/twouich_unsigned-aligned-signed.apk"
 [ -f "$SIGNED" ] || { echo "❌ APK signé introuvable ($SIGNED)"; exit 1; }
 mv -f "$SIGNED" "dist/$APK_NAME"
-rm -f dist/*.idsig
+rm -f "dist/$APK_NAME.idsig"
 
 echo "🔎 Vérification de la signature…"
 java -jar "$SIGNER" -y --verbose -a "dist/$APK_NAME" 2>&1 \

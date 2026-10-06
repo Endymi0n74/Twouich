@@ -850,6 +850,47 @@ def main() -> int:
         ok &= check("bouton Envoyer : icône et identifiant compilés",
                     holds(arsc, "twouich_ic_send") and holds(arsc, "twouich_chat_send"),
                     "icône ou identifiant du bouton absents des ressources")
+        ok &= check("options du lecteur : bouton mobile compilé",
+                    hint_layout in names
+                    and holds(z.read(hint_layout), "twouichPhoneToggleControls")
+                    and holds(z.read(hint_layout), "Options du lecteur")
+                    and holds(arsc, "twouich_chat_options"),
+                    "le compositeur doit exposer un bouton qui ouvre les contrôles existants")
+        player_buttons = "res/layout/include_player_buttons.xml"
+        ok &= check("grille des contrôles amont et ses identifiants compilés",
+                    player_buttons in names
+                    and holds(arsc, "ButtonGrid")
+                    and all(holds(arsc, action) for action in (
+                        "ButtonSearch", "ButtonChannelProfile", "ButtonVideoQuality",
+                        "ButtonChatOnOFF", "ButtonChatPosition", "ButtonMultiViewSize",
+                        "ButtonFollow", "ButtonSendMessage", "ButtonVolumeControl",
+                        "ButtonFastForward", "ButtonVideoSize", "ButtonSaveVod",
+                        "ButtonStat4Nerds")),
+                    "la grille et les commandes upstream doivent rester dans l'APK mobile")
+        ok &= check("contrôles téléphone rattachés et basculables dans le dex",
+                    holds(dex_blob, "twouichPhoneControlsAttach")
+                    and holds(dex_blob, "twouichPhoneToggleControls")
+                    and holds(dex_blob, "ButtonGrid"),
+                    "l'APK doit déplacer la grille existante puis permettre de l'afficher")
+        ok &= check("barres système téléphone : correction et appel I2 compilés",
+                    holds(dex_blob, "twouichPhoneWindow")
+                    and holds(dex_blob, "setDecorFitsSystemWindows")
+                    and holds(dex_blob, "getRootWindowInsets")
+                    and holds(dex_blob, "getPaddingTop")
+                    and holds(dex_blob, "twouichPhoneStackedLayout")
+                    and holds(dex_blob, "setPadding")
+                    and holds(dex_blob, "WindowInsets$Type")
+                    and holds(dex_blob, "I2"),
+                    "l'APK doit appliquer les insets du système au contenu et conserver le chemin TV")
+
+        candidate_apk = apk.name != DEFAULT_APK.name
+        ok &= check("version candidate non publiée identifiable dans le manifeste",
+                    candidate_apk or os.environ.get("ALLOW_UPDATE_JSON_LAG") == "1",
+                    "un APK candidat local ne doit être confondu avec une release/update.json publiée")
+        if candidate_apk and os.environ.get("ALLOW_UPDATE_JSON_LAG") == "1":
+            print("   (update.json en retard explicitement toléré : ALLOW_UPDATE_JSON_LAG=1)")
+        if candidate_apk:
+            print("   (candidat local : update.json n'est pas modifié)")
         # Les quatre écrans qui n'avaient AUCUN chemin tactile (05/10/2026) :
         # verrou sur le LIVRABLE, pas seulement sur patch.py — une régression
         # qui les retirait du layout se verrait ici alors qu'un simple audit de
@@ -930,6 +971,20 @@ def main() -> int:
             body = z.read(page)
             ok &= check(f"{page} : identité Twouich, plus de fond rouge",
                         holds(body, "Twouich") and b"#a30f2d" not in body)
+        changelog_body = (z.read("assets/S0undTV_changelog.html")
+                          if "assets/S0undTV_changelog.html" in names else b"")
+        build_values = {}
+        for line in (ROOT / "patch" / "build.sh").read_text(encoding="utf-8").splitlines():
+            if line.startswith(("VERSION_NAME=", "VERSION_RELEASE_DATE=")):
+                key, value = line.split("=", 1)
+                build_values[key] = value.strip().strip('"')
+        release_name = build_values.get("VERSION_NAME")
+        release_date = build_values.get("VERSION_RELEASE_DATE")
+        expected_heading = (f"Twouich {release_name} ({release_date})"
+                            if release_name and release_date else None)
+        ok &= check("page Nouveautés embarquée à la date de release figée",
+                    bool(expected_heading and holds(changelog_body, expected_heading)),
+                    f"attendu : {expected_heading}")
 
         # 4b. Les pages légales embarquées : présentes, avec leur contenu clé, et
         #     la page À propos pointe vers elles (l'utilisateur doit pouvoir les

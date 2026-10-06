@@ -1,11 +1,4 @@
-"""Vérifie la séquence portrait générée par patch.py (bloc du lecteur).
-
-Garde hors appareil pour le VerifyError du 05/10 : `v7` porte la référence
-DisplayMetrics issue de getDisplayMetrics(), donc le test de plafond doit être
-précédé d'une ÉCRITURE ENTIÈRE dans v7 — sinon ART rejette la classe entière
-(`args to 'if' (Integer, Reference: android.util.DisplayMetrics) must be
-integral`) et le lecteur ne s'ouvre plus du tout.
-"""
+"""Vérifie la séquence portrait générée par patch.py (bloc du lecteur)."""
 import importlib.util
 import pathlib
 import sys
@@ -25,14 +18,20 @@ print(seq)
 problems = []
 first_test = min([seq.index(k) for k in ("if-ge v10, v7", "if-lt v10, v7") if k in seq])
 before = seq[:first_test]
-if "sub-int v7, v9, v10" not in before or "sub-int/2addr v7, v11" not in before:
-    problems.append("aucun entier ecrit dans v7 avant le test de plafond (VerifyError)")
-elif before.rindex("sub-int/2addr v7, v11") < before.rindex("sub-int v7, v9, v10"):
-    problems.append("calcul de la place dans le desordre")
+if "View;->getHeight()I" not in before or "move-result v11" not in before:
+    problems.append("hauteur du compositeur reel absente avant la geometrie")
+if "DisplayMetrics;->density:F" not in before or "0x42800000" not in before:
+    problems.append("repli en dp/densite absent avant la premiere mesure")
+if "sub-int v7, v9, v11" not in before:
+    problems.append("hauteur disponible avant la video non initialisee")
 
 after = seq[seq.index(":twouich_phone_video_fits"):]
 if "sub-int v7, v9, v10" not in after:
     problems.append("hauteur du chat non recalculee apres le plafond de la video")
+if "sub-int/2addr v7, v11" not in after:
+    problems.append("hauteur reelle du compositeur non deduite de la zone du chat")
+if "if-ge v7, v3, :twouich_phone_room" not in seq:
+    problems.append("garde de place minimale pour le chat absent")
 
 for problem in problems:
     print("KO :", problem)
