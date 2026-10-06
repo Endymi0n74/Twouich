@@ -884,10 +884,8 @@ def main() -> int:
                     "l'APK doit appliquer les insets du système au contenu et conserver le chemin TV")
 
         candidate_apk = apk.name != DEFAULT_APK.name
-        ok &= check("version candidate non publiée identifiable dans le manifeste",
-                    candidate_apk or os.environ.get("ALLOW_UPDATE_JSON_LAG") == "1",
-                    "un APK candidat local ne doit être confondu avec une release/update.json publiée")
-        if candidate_apk and os.environ.get("ALLOW_UPDATE_JSON_LAG") == "1":
+        lag_allowed = os.environ.get("ALLOW_UPDATE_JSON_LAG") == "1"
+        if candidate_apk and lag_allowed:
             print("   (update.json en retard explicitement toléré : ALLOW_UPDATE_JSON_LAG=1)")
         if candidate_apk:
             print("   (candidat local : update.json n'est pas modifié)")
@@ -1071,29 +1069,23 @@ def main() -> int:
                     isinstance(code, int) and bool(name), f"lu : {code} / {name}")
         print(f"   → versionCode {code}, versionName {name}")
 
-    # 7. Cohérence avec `update.json`, mais seulement pour le livrable : c'est lui
-    #    que l'app interroge avant de télécharger, et l'URL qu'elle construit est
-    #    `releases/download/<VersionName>/<APK>`. Un artefact quelconque (l'APK
-    #    upstream, une version précédente) n'a pas à y figurer.
-    if apk.name == DEFAULT_APK.name and isinstance(code, int) and name:
+    # 7. Cohérence avec `update.json` : une fois le manifeste lu, l'APK local
+    #    doit correspondre à l'annonce courante. En publication, la tolérance
+    #    ALLOW_UPDATE_JSON_LAG est réservée au tag CI, qui publie l'asset avant
+    #    l'annonce updater.
+    if not lag_allowed and isinstance(code, int) and name:
         update = json.loads((ROOT / "update.json").read_text(encoding="utf-8"))
         stable = [e for e in update if e.get("ReleaseType") == 0]
         ok &= check("update.json : une seule entrée stable", len(stable) == 1,
                     f"{len(stable)} entrées de type stable")
         if len(stable) == 1:
             entry = stable[0]
-            # En CI, sur un tag, update.json ne décrit PAS encore ce livrable :
-            # l'annonce est poussée après la release (sinon 404 silencieux).
-            # ALLOW_UPDATE_JSON_LAG=1 tolère ce décalage voulu, et seulement lui.
-            lag_ok = os.environ.get("ALLOW_UPDATE_JSON_LAG") == "1"
-            if lag_ok:
-                print("   (update.json en retard toléré : ALLOW_UPDATE_JSON_LAG=1)")
             ok &= check("update.json décrit ce livrable",
-                        lag_ok or (entry.get("VersionCode") == code and entry.get("VersionName") == name),
+                        entry.get("VersionCode") == code and entry.get("VersionName") == name,
                         f"update.json={entry.get('VersionCode')}/{entry.get('VersionName')} "
                         f"≠ livrable {code}/{name}")
             ok &= check("update.json annonce ce fichier-ci",
-                        lag_ok or entry.get("APK") == apk.name,
+                        entry.get("APK") == apk.name,
                         f"update.json={entry.get('APK')} ≠ {apk.name}")
 
     sha = hashlib.sha256(apk.read_bytes()).hexdigest()
