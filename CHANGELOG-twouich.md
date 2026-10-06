@@ -2,6 +2,8 @@
 
 ## v1.0.22 — 6 octobre 2026
 
+> **Publié le 6 octobre 2026** (`versionCode 169`) : tag `v1.0.22`, release avec l’APK et `changelog.html`, CI signée verte (run `37510883456`), annonce `update.json` poussée après publication (`ReleaseDate` = `publishedAt`, `2026-10-06T18:23:36Z`). APK publié : 11 265 379 o, SHA-256 `d041dbef874bd0b4e94b146d82834750f5fd95c88883d5c37b9beca143b83bab` — **identique aux octets servis, et reproduit par le build local** ; la CI a revérifié `local = servi`. Le build nettoie aussi un descripteur smali invalide (`startActivity(v0)V`) hérité de l’ancienne greffe, qui empêchait `apktool b` sur un arbre réutilisé.
+
 - **La page « Application info » décrit enfin la version Twouich installée.** Version name, version code, branche et date de build sont harmonisés avec le manifeste dans les Réglages, l'écran debug, le lecteur et les deux côtés du comparateur qui ouvre les Nouveautés.
 - **La rangée de quatre raccourcis superflus disparaît de l'accueil téléphone.** À propos, Vie privée, Nouveautés et Déconnexion ne sont plus dupliqués au-dessus de la navigation ; Accueil, Parcourir et Réglages restent disponibles.
 
