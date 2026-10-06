@@ -687,28 +687,69 @@ def main():
           and "if-ge v1, v2, :cond_twouich_tv_headers" in patcher,
           "l'etat du panneau etait calcule sur les seuls dp : la TV perdait sa "
           "colonne de navigation (HEADERS_HIDDEN).")
-    # Les quatre ecrans qui n'avaient AUCUN chemin tactile (05/10/2026).
-    # Mesure sur BlueStacks a 480 dp : l'accueil n'exposait que 5 elements
-    # cliquables, et « Application info » ne montrait que le build amont
-    # (beta_144) — ni A propos, ni mentions legales, ni changelog, ni deconnexion.
-    # Ces quatre activites ne sont PAS exportees (un `am start` externe echoue),
-    # mais un Intent explicite emis par l'application n'a pas cette contrainte.
-    _ACTIONS = ("About", "Privacy", "ChangeLog", "Logout")
-    _ACTIVITIES = ("AboutActivity", "PrivacyPolicyActivity",
-                   "ChangeLogActivity", "LogoutDialogActivity")
-    check("ecrans sans tactile : les 4 methodes demarrent une activite existante",
-          all(f".method public twouichPhone{n}(Landroid/view/View;)V" in patcher
-              for n in _ACTIONS)
-          and all(f'"com.s0und.s0undtv.activities.{a}"' in patcher for a in _ACTIVITIES)
-          and all(f'android:onClick="twouichPhone{n}"' in patcher for n in _ACTIONS),
-          "sans la methode ET son android:onClick, le bouton du layout ne trouve "
-          "aucun gestionnaire : le tap ne fait rien, silencieusement.")
-    check("ecrans sans tactile : la rangee d'actions est dans le layout telephone",
-          all(f"@+id/twouich_phone_act_{i}" in patcher
-              for i in ("about", "privacy", "changelog", "logout"))
-          and 'android:layout_height="104dp"' in patcher,
-          "sans la rangee, les quatre methodes existent mais aucun doigt ne "
-          "peut les atteindre.")
+    spec = importlib.util.spec_from_file_location("twouich_patch", PATCHER)
+    patch_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(patch_module)
+
+    # La rangée A propos/Vie privée/Nouveautés/Déconnexion ajoutée en octobre
+    # n'était pas voulue : elle dupliquait des entrées d'autres écrans, prenait
+    # 48dp et repoussait encore l'accueil. La navigation doit rester uniquement
+    # Accueil / Parcourir / Réglages, dans une barre de 56dp. Le garde retire aussi
+    # les anciennes méthodes injectées dans un arbre réutilisé.
+    _QUICK_ACTIONS = ("About", "Privacy", "ChangeLog", "Logout")
+    nav_start = patcher.index("def patch_smartphone_navigation(")
+    layout_start = patcher.index('    layout = """', nav_start)
+    layout_end = patcher.index('"""', layout_start + len('    layout = """'))
+    phone_layout = patcher[layout_start:layout_end]
+    methods_start = patcher.index('    methods = """', nav_start)
+    methods_end = patcher.index('"""', methods_start + len('    methods = """'))
+    phone_methods = patcher[methods_start:methods_end]
+    check("navigation smartphone : aucune rangée de raccourcis surnuméraires",
+          "twouich_phone_act_bar" not in phone_layout
+          and all(f"twouich_phone_act_{i}" not in phone_layout
+                  for i in ("about", "privacy", "changelog", "logout"))
+          and all(f"twouichPhone{n}" not in phone_methods for n in _QUICK_ACTIONS)
+          and 'android:layout_height="56dp"' in phone_layout
+          and 'android:layout_marginBottom="62dp"' in phone_layout
+          and "Activity;->startActivity(Landroid/content/Intent;)V" in phone_methods
+          and "Activity;->startActivity(v0)V" not in phone_methods
+          and "remove_phone_quick_action_layout(layout)" not in phone_layout
+          and "remove_phone_quick_action_layout(legacy_layout)" in patcher,
+          "le shell téléphone ne doit contenir que les trois onglets bas et réserver 56dp.")
+    sample_row = '''<FrameLayout>
+    <LinearLayout android:id="@+id/twouich_phone_nav_bar">
+        <View android:layout_height="1dp" />
+        <LinearLayout android:id="@+id/twouich_phone_act_bar">
+            <TextView android:id="@+id/twouich_phone_act_about" />
+            <TextView android:id="@+id/twouich_phone_act_privacy" />
+            <TextView android:id="@+id/twouich_phone_act_changelog" />
+            <TextView android:id="@+id/twouich_phone_act_logout" />
+        </LinearLayout>
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#2a2a2e" />
+        <LinearLayout android:id="@+id/twouich_phone_nav_home" />
+    </LinearLayout>
+</FrameLayout>'''
+    cleaned_row = patch_module.remove_phone_quick_action_layout(sample_row)
+    check("navigation smartphone : la suppression garde les onglets et est idempotente",
+          all(f"twouich_phone_act_{i}" not in cleaned_row
+              for i in ("bar", "about", "privacy", "changelog", "logout"))
+          and "twouich_phone_nav_home" in cleaned_row
+          and patch_module.remove_phone_quick_action_layout(cleaned_row) == cleaned_row,
+          "la rangée doit disparaitre sans effacer la séparation ni les trois onglets.")
+    sample_methods = "\n".join(
+        f".method public twouichPhone{name}(Landroid/view/View;)V\n    .locals 0\n    return-void\n.end method\n"
+        for name in _QUICK_ACTIONS
+    )
+    cleaned_methods = patch_module.remove_phone_quick_action_methods(sample_methods)
+    check("navigation smartphone : callbacks obsolètes supprimés et idempotents",
+          all(f"twouichPhone{name}" not in cleaned_methods for name in _QUICK_ACTIONS)
+          and patch_module.remove_phone_quick_action_methods(cleaned_methods) == cleaned_methods,
+          "les anciens callbacks ne doivent plus accompagner les onglets du shell.")
+    check("navigation smartphone : build ajoute uniquement les trois callbacks utiles",
+          all(f"twouichPhone{name}" not in patcher for name in _QUICK_ACTIONS)
+          and all(f"twouichPhone{name}" in patcher for name in ("Home", "Search", "Settings")),
+          "aucun callback À propos/Vie privée/Nouveautés/Déconnexion ne doit être généré.")
     # Connexion au doigt : le bandeau d'en-tete devient le bouton. Mesure du
     # 05/10/2026 sur le Xiaomi (Android 16) : tap, appui long et touche MENU
     # ouvraient autre chose, le titre n'etait pas cliquable, et les entrees
@@ -904,9 +945,6 @@ def main():
     # canonique (restore → keepalive → empilement, une seule fois chacun), la
     # conservation des appels upstream (getWindow), et l'idempotence au second
     # passage (un second build ne doit plus rien changer).
-    spec = importlib.util.spec_from_file_location("twouich_patch", PATCHER)
-    patch_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(patch_module)
     on_resume = """.method protected onResume()V
     .locals 4
     invoke-static {v0}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
@@ -937,6 +975,60 @@ def main():
           "restore → keepalive → empilement une seule fois chaque, dans cet ordre, "
           "sans perdre les appels upstream, et un second passage est un no-op "
           "(sinon chaque build ajouterait des octets : écart local/CI du 06/10)")
+
+    # --- 21. « Application info » : les métadonnées de build sont codifiées ---
+    # Mesure du 06/10 sur la v1.0.21 installée (téléphone Xiaomi Android 16 ET
+    # BlueStacks) : la page « Application info » affichait beta_144 / 144 /
+    # STV-64-custom-proxy-servers / 28-12-2025 — le build amont, pas le nôtre.
+    # Le correctif avait bien été posé le 21/09 sur l'arbre, mais jamais codifié :
+    # build.sh redésassemble dès que versionName change, il repartait donc à chaque
+    # bump (d'où deux bulletins de CHANGELOG non reproductibles). Six surfaces
+    # portent ces littéraux, y compris les DEUX côtés du comparateur « mise à
+    # jour » (MainFragment les écrit dans les prefs, P6/c les relit) : les réécrire
+    # d'un seul côté fermerait la page « Nouveautés » après une mise à jour.
+    info_targets = patch_module.app_info_targets(169, "v1.0.22", "2026.10.06")
+    info_rels = [rel for rel, _old, _new, _what in info_targets]
+    info_news = [new for _rel, _old, new, _what in info_targets]
+    info_branch = [new for _rel, _old, new, _w in info_targets
+                   if "fork de S0undTV" in new]
+    check("application info : les six surfaces sont reecrites, sans literal amont",
+          "patch_app_info(decoded, args.version_code, args.version_name, "
+          "args.release_date)" in patcher
+          and set(info_rels) == set(patch_module.APP_INFO_PATHS)
+          and len(info_targets) == 12
+          and not any(lit in new
+                      for new in info_news
+                      for lit in patch_module.APP_INFO_UPSTREAM_LITERALS)
+          and len(info_branch) == 2
+          and all(patch_module.APP_INFO_BRANCH in new for new in info_branch),
+          "sans cette cible, chaque release réaffiche le build amont (beta_144 / "
+          "144 / STV-64-…) : c'est le correctif manuel du 21/09, jamais codifié "
+          "et reparti à chaque bump de version.")
+    # Les deux côtés du comparateur doivent porter la MÊME identité : deux
+    # valeurs différentes et la page « Nouveautés » ne s'ouvre plus après une
+    # mise à jour (MainFragment écrit la version, P6/c la compare).
+    main_new = " ".join(new for rel, _o, new, _w in info_targets
+                        if rel == patch_module.APP_INFO_MAIN)
+    read_new = " ".join(new for rel, _o, new, _w in info_targets
+                        if rel == patch_module.APP_INFO_READ)
+    check("application info : ecriture et lecture de la version restent identiques",
+          '"v1.0.22"' in main_new and "0xa9" in main_new
+          and '"v1.0.22"' in read_new and "0xa9" in read_new,
+          "169 s'écrit 0xa9 des deux côtés : deux identités différentes et la "
+          "détection « mise à jour » comparerait beta_144 à v1.0.22.")
+    # La date de build vient de la date de release (constante de build), jamais
+    # de today() : deux dates donnent deux epoch différents, et l'epoch amont
+    # (2025-12-28 17:46:34 GMT+01:00) n'est plus dans aucune cible.
+    time_new = [new for rel, _o, new, _w in info_targets
+                if rel == patch_module.APP_INFO_BUILD]
+    check("application info : la date de build suit la date de release",
+          len(time_new) == 1
+          and time_new[0]
+          == f"const-wide v1, 0x{patch_module.build_time_epoch_ms('2026.10.06'):x}L"
+          and time_new[0]
+          != f"const-wide v1, 0x{patch_module.build_time_epoch_ms('2026.10.07'):x}L",
+          "un today() dans la date affichée changerait l'affichage d'un rebuild "
+          "à l'autre (build non reproductible).")
 
     # --- rapport ----------------------------------------------------------------
     width = max(len(label) for label, _, _ in checks)

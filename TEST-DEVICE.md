@@ -2513,36 +2513,32 @@ destinés à l'accueil et au lecteur — on croyait à tort que l'app ouvrait
 `ChangeLogActivity` ou la fiche chaîne. Il se ferme par **retour arrière**, pas par un
 bouton (aucun libellé n'y est exposé par `uiautomator`, seulement `page_indicator`).
 
-#### Accueil authentifié : 9 éléments, et la géométrie au pixel
+#### Accueil authentifié : géométrie mesurée (historique du build local du 05/10)
 
-L'accueil est passé de 5 à **9 éléments cliquables**, avec les bornes mesurées :
+La mesure ci-dessous portait sur le **build 166 local**, installé pour l'essai des raccourcis,
+pas sur la release publiée. Ces quatre raccourcis ont ensuite été publiés dans un build local
+pour essai ; l'utilisateur a confirmé qu'ils n'avaient pas leur place sur la barre d'accueil.
+Le patch source les retire maintenant. Les positions du build historique :
 
 | Élément | Bornes | Taille |
 |---------|--------|--------|
 | `title_orb` | `[53,47][131,125]` | 78 × 78 px (52 dp) |
-| `twouich_phone_act_about` | `[0,1126][180,1198]` | 180 × 72 px (**120 × 48 dp**) |
+| `twouich_phone_act_about` | `[0,1126][180,1198]` | 180 × 72 px (120 × 48 dp) |
 | `twouich_phone_act_privacy` | `[180,1126][360,1198]` | 180 × 72 px |
 | `twouich_phone_act_changelog` | `[360,1126][540,1198]` | 180 × 72 px |
 | `twouich_phone_act_logout` | `[540,1126][720,1198]` | 180 × 72 px |
 | `twouich_phone_nav_home` / `search` / `settings` | `[0,1200][720,1280]` | 3 × 240 × 80 px |
 
-Les quatre actions font exactement 120 × 48 dp, comme le gabarit, et les sept se
-coupent exactement à 1126 / 1198 / 1200 / 1280. Le contenu est bien authentifié :
+Ces quatre raccourcis ne sont pas nécessaires à la navigation et ne doivent plus apparaître ;
+seuls les trois onglets bas (Accueil / Parcourir / Réglages) sont conservés dans le shell téléphone.
+La version publiée 168 n'est pas modifiée. Le contenu authentifié pendant la mesure était
 `Followed (3)`, `Followed Channels (22)`, `502 viewers`, `Niniste`, `Just Chatting`.
 
-#### Les quatre taps ouvrent la bonne activité — 4/4, mesuré sur l'APK publié
+#### Historique : les quatre taps ouvraient la bonne activité sur le build local du 05/10
 
-| Tap | Activité attendue | Observé |
-|-----|-------------------|---------|
-| A propos | `AboutActivity` | ✅ `AboutActivity` |
-| Vie privée | `PrivacyPolicyActivity` | ✅ `PrivacyPolicyActivity` |
-| Nouveautés | `ChangeLogActivity` | ✅ `ChangeLogActivity` |
-| Déconnexion | `LogoutDialogActivity` | ✅ `LogoutDialogActivity` |
-
-`LogoutDialogActivity` ouvert mais **jamais confirmé** : la session est intacte. C'est la
-première fois que ces quatre écrans sont atteints par un doigt — jusque-là, leur
-présence ne reposait que sur l'audit statique du dex et du manifeste, et sur des
-mutations de l'APK. **0 `FATAL` sur l'ensemble.**
+Les taps avaient été vérifiés sur le build local contenant les raccourcis, pas sur la release.
+Cette navigation a été retirée du shell car ces quatre boutons étaient superflus ; les écrans
+restent accessibles par leurs parcours habituels dans l'application.
 
 #### Le portrait reproduit le § 8.19, avec un vrai flux en marche
 

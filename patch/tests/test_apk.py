@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import io
 import json
 import os
@@ -889,47 +890,35 @@ def main() -> int:
             print("   (update.json en retard explicitement toléré : ALLOW_UPDATE_JSON_LAG=1)")
         if candidate_apk:
             print("   (candidat local : update.json n'est pas modifié)")
-        # Les quatre écrans qui n'avaient AUCUN chemin tactile (05/10/2026) :
-        # verrou sur le LIVRABLE, pas seulement sur patch.py — une régression
-        # qui les retirait du layout se verrait ici alors qu'un simple audit de
-        # la source ne la verrait pas.
+        # Ces quatre raccourcis avaient été ajoutés à tort dans le shell téléphone.
+        # Vérifier l'APK livré lui-même : les identifiants n'existent plus dans les
+        # ressources, les callbacks ne doivent subsister dans aucun dex, et les
+        # destinations des autres écrans restent déclarées pour leur navigation
+        # native (Réglages / pages de l'application).
         phone_main = "res/layout/activity_main.xml"
         phone_bytes = z.read(phone_main) if phone_main in names else b""
-        _ENTRY = (("about", "twouichPhoneAbout", "AboutActivity"),
-                  ("privacy", "twouichPhonePrivacy", "PrivacyPolicyActivity"),
-                  ("changelog", "twouichPhoneChangeLog", "ChangeLogActivity"),
-                  ("logout", "twouichPhoneLogout", "LogoutDialogActivity"))
-        ok &= check("écrans sans tactile : les 4 actions sont dans le layout LIVRÉ",
-                    # Les identifiants sont résolus en ENTIERS dans l'AXML : leur
-                    # nom ne vit que dans resources.arsc. Les valeurs d'attribut,
-                    # elles (android:onClick), restent dans le layout compilé.
-                    # Chercher les deux au même endroit donnerait un verdict faux
-                    # dans un sens comme dans l'autre.
-                    all(holds(arsc, f"twouich_phone_act_{i}") for i, _, _ in _ENTRY)
-                    and all(holds(phone_bytes, h) for _, h, _ in _ENTRY),
-                    f"absent du {phone_main} livré ou de resources.arsc : "
-                    "identifiant d'action ou android:onClick correspondant")
-        # Un `android:onClick` qui nomme une méthode absente du dex ne se voit
-        # dans AUCUN audit de layout : le bouton s'affiche, et l'app meurt au
-        # moment du tap. C'est le défaut que ce second verrou couvre — les deux
-        # premiers ne le verraient pas.
-        ok &= check("écrans sans tactile : les 4 méthodes sont dans le dex livré",
-                    all(holds(dex_blob, h) for _, h, _ in _ENTRY),
-                    "méthode d'action absente du dex : "
-                    + ", ".join(h for _, h, _ in _ENTRY if not holds(dex_blob, h)))
-        # Même raison pour la cible : une activité non déclarée ouvre « app
-        # introuvable ». Le manifeste livré est en AXML binaire, son pool de
-        # chaînes est en UTF-16 — `holds` teste les deux encodages.
-        ok &= check("écrans sans tactile : les 4 activités sont déclarées",
-                    all(holds(manifest, a) for _, _, a in _ENTRY),
-                    "activité absente du manifeste livré : "
-                    + ", ".join(a for _, _, a in _ENTRY if not holds(manifest, a)))
-        # Non-régression TV : la copie layout-television/ est la sienne, elle ne
-        # doit surtout pas hériter de la rangée d'actions.
+        _phone_dex_files = [n for n in names if re.fullmatch(r"classes(?:\d+)?\.dex", n)]
+        _phone_dex = b"".join(z.read(n) for n in _phone_dex_files)
+        _QUICK_ACTIONS = ("about", "privacy", "changelog", "logout")
+        _QUICK_METHODS = ("twouichPhoneAbout", "twouichPhonePrivacy",
+                          "twouichPhoneChangeLog", "twouichPhoneLogout")
+        ok &= check("navigation smartphone : les 4 raccourcis sont absents du layout livré",
+                    not any(holds(arsc, f"twouich_phone_act_{i}") for i in _QUICK_ACTIONS)
+                    and not holds(phone_bytes, "twouichPhoneAbout")
+                    and not holds(phone_bytes, "twouichPhonePrivacy")
+                    and not holds(phone_bytes, "twouichPhoneChangeLog")
+                    and not holds(phone_bytes, "twouichPhoneLogout"),
+                    "un identifiant ou android:onClick surnuméraire reste dans le layout mobile")
+        ok &= check("navigation smartphone : les 4 callbacks sont absents du dex livré",
+                    not any(holds(_phone_dex, method) for method in _QUICK_METHODS),
+                    "callbacks obsolètes présents : "
+                    + ", ".join(method for method in _QUICK_METHODS if holds(_phone_dex, method)))
+        # Le shell TV n'a jamais porté ces raccourcis.
         _tv_main = [n for n in names if n.endswith("/activity_main.xml") and n != phone_main]
-        ok &= check("écrans sans tactile : aucune fuite dans les variantes TV / sw600dp",
-                    all(not holds(z.read(n), "twouich_phone_act_about") for n in _tv_main),
-                    f"rangée d'actions presente dans une des variantes : {_tv_main}")
+        ok &= check("navigation smartphone : aucune fuite des raccourcis dans les layouts TV",
+                    all(not any(holds(z.read(n), f"twouich_phone_act_{i}")
+                                for i in _QUICK_ACTIONS) for n in _tv_main),
+                    f"raccourci surnuméraire dans une variante TV : {_tv_main}")
         # Le bouton emprunte la MÊME voie d'envoi que la touche ENTER du clavier :
         # le callback asynchrone Ly6/i0(PlayerActivity, String) est ce qui partage
         # la file d'attente, le garde auth et les followers-only. Sans lui, le

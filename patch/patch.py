@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import json
 import pathlib
@@ -1161,6 +1162,46 @@ UPDATE_VERSION_METHOD = """.method private i()I
 BETA_FLAG_PATH = "smali/com/s0und/s0undtv/b.smali"
 BETA_FLAG_OLD = ".field public static final a:Z = true"
 BETA_FLAG_NEW = ".field public static final a:Z = false"
+
+# ── Étape 4b : métadonnées « Application info » ──────────────────────────────
+# La page « Application info » (Réglages) — plus l'écran debug et le bandeau du
+# lecteur — ne lisent PAS le manifeste : ce sont des littéraux en dur laissés
+# par l'amont dans le smali (beta_144 / 144 / STV-64-custom-proxy-servers /
+# la date du 28/12/2025 gravée dans Lcom/s0und/s0undtv/b;->b). bump_version()
+# ne touche que le manifeste et apktool.yml : sans la réécriture ci-dessous,
+# CHAQUE release réaffiche le build amont — mesuré le 06/10 sur la v1.0.21
+# installée, sur le Xiaomi (Android 16) comme sur BlueStacks.
+#
+# Un correctif manuel avait bien été posé le 21/09 sur l'arbre (v1.0.12), mais
+# jamais codifié : build.sh redésassemble dès que versionName change, il était
+# donc perdu au bump suivant — deux bulletins de CHANGELOG non reproductibles.
+#
+# Les MÊMES littéraux servent aussi à la détection « mise à jour → page
+# Nouveautés » : MainFragment.C4() les ÉCRIT dans les prefs, P6/c.b() les
+# COMPARE. Les deux côtés sont réécrits ensemble, sinon la comparaison croise
+# deux identités et la page « Nouveautés » ne s'ouvre plus après une mise à jour.
+APP_INFO_BRANCH = "Twouich master (fork de S0undTV)"
+APP_INFO_SETTINGS = "smali_classes2/com/s0und/s0undtv/fragments/SettingsFragment$a.smali"
+APP_INFO_MAIN = "smali_classes2/com/s0und/s0undtv/fragments/MainFragment.smali"
+APP_INFO_READ = "smali_classes2/P6/c.smali"  # P6/c.b() : la lecture du comparateur
+APP_INFO_DEBUG = "smali/com/s0und/s0undtv/activities/DebugActivity.smali"
+APP_INFO_PLAYER = "smali/com/s0und/s0undtv/activities/PlayerActivity.smali"
+APP_INFO_BUILD = "smali/com/s0und/s0undtv/b.smali"  # flag beta + date de build
+APP_INFO_PATHS = (
+    APP_INFO_SETTINGS,
+    APP_INFO_MAIN,
+    APP_INFO_READ,
+    APP_INFO_DEBUG,
+    APP_INFO_PLAYER,
+    APP_INFO_BUILD,
+)
+# Représentations en dur du build amont : leur présence dans l'un de ces
+# fichiers après le patch est une rupture (le build mentirait sur son identité).
+APP_INFO_UPSTREAM_LITERALS = (
+    "beta_144",
+    "STV-64-custom-proxy-servers (729e0f04)",
+    "0x19b65dac213L",  # 2025-12-28 17:46:34 GMT+01:00
+)
 
 
 # ── Étape 2 : identité visuelle ───────────────────────────────────────────
@@ -3115,6 +3156,51 @@ def patch_smartphone_pip(decoded: pathlib.Path) -> None:
     log("smartphone : bouton picture-in-picture posé sur la vidéo")
 
 
+def remove_phone_quick_action_methods(source: str) -> str:
+    """Retire les callbacks des quatre raccourcis téléphone, de façon idempotente."""
+    pattern = re.compile(
+        r"(?ms)^\.method public twouichPhone(?:About|Privacy|ChangeLog|Logout)"
+        r"\(Landroid/view/View;\)V\n.*?^\.end method\n"
+    )
+    matches = list(pattern.finditer(source))
+    if not matches:
+        return source
+    names = [re.search(r"twouichPhone(About|Privacy|ChangeLog|Logout)", m.group()).group(1)
+             for m in matches]
+    expected = {"About", "Privacy", "ChangeLog", "Logout"}
+    if len(matches) != 4 or set(names) != expected:
+        fail("callbacks des quatre raccourcis téléphone partiels ou dupliqués "
+             f"dans MainActivity.smali : {names!r}")
+    cleaned, count = pattern.subn("", source)
+    if count != 4:
+        fail(f"suppression des raccourcis téléphone : 4 méthodes attendues, {count} retirées")
+    log("smartphone : quatre callbacks de raccourci retirés")
+    return cleaned
+
+
+def remove_phone_quick_action_layout(layout: str) -> str:
+    """Retire la rangée A propos/Vie privée/Nouveautés/Déconnexion du shell mobile."""
+    marker = '<LinearLayout android:id="@+id/twouich_phone_act_bar"'
+    if marker not in layout:
+        return layout
+    expected_ids = tuple(f'twouich_phone_act_{name}'
+                         for name in ("about", "privacy", "changelog", "logout"))
+    if any(layout.count(item) != 1 for item in expected_ids):
+        fail("rangée des quatre raccourcis téléphone partielle ou dupliquée dans le layout")
+    start = layout.index(marker)
+    row_end = layout.find("</LinearLayout>", start)
+    divider_start = layout.find(
+        '<View android:layout_width="match_parent" android:layout_height="1dp"', row_end
+    )
+    divider_end = layout.find("/>", divider_start)
+    if min(row_end, divider_start, divider_end) < 0:
+        fail("rangée des quatre raccourcis téléphone incomplète — adapter le patch")
+    cleaned = layout[:start] + layout[divider_end + 2:]
+    if any(item in cleaned for item in expected_ids):
+        fail("suppression de la rangée des raccourcis téléphone incomplète — adapter le patch")
+    return cleaned
+
+
 def patch_smartphone_navigation(decoded: pathlib.Path, here: pathlib.Path) -> None:
     """Ajoute une navigation tactile au shell téléphone, sans modifier le shell TV."""
     print("[1e/5] UX smartphone (navigation tactile)")
@@ -3132,45 +3218,11 @@ def patch_smartphone_navigation(decoded: pathlib.Path, here: pathlib.Path) -> No
     android:background="@color/black">
     <fragment android:name="com.s0und.s0undtv.fragments.MainFragment"
         android:id="@id/main_browse_fragment" android:layout_width="match_parent"
-        android:layout_height="match_parent" android:layout_marginBottom="110dp" />
+        android:layout_height="match_parent" android:layout_marginBottom="62dp" />
     <LinearLayout android:id="@+id/twouich_phone_nav_bar"
-        android:layout_width="match_parent" android:layout_height="104dp"
+        android:layout_width="match_parent" android:layout_height="56dp"
         android:layout_gravity="bottom" android:orientation="vertical"
         android:background="#0e0e10" android:elevation="16dp">
-        <View android:layout_width="match_parent" android:layout_height="1dp"
-            android:background="#2a2a2e" />
-        <LinearLayout android:id="@+id/twouich_phone_act_bar"
-            android:layout_width="match_parent" android:layout_height="48dp"
-            android:orientation="horizontal" android:baselineAligned="false">
-            <TextView android:id="@+id/twouich_phone_act_about"
-                android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
-                android:gravity="center" android:text="A propos" android:textSize="11sp"
-                android:textColor="@color/twouich_phone_nav_inactive"
-                android:background="?android:attr/selectableItemBackground"
-                android:clickable="true" android:focusable="true"
-                android:contentDescription="A propos" android:onClick="twouichPhoneAbout" />
-            <TextView android:id="@+id/twouich_phone_act_privacy"
-                android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
-                android:gravity="center" android:text="Vie privee" android:textSize="11sp"
-                android:textColor="@color/twouich_phone_nav_inactive"
-                android:background="?android:attr/selectableItemBackground"
-                android:clickable="true" android:focusable="true"
-                android:contentDescription="Vie privee" android:onClick="twouichPhonePrivacy" />
-            <TextView android:id="@+id/twouich_phone_act_changelog"
-                android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
-                android:gravity="center" android:text="Nouveautes" android:textSize="11sp"
-                android:textColor="@color/twouich_phone_nav_inactive"
-                android:background="?android:attr/selectableItemBackground"
-                android:clickable="true" android:focusable="true"
-                android:contentDescription="Nouveautes" android:onClick="twouichPhoneChangeLog" />
-            <TextView android:id="@+id/twouich_phone_act_logout"
-                android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
-                android:gravity="center" android:text="Deconnexion" android:textSize="11sp"
-                android:textColor="@color/twouich_phone_nav_inactive"
-                android:background="?android:attr/selectableItemBackground"
-                android:clickable="true" android:focusable="true"
-                android:contentDescription="Deconnexion" android:onClick="twouichPhoneLogout" />
-        </LinearLayout>
         <View android:layout_width="match_parent" android:layout_height="1dp"
             android:background="#2a2a2e" />
         <LinearLayout android:layout_width="match_parent" android:layout_height="55dp"
@@ -3206,9 +3258,14 @@ def patch_smartphone_navigation(decoded: pathlib.Path, here: pathlib.Path) -> No
     </LinearLayout>
 </FrameLayout>
 """
+    legacy_layout = phone.read_text(encoding="utf-8")
+    if "twouich_phone_act_bar" in legacy_layout:
+        legacy_layout = remove_phone_quick_action_layout(legacy_layout)
+        phone.write_text(legacy_layout, encoding="utf-8", newline="\n")
+        log("smartphone : ancienne rangée de quatre raccourcis retirée")
     if phone.read_text(encoding="utf-8") != layout:
         phone.write_text(layout, encoding="utf-8", newline="\n")
-        log("smartphone : shell tactile avec navigation basse")
+        log("smartphone : shell tactile avec navigation basse épurée")
     else:
         log("déjà appliqué : shell tactile smartphone")
 
@@ -3216,7 +3273,9 @@ def patch_smartphone_navigation(decoded: pathlib.Path, here: pathlib.Path) -> No
     if not main.is_file():
         fail(f"activité principale absente : {main}")
     source = main.read_text(encoding="utf-8")
-    methods = """\n.method public twouichPhoneHome(Landroid/view/View;)V
+    original_source = source
+    methods = """
+.method public twouichPhoneHome(Landroid/view/View;)V
     .locals 0
     return-void
 .end method
@@ -3242,67 +3301,42 @@ def patch_smartphone_navigation(decoded: pathlib.Path, here: pathlib.Path) -> No
     invoke-virtual {p0, v0}, Landroid/app/Activity;->startActivity(Landroid/content/Intent;)V
     return-void
 .end method
-
-# Les quatre ecrans qui existent deja dans l'amont mais vers lesquels aucun
-# chemin tactile ne menait (05/10/2026) : mesure sur appareil, l'accueil
-# n'exposait que 5 elements cliquables et « Application info » ne montrait que
-# le build amont. Ils ne sont PAS exportes (un `am start` externe echoue), mais
-# un Intent explicite emis par l'application elle-meme n'a pas cette contrainte :
-# c'est exactement le mecanisme deja employe par twouichPhoneSearch/Settings, donc
-# aucune logique d'authentification n'est reecrite ici.
-.method public twouichPhoneAbout(Landroid/view/View;)V
-    .locals 3
-    new-instance v0, Landroid/content/Intent;
-    invoke-direct {v0}, Landroid/content/Intent;-><init>()V
-    const-string v1, "com.s0und.s0undtv"
-    const-string v2, "com.s0und.s0undtv.activities.AboutActivity"
-    invoke-virtual {v0, v1, v2}, Landroid/content/Intent;->setClassName(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;
-    invoke-virtual {p0, v0}, Landroid/app/Activity;->startActivity(Landroid/content/Intent;)V
-    return-void
-.end method
-
-.method public twouichPhonePrivacy(Landroid/view/View;)V
-    .locals 3
-    new-instance v0, Landroid/content/Intent;
-    invoke-direct {v0}, Landroid/content/Intent;-><init>()V
-    const-string v1, "com.s0und.s0undtv"
-    const-string v2, "com.s0und.s0undtv.activities.PrivacyPolicyActivity"
-    invoke-virtual {v0, v1, v2}, Landroid/content/Intent;->setClassName(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;
-    invoke-virtual {p0, v0}, Landroid/app/Activity;->startActivity(Landroid/content/Intent;)V
-    return-void
-.end method
-
-.method public twouichPhoneChangeLog(Landroid/view/View;)V
-    .locals 3
-    new-instance v0, Landroid/content/Intent;
-    invoke-direct {v0}, Landroid/content/Intent;-><init>()V
-    const-string v1, "com.s0und.s0undtv"
-    const-string v2, "com.s0und.s0undtv.activities.ChangeLogActivity"
-    invoke-virtual {v0, v1, v2}, Landroid/content/Intent;->setClassName(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;
-    invoke-virtual {p0, v0}, Landroid/app/Activity;->startActivity(Landroid/content/Intent;)V
-    return-void
-.end method
-
-.method public twouichPhoneLogout(Landroid/view/View;)V
-    .locals 3
-    new-instance v0, Landroid/content/Intent;
-    invoke-direct {v0}, Landroid/content/Intent;-><init>()V
-    const-string v1, "com.s0und.s0undtv"
-    const-string v2, "com.s0und.s0undtv.activities.LogoutDialogActivity"
-    invoke-virtual {v0, v1, v2}, Landroid/content/Intent;->setClassName(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;
-    invoke-virtual {p0, v0}, Landroid/app/Activity;->startActivity(Landroid/content/Intent;)V
-    return-void
-.end method
 """
     legacy = "invoke-virtual {v0, p0, v1, v2}, Landroid/content/Intent;->setClassName(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;"
     current = "invoke-virtual {v0, v1, v2}, Landroid/content/Intent;->setClassName(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;"
     source = source.replace(legacy, current)
+    # Une ancienne greffe a un descripteur vide, impossible à assembler.
+    # Normaliser aussi le gabarit ci-dessous avant toute insertion.
+    methods = methods.replace(
+        "startActivity(v0)V", "startActivity(Landroid/content/Intent;)V", 1
+    )
+    settings_template = re.search(
+        r"(?ms)^\.method public twouichPhoneSettings\(Landroid/view/View;\)V.*?^\.end method",
+        methods,
+    )
+    if settings_template is None or "startActivity(Landroid/content/Intent;)V" not in settings_template.group(0):
+        fail("navigation Réglages : appel startActivity(Intent) invalide dans le gabarit")
+    # Les callbacks ne font plus partie du gabarit; retirer aussi les anciennes
+    # versions injectées dans les arbres déjà patchés.
+    source = remove_phone_quick_action_methods(source)
     if "twouichPhoneSearch" not in source:
-        main.write_text(source.rstrip() + methods + "\n", encoding="utf-8", newline="\n")
+        source = source.rstrip() + methods + "\n"
         log("smartphone : actions Recherche/Réglages branchées")
-    elif source != main.read_text(encoding="utf-8"):
+    else:
+        # Une ancienne greffe avait l'appel startActivity(Intent) avec un
+        # descripteur de méthode vide : smali ne peut pas l'assembler.
+        settings_method = re.search(
+            r"(?ms)^\.method public twouichPhoneSettings\(Landroid/view/View;\)V.*?^\.end method",
+            source,
+        )
+        if settings_method and "startActivity(v0)V" in settings_method.group(0):
+            fixed = settings_method.group(0).replace(
+                "startActivity(v0)V", "startActivity(Landroid/content/Intent;)V", 1
+            )
+            source = source[:settings_method.start()] + fixed + source[settings_method.end():]
+    if source != original_source:
         main.write_text(source, encoding="utf-8", newline="\n")
-        log("smartphone : appels de navigation corrigés")
+        log("smartphone : navigation actualisée")
     else:
         log("déjà appliqué : actions de navigation smartphone")
 
@@ -3710,6 +3744,92 @@ def bump_version(decoded: pathlib.Path, code: int, name: str) -> None:
     log(f"versionCode={code} versionName={name}")
 
 
+def build_time_epoch_ms(release_date: str) -> int:
+    """Horodatage « Build time » gravé dans Lcom/s0und/s0undtv/b;->b.
+
+    Affiché par la page « Application info » ET par l'écran debug (Date.toString),
+    donc identique des deux côtés. Dérivé de la date de release — constante de
+    build (VERSION_RELEASE_DATE de build.sh), jamais today() : l'affichage ne
+    doit pas dépendre du jour où l'on recompile, au même titre que les octets.
+    """
+    try:
+        day = datetime.datetime.strptime(release_date, "%Y.%m.%d")
+    except ValueError:
+        fail(f"--release-date illisible ({release_date!r}) : format attendu AAAA.MM.JJ")
+    return int(day.replace(hour=12, tzinfo=datetime.timezone.utc).timestamp()) * 1000
+
+
+def app_info_targets(code: int, name: str,
+                     release_date: str) -> list[tuple[str, str, str, str]]:
+    """Les (fichier, motif amont, remplacement, libellé) du correctif.
+
+    Chaque motif est unique dans son fichier (vérifié : un `beta_144` par
+    fichier, `const/16 v2, 0x90` distinct du `const/16 v1, 0x90` sans rapport
+    de la ligne 1058 de SettingsFragment) : replace_once échoue bruyamment si
+    l'amont change, c'est voulu.
+    """
+    build_time = f"0x{build_time_epoch_ms(release_date):x}"
+    version_hex = f"0x{code:x}"
+    return [
+        # Page « Application info » (Réglages) : nom, code, branche.
+        (APP_INFO_SETTINGS, 'const-string v2, "beta_144"',
+         f'const-string v2, "{name}"', "Application info : version name"),
+        (APP_INFO_SETTINGS, "const/16 v2, 0x90",
+         f"const/16 v2, {version_hex}", f"Application info : version code ({code})"),
+        (APP_INFO_SETTINGS, f'const-string v2, "STV-64-custom-proxy-servers (729e0f04)"',
+         f'const-string v2, "{APP_INFO_BRANCH}"', "Application info : branche"),
+        # Date de build (partagée : Réglages + écran debug).
+        (APP_INFO_BUILD, "const-wide v1, 0x19b65dac213L",
+         f"const-wide v1, {build_time}L", f"Build time → {release_date}"),
+        # Écran debug.
+        (APP_INFO_DEBUG, 'const-string v1, "Version name: beta_144"',
+         f'const-string v1, "Version name: {name}"', "écran debug : version name"),
+        (APP_INFO_DEBUG, 'const-string v1, "Version code: 144"',
+         f'const-string v1, "Version code: {code}"', f"écran debug : version code ({code})"),
+        (APP_INFO_DEBUG, 'const-string v1, "Build branch: STV-64-custom-proxy-servers (729e0f04)"',
+         f'const-string v1, "Build branch: {APP_INFO_BRANCH}"', "écran debug : branche"),
+        # Bandeau du lecteur.
+        (APP_INFO_PLAYER, 'const-string p1, "App version: beta_144 | 144"',
+         f'const-string p1, "App version: {name} | {code}"', "lecteur : bandeau de version"),
+        # Détection « mise à jour → page Nouveautés » : l'ÉCRITURE (C4) puis la
+        # LECTURE (P6/c.b) de la même identité — les deux, ou aucune.
+        (APP_INFO_MAIN, 'const-string v2, "beta_144"',
+         f'const-string v2, "{name}"', "prefs : identité écrite après mise à jour"),
+        (APP_INFO_MAIN, "const/16 v2, 0x90",
+         f"const/16 v2, {version_hex}", f"prefs : code écrit après mise à jour ({code})"),
+        (APP_INFO_READ, 'const-string v1, "beta_144"',
+         f'const-string v1, "{name}"', "détection de mise à jour : identité comparée"),
+        (APP_INFO_READ, "const/16 v0, 0x90",
+         f"const/16 v0, {version_hex}", f"détection de mise à jour : code comparé ({code})"),
+    ]
+
+
+def patch_app_info(decoded: pathlib.Path, code: int, name: str,
+                   release_date: str) -> None:
+    """Réécrit les métadonnées de build gravées en dur dans le smali."""
+    for rel, old, new, what in app_info_targets(code, name, release_date):
+        if rel == APP_INFO_BUILD:
+            continue  # date de build : gérée ci-dessous
+        replace_once(decoded / rel, old, new, what)
+    # La date de build n'est pas gravée en clair : c'est un epoch. On la
+    # reconstruit donc à partir de la seule constante lisible dans <clinit>, ce
+    # qui rend le correctif tolérant à un VERSION_RELEASE_DATE changé sans bump
+    # de version (l'arbre réutilisé garde l'ancienne date, et le motif amont
+    # n'y est plus — replace_once échouerait à juste titre mais sans être
+    # exact : le problème serait la date, pas « la cible a changé »).
+    build_file = decoded / APP_INFO_BUILD
+    text = build_file.read_text(encoding="utf-8")
+    want = f"const-wide v1, 0x{build_time_epoch_ms(release_date):x}L"
+    found = re.search(r"const-wide v1, 0x[0-9a-f]+L", text)
+    if not found:
+        fail(f"constante de date de build introuvable dans {APP_INFO_BUILD}")
+    if found.group(0) == want:
+        log(f"déjà appliqué : Build time → {release_date}")
+        return
+    build_file.write_text(text.replace(found.group(0), want, 1), encoding="utf-8")
+    log(f"appliqué : Build time {found.group(0)} → {want}")
+
+
 def main() -> int:
     here = pathlib.Path(__file__).resolve().parent
     parser = argparse.ArgumentParser()
@@ -3752,6 +3872,7 @@ def main() -> int:
     install_selftest(decoded)
     repoint_updater(decoded, args.apk_name)
     bump_version(decoded, args.version_code, args.version_name)
+    patch_app_info(decoded, args.version_code, args.version_name, args.release_date)
 
     print("[5/5] Contrôles")
     checks = 0
@@ -3888,6 +4009,25 @@ def main() -> int:
         elif not path.is_file() or needle not in path.read_text(encoding="utf-8"):
             fail(f"contrôle échoué : {needle!r} absent de {path.relative_to(decoded)}")
         checks += 1
+    # Métadonnées « Application info » : la page ne lit pas le manifeste, elle
+    # lit des littéraux du smali. Le build doit en porter la version ACTUELLE
+    # sur ses six surfaces, et plus aucune trace du build amont — mesure du
+    # 06/10 : la v1.0.21 installée affichait beta_144 / 144 / STV-64-… sur le
+    # Xiaomi (Android 16) comme sur BlueStacks. P6/c (lecture du comparateur de
+    # mise à jour) doit porter la MÊME identité que MainFragment (écriture),
+    # sinon la page « Nouveautés » ne s'ouvre plus après une mise à jour.
+    for rel, _old, new, what in app_info_targets(args.version_code, args.version_name,
+                                                 args.release_date):
+        src = (decoded / rel).read_text(encoding="utf-8")
+        if new not in src:
+            fail(f"contrôle échoué : {what} absent de {rel} (attendu {new!r})")
+        checks += 1
+    for rel in APP_INFO_PATHS:
+        src = (decoded / rel).read_text(encoding="utf-8")
+        for literal in APP_INFO_UPSTREAM_LITERALS:
+            if literal in src:
+                fail(f"contrôle échoué : {rel} porte encore le build amont ({literal})")
+            checks += 1
     # Le bouton du chat est RETIRÉ depuis la v1.0.12 : le chat vit sous la
     # vidéo, donc replier ne changeait plus la taille de l'image. La preuve est
     # donc l'INVERSE — plus de bouton dans le layout téléphone — tandis que la
