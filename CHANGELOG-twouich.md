@@ -2,7 +2,7 @@
 
 ## v1.0.21 — 6 octobre 2026
 
-Release préparée pour `versionCode 168`. L’annonce de mise à jour restera en v1.0.20 jusqu’à la publication réussie des assets du tag `v1.0.21`.
+> **Publié le 6 octobre 2026** (`versionCode 168`) : tag `v1.0.21`, release avec l’APK et `changelog.html`, annonce `update.json` poussée après publication (`ReleaseDate` = `publishedAt`, `2026-10-06T07:35:35Z`). CI signée verte. APK publié : 11 269 475 o, SHA-256 `162e460a617f6e1e2a4935c43385afe85af7a9b5b4eacd4b8ccbb314c500e8b5` — **identique aux octets servis, et reproduit par le build local** : `check-release.sh` vert sur les quatre étages (livrable → `update.json` → tag → octets servis). La recette canonise `onResume` (restore → keepalive → empilement, une seule fois) et conserve la relecture du rappel de focus, ce qui rend le build idempotent : un second passage ne change plus un octet.
 
 - **Le lecteur téléphone respecte de nouveau les barres système.** La géométrie vidéo/chat/compositeur tient compte de la zone utilisable et de la hauteur réelle du compositeur ; le layout TV reste inchangé. Vérifié sur BlueStacks Android 13. La branche edge-to-edge Android 15+ est ajoutée, mais n’a pas été exécutée sur un appareil API 35+.
 - **Les options du lecteur sont accessibles depuis le compositeur.** Le bouton ouvre la grille de commandes upstream existante, sans ajouter de chemins d’action parallèles. Vérification visuelle/arbre faite ; Follow et SendMessage n’ont pas été activés et aucun message n’a été envoyé.

@@ -676,37 +676,72 @@ PHONE_CHAT_ABOVE_OLD = (
 )
 
 
-# L'état du chat est relu au démarrage du lecteur AVANT la première application
-# de la disposition : sans cela, la première image part de l'état par défaut et
-# le choix de l'utilisateur n'arrive qu'après. Le rappel de focus est le seul
-# point d'entrée du démarrage qui précède l'empilement — la relecture s'y glisse.
-PHONE_CHAT_RESTORE_ANCHOR = (
-    "    if-eqz p1, :return_focus\n"
-    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V\n"
-)
-PHONE_CHAT_RESTORE_CALL = (
-    "    if-eqz p1, :return_focus\n"
-    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatRestore()V\n"
-    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V\n"
-)
-
-# Le rappel de focus n'est PAS un point d'entrée fiable du démarrage : mesuré le
-# 21/09 sur BlueStacks (Android 13), `onWindowFocusChanged` n'est jamais
-# dispatché — l'état du chat n'était donc relu nulle part et un chat replié se
-# rouvrait à chaque lancement de l'application. `onResume`, lui, est journalisé
-# par l'app elle-même (« onResume() was called ») et précède la première image :
-# c'est là que la préférence est relue. Une seule lecture par instance (le champ
-# twouichChatRestored garde l'entrée), donc un retour depuis le fond ne relit pas.
-# La géométrie empilée vient des DisplayMetrics, pas d'une vue mesurée :
-# l'appeler depuis onResume (avant la première passe de disposition) est sûr.
+# onResume est le point d'entrée fiable du démarrage (le callback focus
+# n'était pas dispatché sur BlueStacks/API 33). Canoniser toute la séquence ici
+# évite qu'une migration répétée empile les appels dans un arbre apktool réutilisé.
 PHONE_CHAT_RESUME_ANCHOR = (
     "    invoke-super {p0}, Landroid/app/Activity;->onResume()V\n"
 )
 PHONE_CHAT_RESUME_CALL = (
     PHONE_CHAT_RESUME_ANCHOR
     + "\n    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatRestore()V\n"
-    + "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V\n"
+    + "\n    invoke-static {p0}, Lcom/twouich/adblock/PlayerKeepAlive;->startIfPhone(Landroid/app/Activity;)V\n"
+    + "\n    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V\n"
 )
+# Rappel de focus : la forme PUBLIÉE (v1.0.21) appelle la relecture AVANT
+# l'empilement. Elle est sans effet après la première lecture (le champ
+# twouichChatRestored la coupe), mais la retirer ferait diverger le rebuild
+# local des octets servis — constaté le 06/10 : -8 octets dans classes.dex.
+# On répare donc vers cette forme, jamais l'inverse.
+PHONE_CHAT_FOCUS_BARE = (
+    "    if-eqz p1, :return_focus\n"
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V\n"
+)
+PHONE_CHAT_FOCUS_RESTORED = (
+    "    if-eqz p1, :return_focus\n"
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatRestore()V\n"
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V\n"
+)
+
+
+def _normalize_phone_on_resume(text: str) -> tuple[str, bool]:
+    """Canonicalise the Twouich calls inside PlayerActivity.onResume()."""
+    pattern = re.compile(r"(?ms)^[.]method [^\n]*\bonResume\(\)V\n.*?^[.]end method$")
+    methods = list(pattern.finditer(text))
+    if len(methods) != 1:
+        fail("onResume introuvable (ou ambigu) dans PlayerActivity — état du chat impossible à relire")
+    match = methods[0]
+    method = match.group(0)
+    if method.count(PHONE_CHAT_RESUME_ANCHOR) != 1:
+        fail("invoke-super onResume introuvable (ou ambigu) dans PlayerActivity")
+
+    managed_calls = (
+        "->twouichChatRestore()V",
+        "->startIfPhone(Landroid/app/Activity;)V",
+        "->twouichPhoneStackedLayout()V",
+    )
+    lines = method.splitlines(keepends=True)
+    lines = [
+        line for line in lines
+        if not (line.lstrip().startswith("invoke-")
+                and any(call in line for call in managed_calls))
+    ]
+    anchor_index = next(i for i, line in enumerate(lines)
+                        if line == PHONE_CHAT_RESUME_ANCHOR)
+    while anchor_index + 1 < len(lines) and not lines[anchor_index + 1].strip():
+        del lines[anchor_index + 1]
+    canonical = "".join(lines).replace(
+        PHONE_CHAT_RESUME_ANCHOR, PHONE_CHAT_RESUME_CALL, 1
+    )
+    if any(canonical.count(call) != 1 for call in managed_calls):
+        fail("onResume ne peut pas être ramené à une séquence phone unique")
+    if not (canonical.index(managed_calls[0])
+            < canonical.index(managed_calls[1])
+            < canonical.index(managed_calls[2])):
+        fail("ordre invalide dans la séquence téléphone de onResume")
+    return text[:match.start()] + canonical + text[match.end():], canonical != method
+
+
 # L'appel lui-même, sans indentation imposée : sert aux contrôles du livrable.
 CHAT_RESTORE_CALL_LINE = (
     "invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatRestore()V"
@@ -2005,10 +2040,13 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     if PHONE_CHAT_BELOW_OLD not in player_methods:
         fail("géométrie du chat introuvable dans le gabarit de twouichPhoneStackedLayout")
     player_methods = player_methods.replace(PHONE_CHAT_BELOW_OLD, PHONE_CHAT_BELOW_NEW, 1)
-    # Relecture de l'état au démarrage, avant la première disposition.
-    if PHONE_CHAT_RESTORE_ANCHOR not in player_methods:
-        fail("rappel de focus introuvable dans le gabarit — état du chat non relu au démarrage")
-    player_methods = player_methods.replace(PHONE_CHAT_RESTORE_ANCHOR, PHONE_CHAT_RESTORE_CALL, 1)
+    # Le rappel de focus relit la préférence avant l'empilement : c'est la
+    # forme livrée par la v1.0.21, et le normaliseur onResume ne la touche pas.
+    if PHONE_CHAT_FOCUS_BARE in player_methods:
+        player_methods = player_methods.replace(PHONE_CHAT_FOCUS_BARE,
+                                                PHONE_CHAT_FOCUS_RESTORED, 1)
+    if PHONE_CHAT_FOCUS_RESTORED not in player_methods:
+        fail("relecture absente du rappel de focus dans le gabarit")
     # Picture-in-picture (API 26) : bouton dans le lecteur téléphone, fenêtre
     # 16:9, et disparition du chat pendant que la vidéo est en incrustation.
     # Les trois overrides de callback du framework sont PUBLICS : Activity
@@ -2371,21 +2409,30 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     for chat_old in (PHONE_CHAT_BELOW_OLD, PHONE_CHAT_ABOVE_OLD):
         if chat_old in player_fixed:
             player_fixed = player_fixed.replace(chat_old, PHONE_CHAT_BELOW_NEW, 1)
-    # Relecture de l'état au démarrage : un arbre patché avant le 21/09 appelle
-    # l'empilement depuis le rappel de focus sans jamais relire la préférence.
-    if PHONE_CHAT_RESTORE_ANCHOR in player_fixed:
-        player_fixed = player_fixed.replace(PHONE_CHAT_RESTORE_ANCHOR, PHONE_CHAT_RESTORE_CALL, 1)
-    # Point d'entrée RÉEL de la relecture : onResume. Posé ici (et pas dans le
-    # gabarit) parce que onResume appartient au fichier d'origine, donc présent
-    # à l'identique sur un arbre vierge et sur un arbre déjà patché.
-    # Idempotence : le test porte sur le texte AVEC l'appel — l'ancre, elle,
-    # reste présente après l'insertion, donc un test sur l'ancre seule serait
-    # toujours vrai et empilerait les appels à chaque passage.
-    if PHONE_CHAT_RESUME_CALL not in player_fixed:
-        if player_fixed.count(PHONE_CHAT_RESUME_ANCHOR) != 1:
-            fail("onResume introuvable (ou ambigu) dans PlayerActivity "
-                 "— état du chat impossible à relire au démarrage")
-        player_fixed = player_fixed.replace(PHONE_CHAT_RESUME_ANCHOR, PHONE_CHAT_RESUME_CALL, 1)
+    # Le rappel de focus conserve la relecture (forme publiée) : un arbre qui
+    # l'aurait perdue est ramené à la forme servie, jamais l'inverse.
+    if PHONE_CHAT_FOCUS_BARE in player_fixed:
+        player_fixed = player_fixed.replace(PHONE_CHAT_FOCUS_BARE,
+                                            PHONE_CHAT_FOCUS_RESTORED, 1)
+    # Une réparation ancienne a pu laisser un démarrage du service collé à
+    # invoke-super (avant la relecture). On élimine ce résidu : le patcher
+    # générique place le démarrage juste après twouichChatRestore, et le
+    # normaliseur ci-dessous reconstruit la séquence complète.
+    stale_keepalive = (
+        "    invoke-static {p0}, Lcom/twouich/adblock/PlayerKeepAlive;"
+        "->startIfPhone(Landroid/app/Activity;)V\n"
+    )
+    while PHONE_CHAT_RESUME_ANCHOR + stale_keepalive in player_fixed:
+        player_fixed = player_fixed.replace(
+            PHONE_CHAT_RESUME_ANCHOR + stale_keepalive,
+            PHONE_CHAT_RESUME_ANCHOR,
+            1,
+        )
+    # Remettre onResume dans un ordre unique et stable, même sur un arbre que
+    # d'anciennes versions avaient patché plusieurs fois ou sur un arbre vierge.
+    player_fixed, resume_normalized = _normalize_phone_on_resume(player_fixed)
+    # La restauration onResume est distincte du rappel de focus et précède
+    # désormais le démarrage du service et l'unique disposition empilée.
     # Polarité du garde de relecture : l'arbre de travail du 21/09 porte
     # `if-eqz` (le corps sortait aussitôt) — ramené à `if-nez`.
     if PHONE_CHAT_RESTORE_GUARD_OLD in player_fixed:
@@ -2519,7 +2566,8 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
                             + canonical_layout.group(0)
                             + player_fixed[current_layout.end():])
             phone_chat_layout_patched = True
-    # Veille : le service de premier plan suit la vie du lecteur.
+    # Veille : le service suit le lecteur. onResume est normalisé plus haut,
+    # donc ce passage ne peut plus ajouter un second démarrage du service.
     player_fixed, service_calls = _patch_playback_calls(player_fixed)
 
     if ".method private twouichPhoneStackedLayout()V" not in player_fixed:
@@ -2541,7 +2589,7 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         write_player(player_fixed)
         log("smartphone : chat repliable rebranché sur le lecteur (réparation)")
     elif (player_fixed != player_text or tv_guard_count or screen_off_patched
-          or service_calls or send_added or phone_chat_guard_patched
+          or service_calls or resume_normalized or send_added or phone_chat_guard_patched
           or phone_chat_layout_patched):
         write_player(player_fixed)
         log("smartphone : correction des paramètres du lecteur empilé")

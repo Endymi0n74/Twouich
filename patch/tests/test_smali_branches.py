@@ -28,6 +28,7 @@ Ce test verrouille ces deux points. Il ne remplace pas le test sur appareil
 (patch/test-device.sh), il l'empeche de rejouer les memes degats.
 """
 
+import importlib.util
 import re
 from pathlib import Path
 
@@ -894,6 +895,48 @@ def main():
           "View;->getHeight()I" in geo and "DisplayMetrics;->density:F" in geo
           and "0x42800000" in geo,
           "la disposition doit réserver la hauteur réelle du compositeur, pas un 112px fixe")
+
+    # --- 20bis. onResume : la séquence téléphone est canonique et idempotente ---
+    # La release CI v1.0.21 a livré un onResume avec des appels empilés (deux
+    # twouichPhoneStackedLayout, deux startIfPhone) : passages successifs du
+    # patch sur un arbre réutilisé. On exécute le normaliseur RÉEL sur un
+    # extrait volontairement dupliqué et on verrouille trois choses : la forme
+    # canonique (restore → keepalive → empilement, une seule fois chacun), la
+    # conservation des appels upstream (getWindow), et l'idempotence au second
+    # passage (un second build ne doit plus rien changer).
+    spec = importlib.util.spec_from_file_location("twouich_patch", PATCHER)
+    patch_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(patch_module)
+    on_resume = """.method protected onResume()V
+    .locals 4
+    invoke-static {v0}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
+    invoke-super {p0}, Landroid/app/Activity;->onResume()V
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatRestore()V
+    invoke-static {p0}, Lcom/twouich/adblock/PlayerKeepAlive;->startIfPhone(Landroid/app/Activity;)V
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V
+    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V
+    invoke-static {p0}, Lcom/twouich/adblock/PlayerKeepAlive;->startIfPhone(Landroid/app/Activity;)V
+    invoke-virtual {p0}, Landroid/app/Activity;->getWindow()Landroid/view/Window;
+    return-void
+.end method
+"""
+    canonical, first_changed = patch_module._normalize_phone_on_resume(on_resume)
+    second_pass, second_changed = patch_module._normalize_phone_on_resume(canonical)
+    resume_method = canonical[canonical.index(".method protected onResume()V"):]
+    restore_call = "->twouichChatRestore()V"
+    keepalive_call = "->startIfPhone(Landroid/app/Activity;)V"
+    stacked_call = "->twouichPhoneStackedLayout()V"
+    positions = [resume_method.index(call) for call in
+                 (restore_call, keepalive_call, stacked_call)]
+    check("onResume : appels canoniques et normalisation idempotente",
+          first_changed and not second_changed and canonical == second_pass
+          and all(resume_method.count(call) == 1 for call in
+                  (restore_call, keepalive_call, stacked_call))
+          and positions == sorted(positions)
+          and "invoke-virtual {p0}, Landroid/app/Activity;->getWindow()" in resume_method,
+          "restore → keepalive → empilement une seule fois chaque, dans cet ordre, "
+          "sans perdre les appels upstream, et un second passage est un no-op "
+          "(sinon chaque build ajouterait des octets : écart local/CI du 06/10)")
 
     # --- rapport ----------------------------------------------------------------
     width = max(len(label) for label, _, _ in checks)
