@@ -275,17 +275,32 @@ expect_rc "IME invite : code 0" 0
 FAKE_IME=paysage run_step ime
 expect_contains "IME paysage : la saisie reste dans sa colonne" "✓ la saisie reste dans sa colonne"
 expect_contains "IME paysage : sans chevauchement vidéo" "✓ la saisie ne chevauche pas la vidéo"
+expect_contains "IME paysage : le chat ne chevauche ni la vidéo ni la saisie" "✓ le chat ne chevauche ni la vidéo ni la saisie"
+expect_contains "IME paysage : le chat reste dans sa colonne" "✓ le chat reste dans sa colonne"
 expect_rc "IME paysage : code 0" 0
 FAKE_IME=paysage-dehors run_step ime
 expect_contains "IME paysage hors colonne : nomme le défaut (la régression du § 8.26)" "✗ la saisie a quitté sa colonne"
 expect_contains "IME paysage hors colonne : donne la colonne attendue" "hors de [2712,130][2712,816]"
 expect_contains "IME paysage hors colonne : pas de faux chevauchement" "✓ la saisie ne chevauche pas la vidéo"
+expect_contains "IME paysage hors colonne : le chat aussi a quitté sa colonne" "✗ le chat a quitté sa colonne"
 expect_rc "IME paysage hors colonne : code 1" 1
 FAKE_IME=chevauche run_step ime
 expect_contains "IME chevauchement vidéo : nomme le défaut" "✗ la saisie CHEVAUCHE la vidéo"
 expect_contains "IME chevauchement vidéo : mesure le recouvrement" "48 px de recouvrement"
 expect_absent "IME chevauchement vidéo : la colonne n'est pas vérifiée en portrait" "sa colonne"
 expect_rc "IME chevauchement vidéo : code 1" 1
+# La colonne de chat en paysage : le chat ne doit jamais recouvrir la vidéo ni
+# la saisie — deux collisions distinctes, deux verrous distincts.
+FAKE_IME=chat-video run_step ime
+expect_contains "IME chat×vidéo : nomme le défaut" "✗ le chat CHEVAUCHE la vidéo"
+expect_contains "IME chat×vidéo : mesure le recouvrement" "145×830 px de recouvrement"
+expect_contains "IME chat×vidéo : la saisie, elle, est conforme" "✓ la saisie ne chevauche pas la vidéo"
+expect_rc "IME chat×vidéo : code 1" 1
+FAKE_IME=chat-saisie run_step ime
+expect_contains "IME chat×saisie : nomme le défaut" "✗ le chat CHEVAUCHE la saisie"
+expect_contains "IME chat×saisie : mesure le recouvrement" "867×208 px de recouvrement"
+expect_contains "IME chat×saisie : la colonne du chat reste conforme" "✓ le chat reste dans sa colonne"
+expect_rc "IME chat×saisie : code 1" 1
 
 
 echo

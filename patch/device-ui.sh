@@ -19,13 +19,14 @@
 #   tap <x> <y>     tap par coordonnées, avec repli D-pad si le tactile est absorbé
 #   key <code>      touche brute (4 = BACK, 3 = HOME, 19/20/21/22 = flèches)
 #   shot <f.png>    capture d'écran (signal humain, pas signal de test)
-#   ime             la saisie du chat est-elle à sa place ? Trois points :
-#                   (1) AU-DESSUS du clavier — ses bornes contre le cadre IME
-#                   (`dumpsys window`, ligne `type=ime`), le défaut mesuré du
-#                   § 8.11 (913 px sous la première touche) ;
-#                   (2) sans jamais CHEVAUCHER la vidéo (id ExoPlayer) ;
-#                   (3) dans sa COLONNE en paysage (à droite de la vidéo), le
-#                   défaut de rotation du § 8.26.
+#   ime             la zone de chat est-elle à sa place ? Quatre points :
+#                   (1) la saisie AU-DESSUS du clavier — ses bornes contre le
+#                   cadre IME (`dumpsys window`, ligne `type=ime`), le défaut
+#                   mesuré du § 8.11 (913 px sous la première touche) ;
+#                   (2) la saisie sans jamais CHEVAUCHER la vidéo (ExoPlayer) ;
+#                   (3) saisie et chat dans leur COLONNE en paysage (à droite
+#                   de la vidéo), le défaut de rotation du § 8.26 ;
+#                   (4) le chat sans jamais chevaucher la vidéo ni la saisie.
 #                   Sort 1 dès qu'un point est en défaut.
 #   step <avant> <actions> <apres>
 #                   UNE vérification complète en une ligne : l'écran attendu, les
@@ -484,10 +485,29 @@ geometry_node() { # geometry_node — la fenêtre de l'app (id `container`, plei
     ui_dump | grep -E 'resource-id="[^"]*id/container"' | head -1
 }
 
+chat_node() { # chat_node — la zone de chat, si elle est à l'écran
+    # La vue est `com.s0und.s0undtv.chat.ChatRecyclerView`, id `ChatRecycleView`
+    # (relus dans le greffon : champ `E:ChatRecyclerView`, layouts) — un motif
+    # `ChatRecycl` couvre les deux attributs et l'orthographe sans « r ».
+    ui_dump | grep -iE 'ChatRecycl' | head -1
+}
+
+# Intersection de deux rectangles : « recx recy » — les dimensions du
+# recouvrement, 0 de part et d'autre s'il n'y en a pas. Un seul pixel de
+# recouvrement est déjà un défaut, comme pour le clavier.
+rect_overlap() { # rect_overlap ax1 ay1 ax2 ay2 bx1 by1 bx2 by2
+    local ax1=$1 ay1=$2 ax2=$3 ay2=$4 bx1=$5 by1=$6 bx2=$7 by2=$8 rx ry
+    rx=$(( (ax2 < bx2 ? ax2 : bx2) - (ax1 > bx1 ? ax1 : bx1) ))
+    ry=$(( (ay2 < by2 ? ay2 : by2) - (ay1 > by1 ? ay1 : by1) ))
+    [ "$rx" -gt 0 ] || rx=0
+    [ "$ry" -gt 0 ] || ry=0
+    echo "$rx $ry"
+}
+
 cmd_ime() {
-    local fb comp vid geo txt rc=0
+    local fb comp vid geo chat txt rc=0 paysage=0 chat_ok=1
     local x1 y1 x2 y2 cx1 cy1 cx2 cy2 vx1 vy1 vx2 vy2 gx1 gy1 gx2 gy2
-    local haut bas masque ecart recx recy
+    local hx1 hy1 hx2 hy2 haut bas masque ecart recx recy
     comp="$(composer_node)"
     if [ -z "$comp" ]; then
         echo "aucune saisie à l'écran — non concluant"
@@ -544,9 +564,7 @@ cmd_ime() {
     read -r vx1 vy1 vx2 vy2 <<<"$(bounds_vals "$vid")"
     [ -n "${vx1:-}" ] || { echo "✗ vidéo illisible (bornes absentes du nœud)"; return 1; }
     echo "vidéo   : [$vx1,$vy1][$vx2,$vy2]"
-    # Intersection des rectangles, comme pour le clavier.
-    recx=$(( (cx2 < vx2 ? cx2 : vx2) > (cx1 > vx1 ? cx1 : vx1) ? (cx2 < vx2 ? cx2 : vx2) - (cx1 > vx1 ? cx1 : vx1) : 0 ))
-    recy=$(( (cy2 < vy2 ? cy2 : vy2) > (cy1 > vy1 ? cy1 : vy1) ? (cy2 < vy2 ? cy2 : vy2) - (cy1 > vy1 ? cy1 : vy1) : 0 ))
+    read -r recx recy <<<"$(rect_overlap "$cx1" "$cy1" "$cx2" "$cy2" "$vx1" "$vy1" "$vx2" "$vy2")"
     if [ "$recx" -gt 0 ] && [ "$recy" -gt 0 ]; then
         echo "✗ la saisie CHEVAUCHE la vidéo (${recx}×${recy} px de recouvrement)"
         rc=1
@@ -555,20 +573,53 @@ cmd_ime() {
     fi
     # En paysage (`largeur > hauteur`, la branche qu'applique le code — et non
     # le `rotation` de l'arbre, resté à 0 sur un paysage simulé par `wm size`),
-    # la saisie vit dans la colonne à droite de la vidéo : x ≥ bord droit vidéo,
-    # sans dépasser la fenêtre, et dans l'étendue verticale de la vidéo.
+    # la saisie et le chat vivent dans la colonne à droite de la vidéo : x ≥ bord
+    # droit vidéo, sans dépasser la fenêtre, dans l'étendue verticale de la vidéo.
     geo="$(geometry_node)"
     if [ -z "$geo" ]; then
         echo "géométrie : fenêtre inconnue — colonne non vérifiée"
-        return $rc
+    else
+        read -r gx1 gy1 gx2 gy2 <<<"$(bounds_vals "$geo")"
+        [ "$((gx2 - gx1))" -gt "$((gy2 - gy1))" ] && paysage=1
     fi
-    read -r gx1 gy1 gx2 gy2 <<<"$(bounds_vals "$geo")"
-    if [ "$((gx2 - gx1))" -gt "$((gy2 - gy1))" ]; then
+    if [ "$paysage" -eq 1 ]; then
         if [ "$cx1" -ge "$vx2" ] && [ "$cx2" -le "$gx2" ] \
             && [ "$cy1" -ge "$vy1" ] && [ "$cy2" -le "$vy2" ]; then
             echo "✓ la saisie reste dans sa colonne"
         else
             echo "✗ la saisie a quitté sa colonne : [$cx1,$cy1][$cx2,$cy2] hors de [$vx2,$vy1][$gx2,$vy2]"
+            rc=1
+        fi
+    fi
+
+    # ── 3. le chat : jamais sur la vidéo ni sur la saisie, et en colonne ─
+    chat="$(chat_node)"
+    if [ -z "$chat" ]; then
+        echo "chat    : absent de l'écran — non concluant"
+        return $rc
+    fi
+    read -r hx1 hy1 hx2 hy2 <<<"$(bounds_vals "$chat")"
+    [ -n "${hx1:-}" ] || { echo "✗ chat illisible (bornes absentes du nœud)"; return 1; }
+    echo "chat    : [$hx1,$hy1][$hx2,$hy2]"
+    read -r recx recy <<<"$(rect_overlap "$hx1" "$hy1" "$hx2" "$hy2" "$vx1" "$vy1" "$vx2" "$vy2")"
+    if [ "$recx" -gt 0 ] && [ "$recy" -gt 0 ]; then
+        echo "✗ le chat CHEVAUCHE la vidéo (${recx}×${recy} px de recouvrement)"
+        chat_ok=0; rc=1
+    fi
+    read -r recx recy <<<"$(rect_overlap "$hx1" "$hy1" "$hx2" "$hy2" "$cx1" "$cy1" "$cx2" "$cy2")"
+    if [ "$recx" -gt 0 ] && [ "$recy" -gt 0 ]; then
+        echo "✗ le chat CHEVAUCHE la saisie (${recx}×${recy} px de recouvrement)"
+        chat_ok=0; rc=1
+    fi
+    if [ "$chat_ok" -eq 1 ]; then
+        echo "✓ le chat ne chevauche ni la vidéo ni la saisie"
+    fi
+    if [ "$paysage" -eq 1 ]; then
+        if [ "$hx1" -ge "$vx2" ] && [ "$hx2" -le "$gx2" ] \
+            && [ "$hy1" -ge "$vy1" ] && [ "$hy2" -le "$vy2" ]; then
+            echo "✓ le chat reste dans sa colonne"
+        else
+            echo "✗ le chat a quitté sa colonne : [$hx1,$hy1][$hx2,$hy2] hors de [$vx2,$vy1][$gx2,$vy2]"
             rc=1
         fi
     fi

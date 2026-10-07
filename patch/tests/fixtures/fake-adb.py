@@ -63,27 +63,34 @@ def node(text, cls, bounds, clickable="false", focused="false", rid="", hint="")
 # ouvert à `y=1687`, soit 913 px sous la première touche) et son correctif du
 # § 8.26 (barre `0,1479-1220,1687`, collée au bord du clavier).
 IME_SCENARIOS = {
-    #    compositeur              cadre IME                  visible  vidéo              fenêtre
-    "sous":   ("[0,2600][1220,2712]", "[0,1687][1220,2712]", "true",  "[0,130][1220,816]",  "[0,0][1220,2712]"),
-    "dessus": ("[0,1479][1220,1687]", "[0,1687][1220,2712]", "true",  "[0,130][1220,816]",  "[0,0][1220,2712]"),
-    "ferme":  ("[0,2452][1220,2660]", "[0,2712][1220,2712]", "false", "[0,130][1220,816]",  "[0,0][1220,2712]"),
-    "sans":   (None,                   "[0,1687][1220,2712]", "true",  "[0,130][1220,816]",  "[0,0][1220,2712]"),
+    #    compositeur              cadre IME                  visible  vidéo              fenêtre             chat
+    "sous":   ("[0,2600][1220,2712]", "[0,1687][1220,2712]", "true",  "[0,130][1220,816]",  "[0,0][1220,2712]", "[0,816][1220,2452]"),
+    "dessus": ("[0,1479][1220,1687]", "[0,1687][1220,2712]", "true",  "[0,130][1220,816]",  "[0,0][1220,2712]", "[0,816][1220,1479]"),
+    "ferme":  ("[0,2452][1220,2660]", "[0,2712][1220,2712]", "false", "[0,130][1220,816]",  "[0,0][1220,2712]", "[0,816][1220,2452]"),
+    "sans":   (None,                   "[0,1687][1220,2712]", "true",  "[0,130][1220,816]",  "[0,0][1220,2712]", "[0,816][1220,2452]"),
     # `invite` : l'id du compositeur est masqué — c'est alors son **hint** qui
     # le désigne, jamais son `text` (qui vaut « , » sur le vrai appareil).
-    "invite": ("[0,1479][1220,1687]", "[0,1687][1220,2712]", "true",  "[0,130][1220,816]",  "[0,0][1220,2712]"),
+    "invite": ("[0,1479][1220,1687]", "[0,1687][1220,2712]", "true",  "[0,130][1220,816]",  "[0,0][1220,2712]", "[0,816][1220,1479]"),
     # Paysage 2712×1220, tel que mesuré au § 8.26 : vidéo 16:9 à gauche
-    # (1845×1038), saisie au bas de la colonne de droite.
+    # (1845×1038), chat en haut de la colonne de droite, saisie au bas.
     "paysage": ("[1845,960][2712,1168]", "[0,1220][2712,1220]", "false",
-                "[0,130][1845,1168]", "[0,0][2712,1220]"),
+                "[0,130][1845,1168]", "[0,0][2712,1220]", "[1845,130][2712,960]"),
     # La régression de rotation du § 8.26 : la branche portrait tournant avec
-    # des dimensions périmées — vidéo pleine largeur, saisie pleine largeur
-    # dessous. Aucun chevauchement, mais la colonne est quittée.
+    # des dimensions périmées — vidéo, chat et saisie pleine largeur. Aucun
+    # chevauchement, mais les colonnes sont quittées.
     "paysage-dehors": ("[0,960][2712,1168]", "[0,1220][2712,1220]", "false",
-                       "[0,130][2712,816]", "[0,0][2712,1220]"),
+                       "[0,130][2712,816]", "[0,0][2712,1220]", "[0,816][2712,960]"),
     # La vidéo qui déborde sur la saisie (l'ancien défaut « la fenêtre vidéo
-    # n'empiète plus sur le chat », § 8.18) : recouvrement 1220×48 px.
+    # n'empiète plus sur le chat », § 8.18) : recouvrement 1220×48 px. Pas de
+    # chat ici : le scénario isole le chevauchement saisie×vidéo.
     "chevauche": ("[0,2452][1220,2660]", "[0,2712][1220,2712]", "false",
-                  "[0,130][1220,2500]", "[0,0][1220,2712]"),
+                  "[0,130][1220,2500]", "[0,0][1220,2712]", None),
+    # Le chat qui déborde sur la vidéo : 145×830 px de recouvrement.
+    "chat-video": ("[1845,960][2712,1168]", "[0,1220][2712,1220]", "false",
+                   "[0,130][1845,1168]", "[0,0][2712,1220]", "[1700,130][2712,960]"),
+    # Le chat qui déborde sur la saisie : 867×208 px de recouvrement.
+    "chat-saisie": ("[1845,960][2712,1168]", "[0,1220][2712,1220]", "false",
+                    "[0,130][1845,1168]", "[0,0][2712,1220]", "[1845,900][2712,1168]"),
 }
 
 
@@ -95,7 +102,7 @@ def ime_window_dump():
     sc = ime_scenario()
     if sc is None:
         return ""
-    _composer, frame, visible, _video, _geo = sc
+    _composer, frame, visible, _video, _geo, _chat = sc
     return (
         "WINDOW MANAGER WINDOWS (dumpsys window -a)\n"
         "  InsetsState:\n"
@@ -191,6 +198,17 @@ def render(idx, focus):
         nodes.append(
             node("", "android.widget.RelativeLayout", sc[4], rid="com.s0und.s0undtv:id/container")
         )
+        if sc[5] is not None:
+            # La zone de chat : classe `com.s0und.s0undtv.chat.ChatRecyclerView`,
+            # id `ChatRecycleView` (relus dans le greffon et les layouts).
+            nodes.append(
+                node(
+                    "",
+                    "com.s0und.s0undtv.chat.ChatRecyclerView",
+                    sc[5],
+                    rid="com.s0und.s0undtv:id/ChatRecycleView",
+                )
+            )
     head = SCREENS[idx][: SCREENS[idx].index("<node")]
     return head + "".join(nodes) + "</hierarchy>"
 

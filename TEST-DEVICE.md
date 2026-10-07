@@ -2874,3 +2874,15 @@ direct** (téléphone débranché pendant la session) — les ids et le portrait
 géométrie paysage provient des mesures d'appareil du § 8.26 ; la relecture live paysage reste à
 faire quand l'appareil revient (`wm size 2712x1220`, ouvrir le compositeur, `ime`, puis
 `wm size reset`).
+
+**Colonne de chat vérifiée à son tour (07/10/2026)** : le volet 3 de `ime` refuse tout
+recouvrement **chat × vidéo** et **chat × saisie** (mêmes intersections que les volets 1 et 2,
+helper partagé `rect_overlap`), et impose au chat la **même colonne** qu'à la saisie en paysage.
+Identité de la vue lue dans le greffon et les layouts (classe `com.s0und.s0undtv.chat.ChatRecyclerView`,
+id `ChatRecycleView` — motif `ChatRecycl` qui couvre l'orthographe sans « r ») — **pas revérifiée
+en direct** (téléphone débranché). Scénarios calés sur les mesures du § 8.26 : `paysage`
+(chat `[1845,130][2712,960]` → conforme), `paysage-dehors` (chat pleine largeur → colonne
+quittée, en plus de celle de la saisie), `chat-video` (145×830 px de recouvrement) et
+`chat-saisie` (867×208 px). `test_device_ui.sh` **88 → 99 vérifications** ; **mordance** : `chat_node`
+rendu aveugle → 10 échecs nommés ; restauré, 99/99. Le harnais tourne dans la CI à chaque push
+et chaque release (branche le 07/10, verdict `88/88` observé dans le log du run `37583376296`).
