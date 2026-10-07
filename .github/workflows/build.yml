@@ -73,6 +73,10 @@ jobs:
           # relu ici, parce qu'un chemin résolu depuis le mauvais endroit écrit
           # là où personne n'attend le fichier (vu le 05/10/2026).
           python patch/tests/test_script_paths.py
+          # Le verrou « saisie à sa place » (clavier, vidéo, colonne paysage) :
+          # harnais hors appareil sur double d'adb — ses décisions sont jouées
+          # à chaque push, pas seulement quand un téléphone est branché.
+          bash patch/tests/test_device_ui.sh
           # test_brand.py exige les polices Windows du mot-symbole (ARLRDBD.TTF,
           # non redistribuables) et test_apk.py exige un APK SIGNÉ : tous deux
           # restent des contrôles du mainteneur. La CI prouve la recette, pas
@@ -164,6 +168,10 @@ jobs:
           # relu ici, parce qu'un chemin résolu depuis le mauvais endroit écrit
           # là où personne n'attend le fichier (vu le 05/10/2026).
           python patch/tests/test_script_paths.py
+          # Le verrou « saisie à sa place » (clavier, vidéo, colonne paysage) :
+          # harnais hors appareil sur double d'adb — ses décisions sont jouées
+          # à chaque release, pas seulement quand un téléphone est branché.
+          bash patch/tests/test_device_ui.sh
 
       - name: Aucun secret en clair dans le dépôt
         shell: bash
