@@ -223,7 +223,9 @@ Les documents sont **en français**, comme le reste du projet.
 
 1. Incrémenter `VERSION_CODE` / `VERSION_NAME` dans `patch/build.sh`, puis ajouter l'entrée
    correspondante en tête de `CHANGELOG-twouich.md` ; `python patch/sync-readme.py` aligne alors
-   le README (lien d'installation vers l'APK du tag + section de version manquante) — la CI
+   les **deux** README (liens d'installation FR et EN vers l'APK du tag, section de version
+   manquante, et régénération de « Nouveautés » / « What's new » — la prose anglaise se déclare
+   une fois par release dans `WHATS_NEW_EN` du script, sans quoi il échoue bruyant) — la CI
    vérifie cet alignement à chaque push (`sync-readme.py --check`) ;
 2. reconstruire, puis `update.json` doit décrire **exactement** le livrable
    (`APK`, `ReleaseDate`, `ReleaseType`, `VersionCode`, `VersionName`, `hasChangeLog`) ;

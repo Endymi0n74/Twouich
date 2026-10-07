@@ -5,13 +5,15 @@
 | Projet | Rôle | Attribution |
 |---|---|---|
 | **S0undTV** — https://github.com/S0und/S0undTV | application Twitch pour Android TV dont Twouich est un **build modifié**. Closed source : seul le binaire est publié par son auteur. | Toute l'application, son UI, son lecteur ExoPlayer, son intégration Twitch et ses fonctions (chat, emotes BTTV/FFZ/7TV, PiP, VOD, notifications) sont l'œuvre de **S0und** et de ses contributeurs. Les captures de `images/` proviennent de son dépôt. |
-| **Streamlink** — https://github.com/streamlink/streamlink | l'implémentation de référence du nettoyage des plages publicitaires Twitch (`plugins/twitch.py`) a servi de base aux règles de `PlaylistSanitizer` (plages `stitched-ad`, titres `Amazon`, discontinuités). | Logique réimplémentée en smali pour Android ; merci aux mainteneurs de Streamlink. |
+| **Streamlink** — https://github.com/streamlink/streamlink | l'implémentation de référence du nettoyage des plages publicitaires Twitch (`plugins/twitch.py`) a servi de base aux règles de `PlaylistSanitizer` (plages `stitched-ad`, titres `Amazon`, fermeture de zone sur `#EXT-X-TWITCH-LIVE-SEQUENCE` ou la DATERANGE live — depuis la v1.0.17 ; le `#EXT-X-DISCONTINUITY`, lui, est conservé pour le saut de timeline). | Logique réimplémentée en smali pour Android ; merci aux mainteneurs de Streamlink. |
 | **ExoPlayer** (Google) | lecteur utilisé par l'application ; Twouich ne fait que s'insérer dans sa chaîne de sources de données. | — |
 | **apktool / uber-apk-signer / jadx** | outillage de désassemblage, de signature et d'analyse. | — |
 
 ## En aval (ce dépôt)
 
-Ce qui est **nôtre** : le greffon anti-pub (`patch/smali/com/twouich/adblock/`), le repointage de la
+Ce qui est **nôtre** : le greffon anti-pub (`patch/smali/com/twouich/adblock/`), qui porte aussi la
+dé-mute VOD (`-unmuted` → `-muted`) et le fallback VaFT (`VaftFallback.processM3U8()` porté du
+userscript voisin `TwVodNoAdsJCed`), le repointage de la
 mise à jour automatique vers ce dépôt, le script de patch rejouable (`patch/patch.py`), l'outillage
 de build (`patch/build.sh`) et la documentation (`README.md`, `AUDIT.md`).
 

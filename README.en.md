@@ -22,8 +22,9 @@ Android TV client for Twitch, with local filtering of SSAI ad markers, VOD un-mu
 
 ## What's new in v1.0.23 — October 6, 2026
 
-The phone player now survives rotation during playback: switching to landscape keeps the video at an exact 16:9 frame with chat and the compose bar side by side. The "Send a message" bar rises above the keyboard, glued to its top edge — height read via `getWindowVisibleDisplayFrame`, since IME insets report nothing on this MIUI. Measurements and proof in [`TEST-DEVICE.md`](TEST-DEVICE.md) (§ 8.26); full journal in [`CHANGELOG-twouich.md`](CHANGELOG-twouich.md) and [`memory.md`](memory.md).
-
+- **Phone-player rotation no longer breaks the layout mid-playback.** Switching portrait → landscape keeps the video at an exact 16:9 frame (`1845×1038` in a simulated 2712×1220 screen) and ranks chat and the compose bar in a column to its right — the landscape branch is replayed with **re-measured** geometry, instead of the stale configuration `onConfigurationChanged` still found in place.
+- **The "Send a message" bar rises above the keyboard.** Measured glued to the IME top edge (`y=1687` with the keyboard open up to 2712) while the chat shrinks accordingly; keyboard closed, the original portrait stacking is unchanged. With the window edge-to-edge (target 35), `adjustResize` is not enough — and **IME insets report nothing on this MIUI**: the keyboard height is read via `getWindowVisibleDisplayFrame`, the only reliable source measured on the device. A layout watch (`PhoneLayoutWatch`) replays the geometry on every visible-frame change, with an anti-loop guard.
+- No message was sent during validation; no session was lost (`adb install -r`, `firstInstallTime` preserved). Measurement details and recipes: `TEST-DEVICE.md` § 8.26.
 
 ## Installation
 

@@ -22,8 +22,9 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 
 ## Nouveautés v1.0.23 — 6 octobre 2026
 
-Le lecteur téléphone résiste à la rotation en cours de lecture : au passage en paysage, la vidéo garde son cadre 16:9 exact et le chat avec la barre de saisie se rangent en colonne à sa droite. La barre « Envoyer un message » remonte au-dessus du clavier, collée à son bord haut — hauteur lue par `getWindowVisibleDisplayFrame`, les insets IME ne rendant rien sur ce MIUI. Mesures et preuves dans [`TEST-DEVICE.md`](TEST-DEVICE.md) (§ 8.26) ; journal complet dans [`CHANGELOG-twouich.md`](CHANGELOG-twouich.md) et [`memory.md`](memory.md).
-
+- **La rotation pendant la lecture ne disloque plus le lecteur téléphone.** Au passage portrait → paysage, la vidéo garde un 16:9 exact (`1845×1038` dans un écran 2712×1220 simulé) et le chat avec la barre de saisie se rangent en colonne à sa droite — la branche paysage est rejouée avec la géométrie **re-mesurée**, au lieu de la configuration périmée que `onConfigurationChanged` trouvait encore en place.
+- **La barre « Envoyer un message » monte au-dessus du clavier.** Mesurée collée au bord haut de l'IME (`y=1687` avec un clavier ouvert jusqu'à 2712), avec le chat qui se raccourcit d'autant ; clavier fermé, l'empilement portrait d'origine est inchangé. La fenêtre étant edge-to-edge (cible 35), `adjustResize` ne suffit pas — et **les insets IME ne rendent rien sur ce MIUI** : la hauteur du clavier est lue par `getWindowVisibleDisplayFrame`, seule source fiable mesurée sur l'appareil. Une veille de disposition (`PhoneLayoutWatch`) rejoue la géométrie à chaque changement de frame visible, avec garde anti-boucle.
+- Aucun message n'a été envoyé pendant la validation ; aucune session n'a été perdue (`adb install -r`, `firstInstallTime` préservé). Détail des mesures et recettes : `TEST-DEVICE.md` § 8.26.
 
 ## Installation
 
