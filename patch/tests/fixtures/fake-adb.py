@@ -18,12 +18,22 @@
 #   FAKE_ACTIVATE=1   `input keyevent 23` change d'écran
 #   FAKE_NO_FOCUS=1   aucun nœud n'a le focus (écran de départ d'une grille Leanback)
 #   FAKE_CAPTURE=empty|png   `screencap` écrit 0 octet (BlueStacks) ou des octets
-#   FAKE_IME=sous|dessus|ferme|sans   scénario du compositeur et du clavier
-#                     (verrou « saisie sous le clavier » de device-ui.sh) :
+#   FAKE_IME=sous|dessus|ferme|sans|invite|paysage|paysage-dehors|chevauche
+#                     scénario du compositeur, du clavier et de la vidéo
+#                     (verrou « saisie à sa place » de device-ui.sh) :
 #                     `sous`   rejoue le défaut mesuré du § 8.11 (barre 913 px
 #                              sous le bord du clavier), `dessus` l'état corrigé
 #                      du § 8.26, `ferme` le clavier rentré, `sans` un clavier
-#                      ouvert sans aucune saisie à l'écran
+#                      ouvert sans aucune saisie à l'écran, `invite` l'id du
+#                      compositeur masqué (repli par le hint) ;
+#                     `paysage`         l'état corrigé du § 8.26 en 2712×1220
+#                                       (saisie dans sa colonne, à droite de la
+#                                       vidéo) ;
+#                     `paysage-dehors`  la RÉGRESSION de rotation du § 8.26 :
+#                                       la branche portrait appliquée avec des
+#                                       dimensions périmées, saisie pleine
+#                                       largeur sous la vidéo ;
+#                     `chevauche`       la vidéo qui déborde sur la saisie.
 #
 # Ce n'est pas un test de device-ui.sh *en soi* : c'est la preuve que sa
 # logique de décision est juste — que `probe` distingue bien les deux canaux,
@@ -37,14 +47,14 @@ STATE = os.environ.get("FAKE_STATE", ".")
 SERIAL = "127.0.0.1:5555"
 
 
-def node(text, cls, bounds, clickable="false", focused="false", rid=""):
+def node(text, cls, bounds, clickable="false", focused="false", rid="", hint=""):
     return (
         '<node index="0" text="%s" resource-id="%s" class="%s" '
         'package="com.s0und.s0undtv" content-desc="" checkable="false" '
         'checked="false" clickable="%s" enabled="true" focusable="true" '
         'focused="%s" scrollable="false" long-clickable="false" '
-        'password="false" selected="false" bounds="%s" />'
-        % (text, rid, cls, clickable, focused, bounds)
+        'password="false" selected="false" bounds="%s" hint="%s" />'
+        % (text, rid, cls, clickable, focused, bounds, hint)
     )
 
 
@@ -53,11 +63,27 @@ def node(text, cls, bounds, clickable="false", focused="false", rid=""):
 # ouvert à `y=1687`, soit 913 px sous la première touche) et son correctif du
 # § 8.26 (barre `0,1479-1220,1687`, collée au bord du clavier).
 IME_SCENARIOS = {
-    #    compositeur              cadre IME                  visible
-    "sous":   ("[0,2600][1220,2712]", "[0,1687][1220,2712]", "true"),
-    "dessus": ("[0,1479][1220,1687]", "[0,1687][1220,2712]", "true"),
-    "ferme":  ("[0,2452][1220,2660]", "[0,2712][1220,2712]", "false"),
-    "sans":   (None,                   "[0,1687][1220,2712]", "true"),
+    #    compositeur              cadre IME                  visible  vidéo              fenêtre
+    "sous":   ("[0,2600][1220,2712]", "[0,1687][1220,2712]", "true",  "[0,130][1220,816]",  "[0,0][1220,2712]"),
+    "dessus": ("[0,1479][1220,1687]", "[0,1687][1220,2712]", "true",  "[0,130][1220,816]",  "[0,0][1220,2712]"),
+    "ferme":  ("[0,2452][1220,2660]", "[0,2712][1220,2712]", "false", "[0,130][1220,816]",  "[0,0][1220,2712]"),
+    "sans":   (None,                   "[0,1687][1220,2712]", "true",  "[0,130][1220,816]",  "[0,0][1220,2712]"),
+    # `invite` : l'id du compositeur est masqué — c'est alors son **hint** qui
+    # le désigne, jamais son `text` (qui vaut « , » sur le vrai appareil).
+    "invite": ("[0,1479][1220,1687]", "[0,1687][1220,2712]", "true",  "[0,130][1220,816]",  "[0,0][1220,2712]"),
+    # Paysage 2712×1220, tel que mesuré au § 8.26 : vidéo 16:9 à gauche
+    # (1845×1038), saisie au bas de la colonne de droite.
+    "paysage": ("[1845,960][2712,1168]", "[0,1220][2712,1220]", "false",
+                "[0,130][1845,1168]", "[0,0][2712,1220]"),
+    # La régression de rotation du § 8.26 : la branche portrait tournant avec
+    # des dimensions périmées — vidéo pleine largeur, saisie pleine largeur
+    # dessous. Aucun chevauchement, mais la colonne est quittée.
+    "paysage-dehors": ("[0,960][2712,1168]", "[0,1220][2712,1220]", "false",
+                       "[0,130][2712,816]", "[0,0][2712,1220]"),
+    # La vidéo qui déborde sur la saisie (l'ancien défaut « la fenêtre vidéo
+    # n'empiète plus sur le chat », § 8.18) : recouvrement 1220×48 px.
+    "chevauche": ("[0,2452][1220,2660]", "[0,2712][1220,2712]", "false",
+                  "[0,130][1220,2500]", "[0,0][1220,2712]"),
 }
 
 
@@ -69,7 +95,7 @@ def ime_window_dump():
     sc = ime_scenario()
     if sc is None:
         return ""
-    _composer, frame, visible = sc
+    _composer, frame, visible, _video, _geo = sc
     return (
         "WINDOW MANAGER WINDOWS (dumpsys window -a)\n"
         "  InsetsState:\n"
@@ -139,14 +165,31 @@ def render(idx, focus):
     # n'apparaît que dans le scénario IME, sur l'écran 1 : les autres tests
     # voient leurs écrans inchangés, deltas de `step` compris.
     sc = ime_scenario()
-    if idx == 1 and sc is not None and sc[0] is not None:
+    if idx == 1 and sc is not None:
+        if sc[0] is not None:
+            if os.environ.get("FAKE_IME") == "invite":
+                # Fidèle au vrai arbre : `text=","`, l'invite dans `hint`, aucun
+                # id exploitable — le repli de composer_node passe par le hint.
+                nodes.append(
+                    node(",", "android.widget.EditText", sc[0], hint="Envoyer un message")
+                )
+            else:
+                nodes.append(
+                    node(
+                        "Envoyer un message",
+                        "android.widget.EditText",
+                        sc[0],
+                        rid="com.s0und.s0undtv:id/SendMessageWindow",
+                    )
+                )
+        # Le cadre vidéo (`ExoPlayer`, mesuré `[0,130][1220,816]` en portrait
+        # sur le Xiaomi) et la fenêtre (`container`, plein écran) : les bornes
+        # réelles du § 8.26, pas une reconstruction.
         nodes.append(
-            node(
-                "Envoyer un message",
-                "android.widget.EditText",
-                sc[0],
-                rid="com.s0und.s0undtv:id/SendMessageWindow",
-            )
+            node("", "android.widget.FrameLayout", sc[3], rid="com.s0und.s0undtv:id/ExoPlayer")
+        )
+        nodes.append(
+            node("", "android.widget.RelativeLayout", sc[4], rid="com.s0und.s0undtv:id/container")
         )
     head = SCREENS[idx][: SCREENS[idx].index("<node")]
     return head + "".join(nodes) + "</hierarchy>"

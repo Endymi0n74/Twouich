@@ -261,6 +261,31 @@ expect_rc "IME fermé : code 0" 0
 FAKE_IME=sans run_step ime
 expect_contains "IME ouvert sans saisie : non concluant, pas un verdict" "non concluant"
 expect_rc "IME sans saisie : code 0" 0
+# Le repli quand l'id du compositeur est masqué : sur le vrai appareil (mesuré
+# le 07/10 sur le Xiaomi), l'invite « Envoyer un message » vit dans `hint` et le
+# `text` du champ vaut « , » — chercher dans `text` seul ne trouve jamais rien.
+FAKE_IME=invite run_step ime
+expect_contains "IME invite : le repli trouve la saisie par son hint" "✓ la saisie est au-dessus du clavier"
+expect_contains "IME invite : bornes lues sans resource-id" "saisie  : [0,1479][1220,1687]"
+expect_rc "IME invite : code 0" 0
+# Le cas paysage (§ 8.26) : la saisie reste dans sa colonne, à droite de la
+# vidéo, et ne la chevauche jamais. La régression de rotation — la branche
+# portrait appliquée avec des dimensions périmées — ne recouvre rien mais
+# quitte la colonne : c'est ce verrou qui doit la voir.
+FAKE_IME=paysage run_step ime
+expect_contains "IME paysage : la saisie reste dans sa colonne" "✓ la saisie reste dans sa colonne"
+expect_contains "IME paysage : sans chevauchement vidéo" "✓ la saisie ne chevauche pas la vidéo"
+expect_rc "IME paysage : code 0" 0
+FAKE_IME=paysage-dehors run_step ime
+expect_contains "IME paysage hors colonne : nomme le défaut (la régression du § 8.26)" "✗ la saisie a quitté sa colonne"
+expect_contains "IME paysage hors colonne : donne la colonne attendue" "hors de [2712,130][2712,816]"
+expect_contains "IME paysage hors colonne : pas de faux chevauchement" "✓ la saisie ne chevauche pas la vidéo"
+expect_rc "IME paysage hors colonne : code 1" 1
+FAKE_IME=chevauche run_step ime
+expect_contains "IME chevauchement vidéo : nomme le défaut" "✗ la saisie CHEVAUCHE la vidéo"
+expect_contains "IME chevauchement vidéo : mesure le recouvrement" "48 px de recouvrement"
+expect_absent "IME chevauchement vidéo : la colonne n'est pas vérifiée en portrait" "sa colonne"
+expect_rc "IME chevauchement vidéo : code 1" 1
 
 
 echo

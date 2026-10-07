@@ -19,10 +19,14 @@
 #   tap <x> <y>     tap par coordonnées, avec repli D-pad si le tactile est absorbé
 #   key <code>      touche brute (4 = BACK, 3 = HOME, 19/20/21/22 = flèches)
 #   shot <f.png>    capture d'écran (signal humain, pas signal de test)
-#   ime             la saisie du chat est-elle AU-DESSUS du clavier ? Compare
-#                   ses bornes au cadre du clavier (`dumpsys window`, ligne
-#                   `type=ime`). Sort 1 si la saisie est sous le clavier — le
-#                   défaut mesuré du § 8.11 (913 px sous la première touche).
+#   ime             la saisie du chat est-elle à sa place ? Trois points :
+#                   (1) AU-DESSUS du clavier — ses bornes contre le cadre IME
+#                   (`dumpsys window`, ligne `type=ime`), le défaut mesuré du
+#                   § 8.11 (913 px sous la première touche) ;
+#                   (2) sans jamais CHEVAUCHER la vidéo (id ExoPlayer) ;
+#                   (3) dans sa COLONNE en paysage (à droite de la vidéo), le
+#                   défaut de rotation du § 8.26.
+#                   Sort 1 dès qu'un point est en défaut.
 #   step <avant> <actions> <apres>
 #                   UNE vérification complète en une ligne : l'écran attendu, les
 #                   actions, l'écran obtenu. Sort 0 si conforme, 1 sinon — de quoi
@@ -440,6 +444,12 @@ ime_frame() { # ime_frame — « x1 y1 x2 y2 » du clavier, ou vide (fermé / il
     local line b
     while IFS= read -r line; do
         case "$line" in *visible=false*) continue ;; esac
+        # `visibleFrame=` se termine par `frame=` : le retirer d'abord, sinon son
+        # rectangle serait une candidature de plus à `frame=`. Mesuré sur le
+        # Xiaomi clavier fermé : `frame=[0,0][0,0]` mais
+        # `visibleFrame=[0,2556][1220,2712]` — lire ce dernier ferait passer un
+        # clavier fermé pour un clavier ouvert de 156 px.
+        line="$(printf '%s' "$line" | sed 's/visibleFrame=\[[^]]*\]\[[^]]*\]//g')"
         b="$(printf '%s' "$line" | grep -oE 'frame=\[[0-9-]+,[0-9-]+\]\[[0-9-]+,[0-9-]+\]' | head -1)"
         [ -n "$b" ] || continue
         printf '%s\n' "$b" | sed -n \
@@ -449,26 +459,35 @@ ime_frame() { # ime_frame — « x1 y1 x2 y2 » du clavier, ou vide (fermé / il
 
 composer_node() { # composer_node — le nœud de saisie du chat, s'il est à l'écran
     local line
-    # `SendMessageWindow` est l'identifiant réel du compositeur (§ 8.11) ; son
-    # invite « Envoyer un message » est le repli quand l'id est masqué.
+    # `SendMessageWindow` est l'identifiant réel du compositeur (§ 8.11). Repli
+    # quand l'id est masqué : son invite « Envoyer un message » — mesurée sur le
+    # Xiaomi dans l'attribut **`hint`** (le `text` du champ vaut « , »), donc
+    # chercher dans `text` seul ne trouve jamais rien sur un vrai appareil.
     line="$(ui_dump | grep -iE 'resource-id="[^"]*send.?message' | head -1)"
-    [ -n "$line" ] || line="$(node_of 'Envoyer un message')"
+    [ -n "$line" ] || line="$(ui_dump | grep -E '(text|hint)="Envoyer un message"' | head -1)"
     printf '%s\n' "$line"
 }
 
+video_node() { # video_node — le cadre vidéo, s'il est à l'écran
+    # `ExoPlayer` est le conteneur vidéo réel (mesuré `[0,130][1220,816]` en
+    # portrait sur le Xiaomi) ; `exo_content_frame` est son repli.
+    local line
+    line="$(ui_dump | grep -iE 'resource-id="[^"]*ExoPlayer"' | head -1)"
+    [ -n "$line" ] || line="$(ui_dump | grep -iE 'resource-id="[^"]*exo_content_frame"' | head -1)"
+    printf '%s\n' "$line"
+}
+
+geometry_node() { # geometry_node — la fenêtre de l'app (id `container`, plein écran)
+    # Ses bornes donnent la géométrie réelle de la fenêtre — et donc
+    # l'orientation que le code applique (`largeur > hauteur`, § 8.21), le
+    # `rotation` de l'arbre restant à 0 sur un paysage simulé par `wm size`.
+    ui_dump | grep -E 'resource-id="[^"]*id/container"' | head -1
+}
+
 cmd_ime() {
-    local fb comp b txt x1 y1 x2 y2 cx1 cy1 cx2 cy2 haut bas masque ecart
-    fb="$(ime_frame)"
-    if [ -z "$fb" ]; then
-        echo "clavier fermé — rien ne peut être sous lui : non mesuré"
-        return 0
-    fi
-    read -r x1 y1 x2 y2 <<<"$fb"
-    if [ "$((y2 - y1))" -le 0 ]; then
-        echo "clavier fermé — rien ne peut être sous lui : non mesuré"
-        return 0
-    fi
-    echo "clavier : frame=[$x1,$y1][$x2,$y2] (hauteur $((y2 - y1)))"
+    local fb comp vid geo txt rc=0
+    local x1 y1 x2 y2 cx1 cy1 cx2 cy2 vx1 vy1 vx2 vy2 gx1 gy1 gx2 gy2
+    local haut bas masque ecart recx recy
     comp="$(composer_node)"
     if [ -z "$comp" ]; then
         echo "aucune saisie à l'écran — non concluant"
@@ -478,29 +497,82 @@ cmd_ime() {
     [ -n "${cx1:-}" ] || { echo "✗ saisie illisible (bornes absentes du nœud)"; return 1; }
     txt="$(printf '%s' "$comp" | field text)"
     echo "saisie  : [$cx1,$cy1][$cx2,$cy2]  « ${txt:-(sans texte)} »"
-    # Ce que le clavier recouvre réellement de la barre : l'intersection des
-    # deux rectangles. Un barreau qui **chevauche** le bord est déjà un défaut
-    # même si son haut reste au-dessus — le seul état conforme est masque=0.
-    haut=$(( cy2 < y2 ? cy2 : y2 ))
-    bas=$(( cy1 > y1 ? cy1 : y1 ))
-    masque=$(( haut > bas ? haut - bas : 0 ))
-    ecart=$((cy1 - y1))
-    if [ "$masque" -gt 0 ]; then
-        if [ "$ecart" -gt 0 ]; then
-            echo "écart   : barre ${ecart} px sous le bord du clavier — ${masque} px masqués"
-        else
-            echo "écart   : barre $((-ecart)) px au-dessus du bord du clavier — ${masque} px masqués"
-        fi
-        echo "✗ la saisie est SOUS le clavier"
-        return 1
-    fi
-    if [ "$ecart" -eq 0 ]; then
-        echo "écart   : barre collée au bord du clavier — 0 px masqué"
+
+    # ── 1. le clavier ne doit pas recouvrir la saisie ──────────────────
+    fb="$(ime_frame)"
+    if [ -z "$fb" ]; then
+        echo "clavier fermé — rien ne peut être sous lui : non mesuré"
     else
-        echo "écart   : barre $((-ecart)) px au-dessus du bord du clavier — 0 px masqué"
+        read -r x1 y1 x2 y2 <<<"$fb"
+        if [ "$((y2 - y1))" -le 0 ]; then
+            echo "clavier fermé — rien ne peut être sous lui : non mesuré"
+        else
+            echo "clavier : frame=[$x1,$y1][$x2,$y2] (hauteur $((y2 - y1)))"
+            # Ce que le clavier recouvre réellement de la barre : l'intersection
+            # des deux rectangles. Un barreau qui **chevauche** le bord est déjà
+            # un défaut même si son haut reste au-dessus — seul masque=0 est
+            # conforme.
+            haut=$(( cy2 < y2 ? cy2 : y2 ))
+            bas=$(( cy1 > y1 ? cy1 : y1 ))
+            masque=$(( haut > bas ? haut - bas : 0 ))
+            ecart=$((cy1 - y1))
+            if [ "$masque" -gt 0 ]; then
+                if [ "$ecart" -gt 0 ]; then
+                    echo "écart   : barre ${ecart} px sous le bord du clavier — ${masque} px masqués"
+                else
+                    echo "écart   : barre $((-ecart)) px au-dessus du bord du clavier — ${masque} px masqués"
+                fi
+                echo "✗ la saisie est SOUS le clavier"
+                rc=1
+            else
+                if [ "$ecart" -eq 0 ]; then
+                    echo "écart   : barre collée au bord du clavier — 0 px masqué"
+                else
+                    echo "écart   : barre $((-ecart)) px au-dessus du bord du clavier — 0 px masqué"
+                fi
+                echo "✓ la saisie est au-dessus du clavier"
+            fi
+        fi
     fi
-    echo "✓ la saisie est au-dessus du clavier"
-    return 0
+
+    # ── 2. la saisie ne chevauche jamais la vidéo, et reste en colonne ─
+    vid="$(video_node)"
+    if [ -z "$vid" ]; then
+        echo "vidéo   : absente de l'écran — non concluant"
+        return $rc
+    fi
+    read -r vx1 vy1 vx2 vy2 <<<"$(bounds_vals "$vid")"
+    [ -n "${vx1:-}" ] || { echo "✗ vidéo illisible (bornes absentes du nœud)"; return 1; }
+    echo "vidéo   : [$vx1,$vy1][$vx2,$vy2]"
+    # Intersection des rectangles, comme pour le clavier.
+    recx=$(( (cx2 < vx2 ? cx2 : vx2) > (cx1 > vx1 ? cx1 : vx1) ? (cx2 < vx2 ? cx2 : vx2) - (cx1 > vx1 ? cx1 : vx1) : 0 ))
+    recy=$(( (cy2 < vy2 ? cy2 : vy2) > (cy1 > vy1 ? cy1 : vy1) ? (cy2 < vy2 ? cy2 : vy2) - (cy1 > vy1 ? cy1 : vy1) : 0 ))
+    if [ "$recx" -gt 0 ] && [ "$recy" -gt 0 ]; then
+        echo "✗ la saisie CHEVAUCHE la vidéo (${recx}×${recy} px de recouvrement)"
+        rc=1
+    else
+        echo "✓ la saisie ne chevauche pas la vidéo"
+    fi
+    # En paysage (`largeur > hauteur`, la branche qu'applique le code — et non
+    # le `rotation` de l'arbre, resté à 0 sur un paysage simulé par `wm size`),
+    # la saisie vit dans la colonne à droite de la vidéo : x ≥ bord droit vidéo,
+    # sans dépasser la fenêtre, et dans l'étendue verticale de la vidéo.
+    geo="$(geometry_node)"
+    if [ -z "$geo" ]; then
+        echo "géométrie : fenêtre inconnue — colonne non vérifiée"
+        return $rc
+    fi
+    read -r gx1 gy1 gx2 gy2 <<<"$(bounds_vals "$geo")"
+    if [ "$((gx2 - gx1))" -gt "$((gy2 - gy1))" ]; then
+        if [ "$cx1" -ge "$vx2" ] && [ "$cx2" -le "$gx2" ] \
+            && [ "$cy1" -ge "$vy1" ] && [ "$cy2" -le "$vy2" ]; then
+            echo "✓ la saisie reste dans sa colonne"
+        else
+            echo "✗ la saisie a quitté sa colonne : [$cx1,$cy1][$cx2,$cy2] hors de [$vx2,$vy1][$gx2,$vy2]"
+            rc=1
+        fi
+    fi
+    return $rc
 }
 
 # ─── une recette en une ligne ──────────────────────────────────────────

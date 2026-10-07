@@ -2839,3 +2839,38 @@ double `fake-adb.py`, qui rejouent les mesures réelles : `sous` = le défaut du
 (barre `[0,2600][1220,2712]` sous un cadre `[0,1687][1220,2712]` → 913 px, 112 px masqués),
 `dessus` = l'état corrigé du § 8.26. **Mordance par mutation** : le seuil `masque > 0` remplacé
 par `> 999` fait échouer 4 vérifications dont le verdict lui-même ; restauré, 74/74.
+
+**Validé en direct sur le Xiaomi (07/10/2026)**, deux états, chaque ligne de l'outil confrontée au
+dump brut. Clavier ouvert : `frame=[0,1687][1220,2712]` et `saisie [0,1479][1220,1687]` **au pixel
+près** les lignes `InsetsSource … type=ime` de `dumpsys window -a` et `SendMessageWindow` de
+`uiautomator` — verdict « ✓ au-dessus », 208 px d'écart, 0 masqué, exit 0. Clavier fermé (BACK) :
+« clavier fermé — non mesuré », exit 0. **Deux pièges trouvés par ce live, corrigés** :
+
+- **`visibleFrame=` se termine par `frame=`.** Clavier fermé, le brut rapporte `frame=[0,0][0,0]`
+  mais **`visibleFrame=[0,2556][1220,2712]` non nul** : lire ce dernier ferait passer un clavier
+  fermé pour un clavier ouvert de 156 px. `ime_frame` retire désormais `visibleFrame=…` avant
+  d'extraire `frame=`, en plus du garde `visible=false` et du test de hauteur (trois barrières).
+- **L'invite « Envoyer un message » vit dans l'attribut `hint`**, le `text` du champ valant `« , »` :
+  le repli de `composer_node` (quand l'id est masqué) qui cherchait dans `text` seul ne trouvait
+  **jamais** rien sur un vrai appareil — chemin mort que seule la mesure a révélé. Il cherche
+  désormais `(text|hint)`. Le scénario `FAKE_IME=invite` le verrouille (id absent, invite en
+  `hint`) : `test_device_ui.sh` **74 → 77 vérifications**.
+
+**Étendu au cas paysage (07/10/2026)** : `ime` vérifie désormais trois points — (1) la saisie au-
+dessus du clavier ; (2) **sans jamais chevaucher la vidéo** (id `ExoPlayer`, repli
+`exo_content_frame` — id et bornes `[0,130][1220,816]` **validés en direct** sur le Xiaomi avant
+son débranchement) ; (3) **dans sa colonne en paysage** : `x ≥` bord droit de la vidéo, sans
+dépasser la fenêtre (id `container`, `[0,0][1220,2712]` mesuré), dans l'étendue verticale de la
+vidéo. L'orientation vient de la **géométrie du `container`** (`largeur > hauteur`, la branche
+qu'applique réellement le code) et **pas** du `rotation` de l'arbre — resté à 0 sur un paysage
+simulé par `wm size` (§ 8.10). Trois scénarios verrouillés, calés sur les mesures du § 8.26 :
+`paysage` (vidéo 1845×1038 à gauche, saisie `[1845,960][2712,1168]` dans sa colonne → conforme),
+`paysage-dehors` (**la régression de rotation** : branche portrait, vidéo et saisie pleine
+largeur — aucun chevauchement mais colonne quittée, c'est ce verrou qui la voit), `chevauche`
+(la vidéo débordant sur la saisie, recouvrement mesuré 1220×48 px). `test_device_ui.sh`
+**77 → 88 vérifications** ; **mordance** : chevauchement neutralisé + cadrage paysage désactivé →
+7 échecs nommés ; restauré, 88/88. **Limite assumée** : le cas paysage n'a pas pu être rejoué **en
+direct** (téléphone débranché pendant la session) — les ids et le portrait sont validés live, la
+géométrie paysage provient des mesures d'appareil du § 8.26 ; la relecture live paysage reste à
+faire quand l'appareil revient (`wm size 2712x1220`, ouvrir le compositeur, `ime`, puis
+`wm size reset`).
