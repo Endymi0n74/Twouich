@@ -20,17 +20,17 @@ Android TV client for Twitch, with local filtering of SSAI ad markers, VOD un-mu
 - **VaFT fallback** `v1.0.16`: if `stitched-ad` survives stripping (new format), attempt clean stream `GQL PlaybackAccessToken embed` → `usher v2` → variant (5s timeout, fallback to stripping) (`VaftFallback`, dormant while `lastCut>0`)
 - **Reproducible build**: canonicalized ZIP (timestamp + order), `SELFTEST 31/31`, `check-release.sh` 4/4
 
-## What's new in v1.0.20 — October 5, 2026
+## What's new in v1.0.23 — October 6, 2026
 
-The phone player now keeps chat visible during playback instead of inheriting the upstream fade that made the chat area black. TV behavior is preserved. See [`CHANGELOG-twouich.md`](CHANGELOG-twouich.md) and [`memory.md`](memory.md).
+The phone player now survives rotation during playback: switching to landscape keeps the video at an exact 16:9 frame with chat and the compose bar side by side. The "Send a message" bar rises above the keyboard, glued to its top edge — height read via `getWindowVisibleDisplayFrame`, since IME insets report nothing on this MIUI. Measurements and proof in [`TEST-DEVICE.md`](TEST-DEVICE.md) (§ 8.26); full journal in [`CHANGELOG-twouich.md`](CHANGELOG-twouich.md) and [`memory.md`](memory.md).
 
 
 ## Installation
 
-Download [`Twouich_v1.0.20.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.20/Twouich_v1.0.20.apk) from the published release.
+Download [`Twouich_v1.0.23.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.23/Twouich_v1.0.23.apk) from the published release.
 
 ```bash
-adb install -r Twouich_v1.0.20.apk
+adb install -r Twouich_v1.0.23.apk
 ```
 
 
