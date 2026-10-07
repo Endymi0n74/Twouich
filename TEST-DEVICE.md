@@ -2825,3 +2825,17 @@ appareil différent (§ 8.21).
 `update.json` reste en 169/v1.0.22 tant qu'aucune release n'est demandée). Traces logcat
 `clavier :` / `veille :` laissées dans le livrable, cohérentes avec la trace
 `interface : telephone`.
+
+**Verrou de non-régression (07/10/2026)** : `bash patch/device-ui.sh ime` rejoue la comparaison
+à la demande — il lit le cadre du clavier dans `dumpsys window -a` (ligne `type=ime`, la source
+du § 8.11), les bornes de la saisie dans l'arbre `uiautomator` (id `SendMessageWindow`, repli
+sur l'invite « Envoyer un message »), et sort **1** si l'intersection des deux rectangles n'est
+pas vide — un barreau qui **chevauche** le bord du clavier est un défaut même si son haut reste
+au-dessus, seul `masque=0` est conforme. Les quatre états sont nommés : sous (sortie 1, avec
+l'écart au bord **et** les pixels masqués), dessus (0), clavier fermé (0, « non mesuré »),
+clavier ouvert sans saisie (0, « non concluant »). Verrouillé par `test_device_ui.sh`
+(**61 → 74 vérifications**, section 8) sur les scénarios `FAKE_IME=sous|dessus|ferme|sans` du
+double `fake-adb.py`, qui rejouent les mesures réelles : `sous` = le défaut du § 8.11
+(barre `[0,2600][1220,2712]` sous un cadre `[0,1687][1220,2712]` → 913 px, 112 px masqués),
+`dessus` = l'état corrigé du § 8.26. **Mordance par mutation** : le seuil `masque > 0` remplacé
+par `> 999` fait échouer 4 vérifications dont le verdict lui-même ; restauré, 74/74.

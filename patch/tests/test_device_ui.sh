@@ -72,7 +72,7 @@ run_ui() {
     reset_state
     OUT="$(ADB="$ADB_FAKE" FAKE_STATE="$STATE" SERIAL= FAKE_NO_FOCUS="${FAKE_NO_FOCUS:-}" \
         FAKE_TACTILE="${FAKE_TACTILE:-}" FAKE_ACTIVATE="${FAKE_ACTIVATE:-}" \
-        FAKE_CAPTURE="${FAKE_CAPTURE:-}" \
+        FAKE_CAPTURE="${FAKE_CAPTURE:-}" FAKE_IME="${FAKE_IME:-}" \
         bash "$UI" "$@" 2>&1)"
     RC=$?
 }
@@ -82,7 +82,7 @@ run_ui() {
 run_step() {
     OUT="$(ADB="$ADB_FAKE" FAKE_STATE="$STATE" SERIAL= FAKE_NO_FOCUS="${FAKE_NO_FOCUS:-}" \
         FAKE_TACTILE="${FAKE_TACTILE:-}" FAKE_ACTIVATE="${FAKE_ACTIVATE:-}" \
-        FAKE_CAPTURE="${FAKE_CAPTURE:-}" \
+        FAKE_CAPTURE="${FAKE_CAPTURE:-}" FAKE_IME="${FAKE_IME:-}" \
         bash "$UI" "$@" 2>&1)"
     RC=$?
 }
@@ -234,6 +234,33 @@ FAKE_ACTIVATE=1 run_step step "Revenir" "key:4" "Live Stream History"
 expect_contains "recette 2/2 : lecteur → accueil (BACK)" "✓ ÉTAPE CONFORME"
 expect_contains "recette 2/2 : la carte est revenue à l'écran" "Live Stream History, Niniste"
 expect_rc "recette : chaque étape sort en 0" 0
+
+
+echo
+echo "═══ 8. verrou IME — la saisie ne doit jamais être sous le clavier"
+# Le défaut mesuré du § 8.11 : barre à y=2600 sous un clavier ouvert à y=1687,
+# soit 913 px sous la première touche. Le verrou doit le **voir** et sortir 1 —
+# c'est sa mordance : sans lui, la régression revient sans que rien ne crie.
+# Le compositeur vit sur l'écran du lecteur : y accéder au D-pad comme en § 6.
+FAKE_ACTIVATE=1 run_ui nav "Niniste"
+FAKE_ACTIVATE=1 run_step press
+FAKE_IME=sous run_step ime
+expect_contains "IME sous : nomme le défaut" "✗ la saisie est SOUS le clavier"
+expect_contains "IME sous : mesure l'écart au bord (le défaut du § 8.11)" "barre 913 px sous le bord du clavier"
+expect_contains "IME sous : mesure ce qui est réellement masqué" "112 px masqués"
+expect_contains "IME sous : donne le cadre du clavier" "clavier : frame=[0,1687][1220,2712]"
+expect_contains "IME sous : donne les bornes de la saisie" "saisie  : [0,2600][1220,2712]"
+expect_rc "IME sous : code 1" 1
+FAKE_IME=dessus run_step ime
+expect_contains "IME dessus : conforme (l'état corrigé du § 8.26)" "✓ la saisie est au-dessus du clavier"
+expect_contains "IME dessus : rien de masqué" "0 px masqué"
+expect_rc "IME dessus : code 0" 0
+FAKE_IME=ferme run_step ime
+expect_contains "IME fermé : le dit au lieu de rendre un faux verdict" "clavier fermé"
+expect_rc "IME fermé : code 0" 0
+FAKE_IME=sans run_step ime
+expect_contains "IME ouvert sans saisie : non concluant, pas un verdict" "non concluant"
+expect_rc "IME sans saisie : code 0" 0
 
 
 echo

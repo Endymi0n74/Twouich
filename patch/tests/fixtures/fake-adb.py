@@ -18,6 +18,12 @@
 #   FAKE_ACTIVATE=1   `input keyevent 23` change d'écran
 #   FAKE_NO_FOCUS=1   aucun nœud n'a le focus (écran de départ d'une grille Leanback)
 #   FAKE_CAPTURE=empty|png   `screencap` écrit 0 octet (BlueStacks) ou des octets
+#   FAKE_IME=sous|dessus|ferme|sans   scénario du compositeur et du clavier
+#                     (verrou « saisie sous le clavier » de device-ui.sh) :
+#                     `sous`   rejoue le défaut mesuré du § 8.11 (barre 913 px
+#                              sous le bord du clavier), `dessus` l'état corrigé
+#                      du § 8.26, `ferme` le clavier rentré, `sans` un clavier
+#                      ouvert sans aucune saisie à l'écran
 #
 # Ce n'est pas un test de device-ui.sh *en soi* : c'est la preuve que sa
 # logique de décision est juste — que `probe` distingue bien les deux canaux,
@@ -31,14 +37,43 @@ STATE = os.environ.get("FAKE_STATE", ".")
 SERIAL = "127.0.0.1:5555"
 
 
-def node(text, cls, bounds, clickable="false", focused="false"):
+def node(text, cls, bounds, clickable="false", focused="false", rid=""):
     return (
-        '<node index="0" text="%s" resource-id="" class="%s" '
+        '<node index="0" text="%s" resource-id="%s" class="%s" '
         'package="com.s0und.s0undtv" content-desc="" checkable="false" '
         'checked="false" clickable="%s" enabled="true" focusable="true" '
         'focused="%s" scrollable="false" long-clickable="false" '
         'password="false" selected="false" bounds="%s" />'
-        % (text, cls, clickable, focused, bounds)
+        % (text, rid, cls, clickable, focused, bounds)
+    )
+
+
+# Scénario IME : bornes du compositeur + cadre du clavier, tels que mesurés
+# sur le Xiaomi — le défaut du § 8.11 (barre `y 2600→2712` sous un clavier
+# ouvert à `y=1687`, soit 913 px sous la première touche) et son correctif du
+# § 8.26 (barre `0,1479-1220,1687`, collée au bord du clavier).
+IME_SCENARIOS = {
+    #    compositeur              cadre IME                  visible
+    "sous":   ("[0,2600][1220,2712]", "[0,1687][1220,2712]", "true"),
+    "dessus": ("[0,1479][1220,1687]", "[0,1687][1220,2712]", "true"),
+    "ferme":  ("[0,2452][1220,2660]", "[0,2712][1220,2712]", "false"),
+    "sans":   (None,                   "[0,1687][1220,2712]", "true"),
+}
+
+
+def ime_scenario():
+    return IME_SCENARIOS.get(os.environ.get("FAKE_IME", ""))
+
+
+def ime_window_dump():
+    sc = ime_scenario()
+    if sc is None:
+        return ""
+    _composer, frame, visible = sc
+    return (
+        "WINDOW MANAGER WINDOWS (dumpsys window -a)\n"
+        "  InsetsState:\n"
+        "    InsetsSource id=3 type=ime frame=%s visible=%s\n" % (frame, visible)
     )
 
 
@@ -98,6 +133,19 @@ def render(idx, focus):
                 r'focused="[^"]*"',
                 'focused="%s"' % ("true" if i == focus and not aveugle else "false"),
                 n,
+            )
+        )
+    # Le compositeur du lecteur (« Envoyer un message », id SendMessageWindow)
+    # n'apparaît que dans le scénario IME, sur l'écran 1 : les autres tests
+    # voient leurs écrans inchangés, deltas de `step` compris.
+    sc = ime_scenario()
+    if idx == 1 and sc is not None and sc[0] is not None:
+        nodes.append(
+            node(
+                "Envoyer un message",
+                "android.widget.EditText",
+                sc[0],
+                rid="com.s0und.s0undtv:id/SendMessageWindow",
             )
         )
     head = SCREENS[idx][: SCREENS[idx].index("<node")]
@@ -161,6 +209,12 @@ def main(argv):
     if cmd[0] == "uiautomator" and cmd[1:2] == ["dump"]:
         store_remote(cmd[2], dump_xml().encode())
         sys.stdout.write("UI hierchary dumped to: %s\n" % cmd[2])
+        return 0
+
+    if cmd[0] == "dumpsys" and cmd[1:2] == ["window"]:
+        # L'état des insets, dont la ligne `type=ime` d'où device-ui.sh lit le
+        # cadre du clavier (la fenêtre `InputMethod` ne dit rien d'exploitable).
+        sys.stdout.write(ime_window_dump())
         return 0
 
     if cmd[0] == "cat":

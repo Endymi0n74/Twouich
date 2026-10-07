@@ -19,6 +19,10 @@
 #   tap <x> <y>     tap par coordonnées, avec repli D-pad si le tactile est absorbé
 #   key <code>      touche brute (4 = BACK, 3 = HOME, 19/20/21/22 = flèches)
 #   shot <f.png>    capture d'écran (signal humain, pas signal de test)
+#   ime             la saisie du chat est-elle AU-DESSUS du clavier ? Compare
+#                   ses bornes au cadre du clavier (`dumpsys window`, ligne
+#                   `type=ime`). Sort 1 si la saisie est sous le clavier — le
+#                   défaut mesuré du § 8.11 (913 px sous la première touche).
 #   step <avant> <actions> <apres>
 #                   UNE vérification complète en une ligne : l'écran attendu, les
 #                   actions, l'écran obtenu. Sort 0 si conforme, 1 sinon — de quoi
@@ -208,15 +212,19 @@ field() {  # field <attribut> < <ligne de nœud>
     grep -oE "$1=\"[^\"]*\"" | head -1 | sed "s/^$1=\"//; s/\"$//"
 }
 
-# Centre d'un nœud, depuis bounds="[x1,y1][x2,y2]". Attention : les bornes sont
-# séparées par des **virgules** — les confondre avec le « x » des tailles
+# Valeurs brutes des bornes d'un nœud : « x1 y1 x2 y2 ». Attention : les bornes
+# sont séparées par des **virgules** — les confondre avec le « x » des tailles
 # d'écran (`wm size` → 1220x2712) donne des coordonnées fausses sans le moindre
 # message d'erreur (piège payé, § 8.4).
+bounds_vals() {
+    printf '%s' "$1" | field bounds | sed -n \
+        's/^\[\([0-9-]*\),\([0-9-]*\)\]\[\([0-9-]*\),\([0-9-]*\)\]$/\1 \2 \3 \4/p'
+}
+
+# Centre d'un nœud, depuis bounds="[x1,y1][x2,y2]".
 node_center() {
-    local b x1 y1 x2 y2
-    b="$(printf '%s' "$1" | field bounds)"
-    read -r x1 y1 x2 y2 <<<"$(printf '%s' "$b" | sed -n \
-        's/^\[\([0-9-]*\),\([0-9-]*\)\]\[\([0-9-]*\),\([0-9-]*\)\]$/\1 \2 \3 \4/p')"
+    local x1 y1 x2 y2
+    read -r x1 y1 x2 y2 <<<"$(bounds_vals "$1")"
     [ -n "${x1:-}" ] || return 1
     echo "$(( (x1 + x2) / 2 )) $(( (y1 + y2) / 2 ))"
 }
@@ -419,6 +427,82 @@ cmd_shot() {
     return 1
 }
 
+# ─── verrou IME : la saisie doit rester AU-DESSUS du clavier ────────────
+
+# Le cadre du clavier est dans l'état des insets (`dumpsys window -a`, ligne
+# `type=ime frame=…`) : la fenêtre `InputMethod`, elle, mesure tout l'écran et
+# ne dit pas où commencent les touches (§ 8.11). C'est cette ligne qui a servi
+# à mesurer le défaut (saisie 913 px sous la première touche) et son
+# correctif (§ 8.26). Une source marquée invisible ne montre pas de clavier :
+# sur certains appareils le cadre reste renseigné clavier fermé, donc le
+# drapeau compte autant que la hauteur.
+ime_frame() { # ime_frame — « x1 y1 x2 y2 » du clavier, ou vide (fermé / illisible)
+    local line b
+    while IFS= read -r line; do
+        case "$line" in *visible=false*) continue ;; esac
+        b="$(printf '%s' "$line" | grep -oE 'frame=\[[0-9-]+,[0-9-]+\]\[[0-9-]+,[0-9-]+\]' | head -1)"
+        [ -n "$b" ] || continue
+        printf '%s\n' "$b" | sed -n \
+            's/^frame=\[\([0-9-]*\),\([0-9-]*\)\]\[\([0-9-]*\),\([0-9-]*\)\]$/\1 \2 \3 \4/p'
+    done < <(adbs dumpsys window -a | tr -d '\r' | grep 'type=ime') | tail -1
+}
+
+composer_node() { # composer_node — le nœud de saisie du chat, s'il est à l'écran
+    local line
+    # `SendMessageWindow` est l'identifiant réel du compositeur (§ 8.11) ; son
+    # invite « Envoyer un message » est le repli quand l'id est masqué.
+    line="$(ui_dump | grep -iE 'resource-id="[^"]*send.?message' | head -1)"
+    [ -n "$line" ] || line="$(node_of 'Envoyer un message')"
+    printf '%s\n' "$line"
+}
+
+cmd_ime() {
+    local fb comp b txt x1 y1 x2 y2 cx1 cy1 cx2 cy2 haut bas masque ecart
+    fb="$(ime_frame)"
+    if [ -z "$fb" ]; then
+        echo "clavier fermé — rien ne peut être sous lui : non mesuré"
+        return 0
+    fi
+    read -r x1 y1 x2 y2 <<<"$fb"
+    if [ "$((y2 - y1))" -le 0 ]; then
+        echo "clavier fermé — rien ne peut être sous lui : non mesuré"
+        return 0
+    fi
+    echo "clavier : frame=[$x1,$y1][$x2,$y2] (hauteur $((y2 - y1)))"
+    comp="$(composer_node)"
+    if [ -z "$comp" ]; then
+        echo "aucune saisie à l'écran — non concluant"
+        return 0
+    fi
+    read -r cx1 cy1 cx2 cy2 <<<"$(bounds_vals "$comp")"
+    [ -n "${cx1:-}" ] || { echo "✗ saisie illisible (bornes absentes du nœud)"; return 1; }
+    txt="$(printf '%s' "$comp" | field text)"
+    echo "saisie  : [$cx1,$cy1][$cx2,$cy2]  « ${txt:-(sans texte)} »"
+    # Ce que le clavier recouvre réellement de la barre : l'intersection des
+    # deux rectangles. Un barreau qui **chevauche** le bord est déjà un défaut
+    # même si son haut reste au-dessus — le seul état conforme est masque=0.
+    haut=$(( cy2 < y2 ? cy2 : y2 ))
+    bas=$(( cy1 > y1 ? cy1 : y1 ))
+    masque=$(( haut > bas ? haut - bas : 0 ))
+    ecart=$((cy1 - y1))
+    if [ "$masque" -gt 0 ]; then
+        if [ "$ecart" -gt 0 ]; then
+            echo "écart   : barre ${ecart} px sous le bord du clavier — ${masque} px masqués"
+        else
+            echo "écart   : barre $((-ecart)) px au-dessus du bord du clavier — ${masque} px masqués"
+        fi
+        echo "✗ la saisie est SOUS le clavier"
+        return 1
+    fi
+    if [ "$ecart" -eq 0 ]; then
+        echo "écart   : barre collée au bord du clavier — 0 px masqué"
+    else
+        echo "écart   : barre $((-ecart)) px au-dessus du bord du clavier — 0 px masqué"
+    fi
+    echo "✓ la saisie est au-dessus du clavier"
+    return 0
+}
+
 # ─── une recette en une ligne ──────────────────────────────────────────
 
 # Textes de l'écran, sans le préfixe `text=` — la signature d'écran, lisible.
@@ -527,6 +611,7 @@ case "$CMD" in
     tap)        [ -n "$ARG2" ] || usage "tap <x> <y>";         cmd_tap "$ARG1" "$ARG2" ;;
     key)        [ -n "$ARG1" ] || usage "key <code>";          cmd_key "$ARG1" ;;
     shot)       [ -n "$ARG1" ] || usage "shot <fichier.png>";  cmd_shot "$ARG1" ;;
+    ime)        cmd_ime ;;
     step)       [ -n "$ARG2" ] && [ -n "$ARG3" ] \
                     || usage "step <texte avant> <actions> <texte apres>"
                 cmd_step "$ARG1" "$ARG2" "$ARG3" ;;
