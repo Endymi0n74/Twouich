@@ -784,6 +784,51 @@ def main() -> int:
                     "les layouts TV doivent conserver la ressource amont")
         ok &= check("saisie chat smartphone compilée",
                     holds(arsc, "ET_SendMessage"))
+        # Coins des panneaux du lecteur : cartes à 14 dp côté téléphone, original
+        # (2 dp) côté TV. Ces neuf layouts sont PARTAGÉS — `layout-television`
+        # réinclut les mêmes panneaux — donc des valeurs identiques des deux
+        # côtés signifient soit une greffe qui a fui sur la TV, soit un patch
+        # qui n'a pas été appliqué. Les deux valent un échec.
+        panel_layouts = (
+            "viewholder_videoquality.xml",
+            "viewholder_volume_control.xml",
+            "viewholder_playbackspeed.xml",
+            "viewholder_vodchapter.xml",
+            "peek_card_stream.xml",
+            "peek_card_channel.xml",
+            "peek_card_game.xml",
+            "streamnavigation_preview.xml",
+            "streamnavigation_preview_multiview2.xml",
+        )
+
+        def corner_dip(layout_name: str) -> float | None:
+            """Rayon `cardCornerRadius` d'un CardView de layout livré, en dp.
+
+            aapt2 encode une dimension en 24.8 : entier a partir du bit 8, unite
+            dans les quatre bits bas (1 = dp). Mesure sur le livrable : 14 dp =
+            `0xe01`, 2 dp = `0x201` — pas l'encodage flottant de `Res_value`.
+            """
+            if layout_name not in names:
+                return None
+            attr = view_attributes(
+                z.read(layout_name), "androidx.cardview.widget.CardView"
+            ).get("cardCornerRadius")
+            if attr is None or attr[0] != TYPE_DIMENSION or (attr[1] & 0xF) != 1:
+                return None
+            return float((attr[1] & 0xFFFFFF00) >> 8)
+
+        phone_corners = {n: corner_dip(f"res/layout/{n}")
+                         for n in panel_layouts}
+        tv_corners = {n: corner_dip(f"res/layout-sw600dp/{n}")
+                      for n in panel_layouts}
+        ok &= check("panneaux lecteur : cartes téléphone à 14 dp",
+                    all(v == 14.0 for v in phone_corners.values()),
+                    ", ".join(f"{n}={v}" for n, v in phone_corners.items()
+                              if v != 14.0))
+        ok &= check("panneaux lecteur : TV aux coins d'origine (2 dp)",
+                    all(v == 2.0 for v in tv_corners.values()),
+                    ", ".join(f"{n}={v}" for n, v in tv_corners.items()
+                              if v != 2.0))
         dex_blob = b"".join(z.read(name) for name in names if name.endswith(".dex"))
         ok &= check("garde alpha chat smartphone compilé",
                     holds(dex_blob, "twouichPhoneChatOwnsFade")
@@ -820,6 +865,21 @@ def main() -> int:
                     and holds(dex_blob, "onPictureInPictureModeChanged")
                     and holds(dex_blob, "Landroid/app/PictureInPictureParams;"),
                     "sans bouton ni override, l'incrustation ne peut pas être demandée")
+        # Le fond du bouton PiP doit être le CERCLE, pas le carré translucide
+        # amont. Trouvé le 24/10 en comparant un décodage propre au build
+        # précédent : la passe « surfaces du lecteur » tournait AVANT
+        # l'insertion du bouton, donc un arbre neuf repartait avec `#66000000`
+        # pendant qu'un arbre réutilisé avait le cercle — deux livrables pour un
+        # même patch.py. Le test lit l'attribut dans le layout COMPILÉ.
+        pip_attrs = view_attributes(z.read("res/layout/activity_player.xml"),
+                                    "ImageButton")
+        pip_bg = pip_attrs.get("background")
+        pip_bg_name = (shipped_resource_names.get(pip_bg[1])
+                       if pip_bg and pip_bg[0] == TYPE_REFERENCE else None)
+        ok &= check("bouton picture-in-picture circulaire",
+                    pip_bg_name == "drawable/twouich_phone_pip_bg",
+                    f"fond du bouton PiP = {pip_bg_name or pip_bg} au lieu du cercle : "
+                    "le carré translucide amont est resté dans le livrable")
         # Le bouton masquer/afficher le chat est RETIRÉ depuis la v1.0.12 : le chat
         # vit SOUS la vidéo, donc replier ne changeait plus la taille de l'image
         # (« l'icône à côté du PiP ne sert à rien », 21/09). La preuve est donc

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Avatar de chaîne : disque pleine surface, comme l'interface de référence.
+     L'outline ovale sert aussi de masque : posée avec `clipToOutline`, la vue
+     rogne son dessin en cercle sans rien peindre par-dessus. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#2a2a2e" />
+</shape>

@@ -1,5 +1,13 @@
 # Journal des modifications — Twouich
 
+## v1.0.24 — 24 octobre 2026
+
+- **Les points de visionnage arrivent sur téléphone.** Une minute regardée vaut un point, par chaîne, et la pastille s'affiche en haut à gauche de la vidéo (`0 pt`, `12 pts`). Tout reste sur l'appareil, dans les préférences privées de l'application : aucune session Twitch n'est nécessaire et rien n'est envoyé nulle part. Le compteur suit la lecture (rafraîchi toutes les 15 s) et reprend là où il s'était arrêté après une mise à jour.
+- **Le lecteur et la fiche chaîne prennent les codes de Twitch mobile.** Sur téléphone uniquement : panneau de chat en surface sombre à coins supérieurs arrondis avec 8 dp de respiration sous la vidéo, bouton picture-in-picture circulaire, champ de saisie en pastille, fiche chaîne en surface sombre avec avatar rond et boutons pilule. La télévision garde son rendu d'origine, vérifié ressource par ressource (`layout-sw600dp`, `layout-sw540dp`, `layout-television`) et à l'écran en 1920×1080.
+- **Les listes du lecteur perdent leurs coins droits.** Hauteur, qualité, vitesse de lecture et chapitres de VOD passent de 2 dp — invisibles à l'œil — à 14 dp : les panneaux qui s'ouvrent sur le chat se lisent enfin comme des cartes. Le rayon est posé côté téléphone seulement ; la TV retrouve les 2 dp d'origine.
+- **Le secours anti-pub ne sert plus la playlist brute.** Sept conditions étaient inversées dans le repli : quand le filtre principal échouait, l'app rendait la playlist publicitaire telle quelle. Mesuré sur un pod réel : 2 578 octets remplacés par 15 674 octets de contenu propre, `ads_out=false`. La chaîne est désormais connue dès l'ouverture du lecteur — deep link compris — pour que le repli n'ait pas à la deviner.
+- Aucun message n'a été envoyé et aucune session n'a été perdue pendant la validation (`adb install -r`).
+
 ## v1.0.23 — 6 octobre 2026
 
 > **Publié le 6 octobre 2026** (`versionCode 170`) : tag `v1.0.23`, release avec l'APK et `changelog.html`, CI signée verte (run `37537323787`), annonce `update.json` poussée après publication (`ReleaseDate` = `publishedAt`, `2026-10-06T21:56:57Z`). APK publié : 11 265 379 o, SHA-256 `144b440cb162a0603146907a3ac70e0773853c3874af0dff11c228ad4b183309` — **identique aux octets servis et au build local** (septième release reproductible de suite). Vérifié sur le Xiaomi de référence avant publication ; `dist/Twouich_v1.0.22.apk` (`d041dbef…`) inchangé.

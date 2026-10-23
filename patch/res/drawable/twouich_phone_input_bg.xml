@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Champ « Envoyer un message » : pastille arrondie sur la surface du chat,
+     comme l'interface Twitch mobile (l'ancien fond carré venait du thème). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#2a2a2e" />
+    <corners android:radius="20dp" />
+</shape>

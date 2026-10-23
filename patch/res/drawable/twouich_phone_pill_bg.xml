@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bouton d'action de l'écran de chaîne : pilule, comme les boutons FOLLOW /
+     UNFOLLOW de l'interface de référence (l'amont posait un bouton rectangulaire
+     sur la couleur de la marque). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#2a2a2e" />
+    <corners android:radius="20dp" />
+</shape>

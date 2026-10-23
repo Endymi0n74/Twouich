@@ -215,6 +215,42 @@ def main():
     source = load("AdBlockDataSource.smali")
     sanitizer = load("PlaylistSanitizer.smali")
     selftest = load("SelfTest.smali")
+    vaft = load("VaftFallback.smali")
+
+    # --- 0. Secours « flux propre » : il voit la playlist BRUTE, et n'accepte
+    #        que secours propre ------------------------------------------------
+    # 23/10/2026 : l'ancien VaFT recevait la playlist deja nettoyee (donc sans
+    # `stitched-ad`) : jamais declenche. Et sa verification finale etait
+    # inversee (il n'acceptait que les flux... publicitaires). Pendant ce temps
+    # un pod laissait ExoPlayer sans segment : gel + roue pendant 60 s.
+    check(
+        "read() : le secours voit la playlist brute (VaftFallback AVANT PlaylistSanitizer)",
+        source.index("VaftFallback;->a") < source.index("PlaylistSanitizer;->a"),
+        "le secours appele apres le nettoyage ne voit plus aucun marqueur pub : "
+        "il ne se declenche jamais (constate le 23/10/2026).",
+    )
+    check(
+        "secours : seul un flux de secours PROPRE est servi (if-eqz v2, :use_clean)",
+        "if-eqz v2, :use_clean" in vaft,
+        "attendu : c(secours) == 0 (aucune pub) -> on le sert. `if-nez` "
+        "brancherait quand le secours PORTE une pub : c'est l'inversion "
+        "mesuree sur l'appareil le 23/10/2026.",
+    )
+    check(
+        "secours : l'ancienne inversion n'est pas revenue (pas de if-nez v2, :use_clean)",
+        "if-nez v2, :use_clean" not in vaft,
+    )
+    check(
+        "secours : les quatre familles de marqueurs sont reconnues",
+        all(m in vaft for m in ('"stitched-ad"', '"X-TV-TWITCH-AD-QUARTILE"',
+                                '"#EXT-X-CUE-OUT"', '"Amazon"')),
+    )
+    check(
+        "secours : une VOD n'est jamais remplacee par un direct (#EXT-X-ENDLIST)",
+        '"#EXT-X-ENDLIST"' in vaft,
+        "un EXTINF « Amazon » dans une VOD ne doit pas faire ouvrir le direct "
+        "de la derniere chaine regardee.",
+    )
 
     # --- 1. Aucun opcode ambigu, dans TOUT le greffon ---------------------------
     offenders = []
@@ -1110,6 +1146,72 @@ def main():
           "06/10 (la hauteur seule ne raccourcissait pas le chat), plancher a "
           "zero contre les hauteurs negatives lues match/wrap, et la video (v4) "
           "n'est jamais retouchee a l'ouverture du clavier.")
+
+    # --- 23. Points de visionnage : polarites mesurees a l'ecran ----------------
+    # Trois inversions successives le 23/10/2026, toutes muettes : la pastille
+    # restait a « 0 pt » pendant que le lecteur tournait, ou l'armement de la
+    # cadence sautait la creation du Handler et tuait le lecteur a l'onResume
+    # (NPE postDelayed sur un objet nul). On verrouille les cinq gardes.
+    phone = HERE.parent / "smali" / "com" / "twouich" / "phone"
+    watch = (phone / "WatchPoints.smali")
+    ticker = (phone / "PointsTicker.smali")
+    watch_src = watch.read_text(encoding="utf-8") if watch.is_file() else ""
+    ticker_src = ticker.read_text(encoding="utf-8") if ticker.is_file() else ""
+    check("points : solder seulement une session ouverte (since != 0)",
+          "if-eqz v10, :done" in watch_src
+          and "if-nez v10, :done" not in watch_src,
+          "cmp-long rend 0 quand `since` est nul : un `if-nez` saute alors que "
+          "la session court et ne solde jamais — pastille figee a 0 "
+          "(mesure du 23/10).")
+    check("points : une minute entiere avant de solder",
+          "if-lez v10, :done" in watch_src,
+          "minutes <= 0 doit sortir ; `if-gtz` inversait la garde.")
+    check("points : la meme chaine garde le depart (session idempotente)",
+          watch_src.count("if-nez v0, :done") >= 1
+          and "if-eqz v0, :done" in watch_src,
+          "equals != 0 (meme chaine) -> on garde la session ; longueur nulle "
+          "-> rien a compter. Inverser les deux remet le depart a maintenant a "
+          "chaque passe de disposition : le compteur ne peut pas atteindre "
+          "une minute.")
+    check("points : pastille masquee sans chaine, pluriel a partir de 2",
+          "if-eqz v1, :none" in watch_src
+          and "if-le v0, v3, :no_plural" in watch_src
+          and '" pt"' in watch_src and '"s"' in watch_src,
+          "0 et 1 restent au singulier (« 0 pt », « 1 pt ») ; un `if-gt` "
+          "affichait « 0 pts » sur l'appareil.")
+    check("points : Greffon cable dans le lecteur (entree, etiquette, fin)",
+          "WatchPoints;->enter" in patcher
+          and "WatchPoints;->label" in patcher
+          and "WatchPoints;->leave" in patcher
+          and "PointsTicker;->start" in patcher
+          and "PointsTicker;->stop" in patcher,
+          "le comptage s'ouvre et se ferme avec le lecteur ; sans `stop` a la "
+          "pause, une chaine de plus restait en attente a chaque reprise.")
+    # Les gabarits sont decoupes en literaux Python adjacents : sans recoller
+    # les morceaux, une recherche de ligne complete ne trouve jamais rien (et
+    # une assertion negative passerait a tort).
+    joined = re.sub(r'"\s*\n\s*"', "", patcher)
+    check("points : l'appel au lecteur est virtuel (methode publique)",
+          "invoke-virtual {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;"
+          "->twouichPhonePoints()V" in joined
+          and "invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;"
+          "->twouichPhonePoints()V" not in joined
+          and ".method public twouichPhonePoints()V" in patcher,
+          "un `invoke-direct` sur une methode publique fait refuser la classe "
+          "entiere par ART : « expected to be of type direct but instead was "
+          "found to be of type virtual » (mesure du 23/10).")
+    check("points : cadence armee une fois, Handler cree si absent",
+          "if-eqz v0, :arm" in ticker_src
+          and "if-nez v0, :have" in ticker_src
+          and "if-nez v0, :ticker_ready" in ticker_src,
+          "`if-nez` devant la creation du Handler sautait celle-ci quand il "
+          "etait nul : `postDelayed` sur un Handler nul tuait le lecteur "
+          "(NullPointerException a l'onResume, 23/10).")
+    check("points : la cadence s'arrete quand l'activite se termine",
+          "invoke-virtual {v1}, Landroid/app/Activity;->isFinishing()Z" in ticker_src
+          and "if-nez v2, :done" in ticker_src,
+          "isFinishing() non nul -> plus rien a rafraichir (`if-eqz` "
+          "rafraichissait une activite morte et sautait les vivantes).")
 
     # --- rapport ----------------------------------------------------------------
     width = max(len(label) for label, _, _ in checks)

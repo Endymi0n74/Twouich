@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView android:id="@id/PeekCardView" android:layout_width="167.5dp" android:layout_height="129.0dp" android:elevation="8.0dp" app:cardCornerRadius="2.0dp" app:cardElevation="8.0dp" app:cardPreventCornerOverlap="false"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <RelativeLayout android:id="@id/background" android:background="@color/theme_darkgrey_dark" android:layout_width="match_parent" android:layout_height="match_parent">
+        <ImageView android:id="@id/stream_navigation_preview_preview" android:layout_width="match_parent" android:layout_height="94.0dp" />
+        <androidx.constraintlayout.widget.ConstraintLayout android:id="@id/peek_card_bottomLayout" android:layout_width="match_parent" android:layout_height="35.0dp" android:layout_alignParentBottom="true">
+            <ImageView android:id="@id/stream_navigation_preview_badge_image" android:layout_width="31.0dp" android:layout_height="31.0dp" android:layout_marginTop="2.0dp" android:layout_marginBottom="2.0dp" android:layout_marginStart="2.0dp" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent" />
+            <TextView android:textSize="16.0sp" android:textColor="@color/white" android:gravity="center" android:id="@id/stream_navigation_preview_title" android:layout_width="wrap_content" android:layout_height="31.0dp" android:singleLine="true" app:layout_constraintBottom_toBottomOf="@id/peek_card_bottomLayout" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toEndOf="@id/stream_navigation_preview_badge_image" app:layout_constraintTop_toTopOf="parent" />
+        </androidx.constraintlayout.widget.ConstraintLayout>
+    </RelativeLayout>
+</androidx.cardview.widget.CardView>

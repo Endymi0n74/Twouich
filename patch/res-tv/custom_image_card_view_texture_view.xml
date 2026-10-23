@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<merge
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <androidx.constraintlayout.widget.ConstraintLayout android:layout_width="match_parent" android:layout_height="match_parent">
+        <com.google.android.exoplayer2.ui.StyledPlayerView android:id="@id/StreamPreview" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:scaleType="centerCrop" android:adjustViewBounds="true" app:surface_type="texture_view" app:use_artwork="true" app:use_controller="false" />
+        <ImageView android:id="@id/main_image" style="?imageCardViewImageStyle" />
+        <ImageView android:id="@id/CardStatus" android:visibility="gone" android:layout_width="40.0dp" android:layout_height="20.0dp" android:layout_marginTop="3.0dp" android:scaleType="fitXY" android:layout_marginStart="3.0dp" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent" />
+        <TextView android:id="@id/CardUptime" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="3.0dp" android:layout_marginEnd="3.0dp" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintTop_toTopOf="parent" style="@style/image_card_view_textview" />
+        <TextView android:id="@id/CardViewers" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginBottom="3.0dp" android:layout_marginStart="3.0dp" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintStart_toStartOf="parent" style="@style/image_card_view_textview" />
+        <TextView android:textSize="15.0sp" android:id="@id/CardLanguage" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginBottom="3.0dp" android:layout_marginEnd="3.0dp" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toEndOf="parent" style="@style/image_card_view_textview" />
+        <ProgressBar android:id="@id/VODProgressbar" android:layout_width="match_parent" android:layout_height="5.0dp" android:progress="33" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintStart_toStartOf="parent" style="@style/Widget.AppCompat.ProgressBar.Horizontal" />
+    </androidx.constraintlayout.widget.ConstraintLayout>
+    <androidx.leanback.widget.NonOverlappingRelativeLayout android:id="@id/info_field" style="@style/CustomInfoAreaStyle" />
+</merge>

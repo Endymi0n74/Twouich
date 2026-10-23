@@ -463,6 +463,75 @@ def _patch_playback_calls(text: str) -> tuple[str, int]:
     return text, changed
 
 
+# --- Capture precoce de la chaine (secours anti-pub) --------------------------
+#
+# PlayerActivity.x3(int, String, P6.d.o) recoit le login de la chaine sur TOUS
+# les chemins d'ouverture (deeplink s0undtv://stream/<login>, extras d'intent).
+# C'est le seul point ou la chaine est connue AVANT la premiere playlist :
+# le pod de preroll arrive sur video-weaver.example/index-dyn.m3u8 avant
+# l'ouverture usher, et sans ce renseignement VaftFallback ne pouvait pas
+# armer son secours (mesure du 23/10/2026 : 623 o -> 328 o, ~1,7 s d'attente).
+X3_SIGNATURE = ".method private x3(ILjava/lang/String;LP6/d$o;)V"
+CHANNEL_CAPTURE_CALL = (
+    "    # secours anti-pub : la chaine est connue AVANT la premiere playlist.\n"
+    "    # Le pod de preroll arrive avant l'ouverture usher ; sans cela le\n"
+    "    # secours ne peut pas s'armer et le lecteur attend la playlist reelle.\n"
+    "    invoke-static {p2}, Lcom/twouich/adblock/AdBlockDataSource;->"
+    "twouichSetChannel(Ljava/lang/String;)V\n"
+)
+
+
+# Deeplink s0undtv://stream/<login> : l'URI est lisible dans onCreate, donc
+# avant la creation du lecteur et de sa premiere source.
+ONCREATE_SUPER = (
+    "    invoke-super {p0, p1}, Landroid/app/Activity;->onCreate(Landroid/os/Bundle;)V\n"
+)
+ONCREATE_CHANNEL_CAPTURE = (
+    "\n"
+    "    # secours anti-pub : deeplink s0undtv://stream/<login>. Pose AVANT le\n"
+    "    # lecteur, donc le pod de preroll (video-weaver.example) trouve la chaine.\n"
+    "    invoke-virtual {p0}, Landroid/app/Activity;->getIntent()Landroid/content/Intent;\n"
+    "    move-result-object v0\n"
+    "    if-eqz v0, :tw_ch_none\n"
+    "    invoke-virtual {v0}, Landroid/content/Intent;->getData()Landroid/net/Uri;\n"
+    "    move-result-object v0\n"
+    "    if-eqz v0, :tw_ch_none\n"
+    "    invoke-virtual {v0}, Landroid/net/Uri;->getHost()Ljava/lang/String;\n"
+    "    move-result-object v1\n"
+    "    const-string v2, \"stream\"\n"
+    "    invoke-virtual {v2, v1}, Ljava/lang/String;->equals(Ljava/lang/Object;)Z\n"
+    "    move-result v1\n"
+    "    if-eqz v1, :tw_ch_none\n"
+    "    invoke-virtual {v0}, Landroid/net/Uri;->getLastPathSegment()Ljava/lang/String;\n"
+    "    move-result-object v0\n"
+    "    invoke-static {v0}, Lcom/twouich/adblock/AdBlockDataSource;->"
+    "twouichSetChannel(Ljava/lang/String;)V\n"
+    "    :tw_ch_none\n"
+)
+
+
+def install_early_channel_capture(text: str) -> str:
+    """Renseigne la chaine avant la premiere playlist (onCreate + x3)."""
+    if "secours anti-pub : deeplink" not in text:
+        if text.count(ONCREATE_SUPER) != 1:
+            fail("PlayerActivity.onCreate : invoke-super ambigu, capture precoce "
+                 "impossible")
+        text = text.replace(ONCREATE_SUPER, ONCREATE_SUPER + ONCREATE_CHANNEL_CAPTURE, 1)
+    if CHANNEL_CAPTURE_CALL not in text:
+        start = text.find(X3_SIGNATURE)
+        if start < 0:
+            fail("PlayerActivity.x3(int, String, P6.d.o) introuvable : la chaine "
+                 "ne peut pas etre connue avant la premiere playlist")
+        if text.find(X3_SIGNATURE, start + 1) >= 0:
+            fail("PlayerActivity.x3 : signature ambiguë")
+        locals_match = re.search(r"(?m)^    \.locals \d+\n", text[start:])
+        if locals_match is None:
+            fail("PlayerActivity.x3 : directive .locals absente")
+        at = start + locals_match.end()
+        text = text[:at] + "\n" + CHANNEL_CAPTURE_CALL + text[at:]
+    return text
+
+
 # --- Service de premier plan : declaration au manifeste -----------------------
 PLAYBACK_SERVICE = "com.twouich.adblock.PlayerKeepAlive"
 UPDATE_SERVICE = "com.s0und.s0undtv.service.AutoUpdateService"
@@ -654,12 +723,33 @@ PHONE_CHAT_BELOW_OLD = (
     "    invoke-virtual {v0, v9}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(I)V\n"
     "    invoke-virtual {v5, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V\n"
 )
+# Fenetre du lecteur : 8 dp entre la video et le panneau de chat. Collee a
+# l'image, la surface arrondie se lisait comme un simple remplissage ; l'ecart
+# la detache sur le fond noir. La hauteur du chat diminue d'autant pour que son
+# bas ne passe pas sous la saisie. v7 (hauteur du chat) est libre apres le
+# constructeur, v9 est du brouillon.
+PHONE_CHAT_WINDOW_GAP = (
+    "    # Fenetre : ecart video/chat (8 dp), hauteur de chat reduite d'autant.\n"
+    "    invoke-virtual {p0}, Landroid/content/Context;->getResources()Landroid/content/res/Resources;\n"
+    "    move-result-object v9\n"
+    "    invoke-virtual {v9}, Landroid/content/res/Resources;->getDisplayMetrics()Landroid/util/DisplayMetrics;\n"
+    "    move-result-object v9\n"
+    "    iget v9, v9, Landroid/util/DisplayMetrics;->density:F\n"
+    "    const/high16 v7, 0x41000000\n"
+    "    mul-float/2addr v9, v7\n"
+    "    float-to-int v9, v9\n"
+    "    iput v9, v0, Landroid/view/ViewGroup$MarginLayoutParams;->topMargin:I\n"
+    "    iget v7, v0, Landroid/view/ViewGroup$LayoutParams;->height:I\n"
+    "    sub-int/2addr v7, v9\n"
+    "    iput v7, v0, Landroid/view/ViewGroup$LayoutParams;->height:I\n"
+)
 PHONE_CHAT_BELOW_NEW = (
     "    const/4 v9, 0x3\n"
     "    invoke-virtual {v0, v9, v1}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(II)V\n"
     "    const/16 v9, 0xc\n"
     "    invoke-virtual {v0, v9}, Landroid/widget/RelativeLayout$LayoutParams;->addRule(I)V\n"
-    "    iput v11, v0, Landroid/view/ViewGroup$MarginLayoutParams;->bottomMargin:I\n"
+    + PHONE_CHAT_WINDOW_GAP
+    + "    iput v11, v0, Landroid/view/ViewGroup$MarginLayoutParams;->bottomMargin:I\n"
     "    invoke-virtual {v5, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V\n"
 )
 # État intermédiaire du même jour : le chat borné par la règle 2 (AU-DESSUS de la
@@ -676,6 +766,76 @@ PHONE_CHAT_ABOVE_OLD = (
     "    invoke-virtual {v5, v0}, Landroid/view/View;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V\n"
 )
 
+
+# Pastille de points de visionnage : méthode ajoutée au lecteur (téléphone
+# seulement — `twouichPhoneStackedLayout` sort avant sur la TV, et la vue
+# n'existe pas dans les layouts TV).
+PHONE_POINTS_METHOD = r'''
+.method public twouichPhonePoints()V
+    .locals 6
+
+    sget-object v0, Lcom/twouich/adblock/AdBlockDataSource;->lastChannel:Ljava/lang/String;
+
+    invoke-static {p0, v0}, Lcom/twouich/phone/WatchPoints;->enter(Landroid/content/Context;Ljava/lang/String;)V
+
+    const-string v1, "twouich_phone_points"
+
+    invoke-direct {p0, v1}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneId(Ljava/lang/String;)I
+    move-result v1
+
+    invoke-virtual {p0, v1}, Landroid/app/Activity;->findViewById(I)Landroid/view/View;
+    move-result-object v1
+
+    check-cast v1, Landroid/widget/TextView;
+
+    if-eqz v1, :points_done
+
+    invoke-static {p0, v0}, Lcom/twouich/phone/WatchPoints;->label(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;
+    move-result-object v2
+
+    if-eqz v2, :points_hide
+
+    invoke-virtual {v1, v2}, Landroid/widget/TextView;->setText(Ljava/lang/CharSequence;)V
+
+    const/4 v2, 0x0
+
+    invoke-virtual {v1, v2}, Landroid/view/View;->setVisibility(I)V
+
+    goto :points_done
+
+    :points_hide
+    const/16 v2, 0x8
+
+    invoke-virtual {v1, v2}, Landroid/view/View;->setVisibility(I)V
+
+    # Trace : sans elle, une pastille absente ne dit pas si la chaine est
+    # inconnue ou si la cadence ne tourne plus.
+    const-string v3, "Twouich"
+
+    const-string v4, "points : chaine inconnue, pastille masquee"
+
+    invoke-static {v3, v4}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
+
+    :points_done
+    invoke-static {p0}, Lcom/twouich/phone/PointsTicker;->start(Landroid/app/Activity;)V
+
+    return-void
+.end method
+'''
+# `invoke-virtual` : la methode est publique (PointsTicker l'appelle depuis une
+# autre classe). Un `invoke-direct` la declare directe et ART refuse la classe
+# entiere a l'execution — « expected to be of type direct but instead was found
+# to be of type virtual », releve sur BlueStacks le 23/10.
+PHONE_POINTS_CALL = (
+    "    invoke-virtual {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;"
+    "->twouichPhonePoints()V\n"
+)
+PHONE_POINTS_LEAVE = (
+    "    invoke-static {}, Lcom/twouich/phone/PointsTicker;->stop()V\n"
+    "\n"
+    "    invoke-static {p0}, Lcom/twouich/phone/WatchPoints;"
+    "->leave(Landroid/content/Context;)V"
+)
 
 # onResume est le point d'entrée fiable du démarrage (le callback focus
 # n'était pas dispatché sur BlueStacks/API 33). Canoniser toute la séquence ici
@@ -1802,6 +1962,10 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         if final.count("smallestScreenWidthDp:I") != 1:
             fail("le seuil de dp garde encore l'interface ailleurs que dans "
                  "twouichTvInterface : le mode TV ne serait plus fiable")
+        # La chaine doit etre connue avant la premiere playlist, donc avant
+        # tout acces reseau du lecteur : capture posee ici, dans le point
+        # d'ecriture unique (elle survit aux rebuilds et reste idempotente).
+        final = install_early_channel_capture(final)
         player_smali.write_text(final, encoding="utf-8", newline="\n")
         if lowered:
             log(f"lecteur : {lowered} garde(s) d'interface ramenee(s) au mode "
@@ -2058,6 +2222,27 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     const/4 v9, 0x0
     invoke-virtual {v6, v9}, Landroid/view/View;->setVisibility(I)V
     :twouich_phone_epilogue
+    # Fond du chat : l'upstream le repeint en noir opaque a l'application du
+    # theme (PlayerActivity$H, setBackgroundColor(-0x1000000)), donc le drawable
+    # pose dans le layout ne survit pas. On repose la surface arrondie ici —
+    # telephone seulement, ce code ne tourne pas sur TV (garde < 600 dp en
+    # tete). Mesure du 23/10 : sans cela la zone sous la video restait
+    # exactement (0,0,0), meme avec un drawable rouge dans le layout.
+    # twouichPhoneId resout des ID (`R.id`) : pour un drawable il faut le type
+    # « drawable », sinon l'identifiant rend 0 et rien ne se pose.
+    invoke-virtual {p0}, Landroid/content/Context;->getResources()Landroid/content/res/Resources;
+    move-result-object v0
+    const-string v1, "twouich_phone_chat_bg"
+    const-string v2, "drawable"
+    const-string v3, "com.s0und.s0undtv"
+    invoke-virtual {v0, v1, v2, v3}, Landroid/content/res/Resources;->getIdentifier(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)I
+    move-result v1
+    if-eqz v1, :twouich_phone_chat_bg_ready
+    invoke-virtual {v0, v1}, Landroid/content/res/Resources;->getDrawable(I)Landroid/graphics/drawable/Drawable;
+    move-result-object v1
+    if-eqz v1, :twouich_phone_chat_bg_ready
+    invoke-virtual {v5, v1}, Landroid/view/View;->setBackground(Landroid/graphics/drawable/Drawable;)V
+    :twouich_phone_chat_bg_ready
     # Veille de disposition : la rotation arrive AVANT la re-mesure de l'arbre.
     # Mesure du 06/10 sur le Xiaomi : en passant de portrait en paysage en cours
     # de lecture, la branche portrait s'appliquait avec la largeur perimee —
@@ -2192,6 +2377,28 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
                                                 PHONE_CHAT_FOCUS_RESTORED, 1)
     if PHONE_CHAT_FOCUS_RESTORED not in player_methods:
         fail("relecture absente du rappel de focus dans le gabarit")
+    # Pastille de points de visionnage : la méthode et son appel vivent dans la
+    # source unique du lecteur, donc présents à l'identique sur un arbre vierge
+    # et sur un arbre réparé (la réparation canonique reprend ce corps).
+    if "->twouichPhonePoints()V" not in player_methods:
+        window = "\n\n.method private twouichPhoneWindow()V"
+        if player_methods.count(window) != 1:
+            fail("ancre twouichPhoneWindow introuvable dans le gabarit du lecteur")
+        player_methods = player_methods.replace(
+            window, "\n" + PHONE_POINTS_METHOD + window, 1)
+        start = player_methods.index(".method private twouichPhoneStackedLayout()V")
+        end = player_methods.index("\n.end method", start)
+        body = player_methods[start:end]
+        guard = ("    iget v1, v1, Landroid/content/res/Configuration;"
+                 "->smallestScreenWidthDp:I\n"
+                 "    const/16 v2, 0x258\n"
+                 "    if-ge v1, v2, :return_phone_layout\n")
+        if body.count(guard) != 1:
+            fail("garde télévision introuvable dans twouichPhoneStackedLayout")
+        body = body.replace(guard, guard + "\n" + PHONE_POINTS_CALL, 1)
+        player_methods = player_methods[:start] + body + player_methods[end:]
+    if PHONE_POINTS_METHOD not in player_methods or PHONE_POINTS_CALL not in player_methods:
+        fail("pastille de points de visionnage absente du gabarit du lecteur")
     # Picture-in-picture (API 26) : bouton dans le lecteur téléphone, fenêtre
     # 16:9, et disparition du chat pendant que la vidéo est en incrustation.
     # Les trois overrides de callback du framework sont PUBLICS : Activity
@@ -2722,6 +2929,24 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
                             + canonical_layout.group(0)
                             + player_fixed[current_layout.end():])
             phone_chat_layout_patched = True
+    # La pastille de points a change de signature (privee -> publique) et gagne
+    # une cadence : un arbre deja greffe garderait l'ancienne methode privee, que
+    # PointsTicker ne peut pas appeler (IllegalAccessError au premier tir). Elle
+    # est donc canonisee ici, comme la disposition : une seule source.
+    points_repaired = False
+    canonical_points = PHONE_POINTS_METHOD.replace("\r\n", "\n").strip()
+    current_points = re.search(
+        r"(?ms)^\.method [^\n]*twouichPhonePoints\(\)V\n.*?^\.end method$",
+        player_fixed,
+    )
+    if current_points is None:
+        player_fixed = player_fixed.rstrip() + "\n\n" + canonical_points + "\n"
+        points_repaired = True
+    elif current_points.group(0).strip() != canonical_points:
+        player_fixed = (player_fixed[:current_points.start()]
+                        + canonical_points
+                        + player_fixed[current_points.end():])
+        points_repaired = True
     # Veille : le service suit le lecteur. onResume est normalisé plus haut,
     # donc ce passage ne peut plus ajouter un second démarrage du service.
     player_fixed, service_calls = _patch_playback_calls(player_fixed)
@@ -2750,7 +2975,7 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         log("smartphone : chat repliable rebranché sur le lecteur (réparation)")
     elif (player_fixed != player_text or tv_guard_count or screen_off_patched
           or service_calls or resume_normalized or send_added or phone_chat_guard_patched
-          or phone_chat_layout_patched or relayout_missing):
+          or phone_chat_layout_patched or relayout_missing or points_repaired):
         write_player(player_fixed)
         log("smartphone : correction des paramètres du lecteur empilé")
     else:
@@ -2764,7 +2989,8 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         "\n".join((CHAT_METHODS, player_methods, pip_methods, TV_INTERFACE_METHOD,
                     PHONE_CHAT_OWN_FADE_METHOD, PHONE_CHAT_FADE_GUARD,
                     PHONE_CHAT_LAYOUT_VISIBLE, PHONE_SCREEN_OFF_GUARD,
-                    PHONE_SCREEN_OFF_KEPT)).encode("utf-8")
+                    PHONE_SCREEN_OFF_KEPT, PHONE_POINTS_METHOD,
+                    PHONE_POINTS_LEAVE)).encode("utf-8")
     ).hexdigest()
 
     values = decoded / "res/values/dimens.xml"
@@ -3320,6 +3546,564 @@ def remove_phone_quick_action_layout(layout: str) -> str:
     return cleaned
 
 
+def patch_phone_surfaces(decoded: pathlib.Path) -> None:
+    """Arrondit les surfaces du lecteur telephone, sans toucher au shell TV.
+
+    Mesure du 23/10 sur BlueStacks (720x1280) : la video 16:9 s'arrete a 405 px
+    et le chat occupe le reste, mais son fond etait un voile noir a 45 % sur du
+    noir — la zone sous la video se lisait comme un trou. Le panneau prend
+    maintenant la surface du chat (#0e0e10) avec les coins superieurs arrondis,
+    le champ de saisie devient une pastille et le bouton d'incrustation un
+    cercle. Toutes ces vues n'existent que dans le layout telephone (la TV a
+    son propre layout-television/activity_player.xml).
+    """
+    print("[1f/5] UX smartphone (surfaces arrondies du lecteur)")
+    player = decoded / "res/layout/activity_player.xml"
+    if not player.is_file():
+        fail(f"layout lecteur absent : {player}")
+    text = player.read_text(encoding="utf-8")
+    original = text
+    chat_old = ('android:id="@id/ChatRecycleView" android:background="@color/black_opacity_45p"')
+    chat_new = ('android:id="@id/ChatRecycleView" android:background='
+                '"@drawable/twouich_phone_chat_bg"')
+    if chat_old in text:
+        text = text.replace(chat_old, chat_new, 1)
+    pip_old = 'android:background="#66000000" android:src="@drawable/twouich_ic_pip"'
+    pip_new = ('android:background="@drawable/twouich_phone_pip_bg" '
+               'android:src="@drawable/twouich_ic_pip"')
+    if pip_old in text:
+        text = text.replace(pip_old, pip_new, 1)
+    if text != original:
+        player.write_text(text, encoding="utf-8", newline="\n")
+        log("smartphone : panneau de chat opaque et coins arrondis")
+    else:
+        log("déjà appliqué : surfaces du lecteur")
+    if "@drawable/twouich_phone_chat_bg" not in text:
+        fail("chat telephone : fond arrondi non applique")
+    # Le bouton PiP est INSÉRÉ par `patch_smartphone_pip()`, qui doit donc avoir
+    # tourné avant. Sans ce garde-fou, un arbre neuf gardait le `#66000000`
+    # amont (un carré translucide) pendant qu'un arbre réutilisé, lui, avait
+    # déjà le cercle : deux livrables différents pour le même patch.py, trouvé
+    # le 24/10 en comparant un décodage propre au build précédent.
+    if pip_old in text:
+        fail("surfaces du lecteur appliquées AVANT l'insertion du bouton PiP — "
+             "le fond circulaire manquerait du livrable")
+
+
+CARD_LAYOUTS = ("lb_image_card_view.xml", "custom_image_card_view.xml",
+                "custom_image_card_view_texture_view.xml")
+
+def patch_phone_cards(decoded: pathlib.Path, here: pathlib.Path) -> None:
+    """Arrondit les cartes de la grille téléphone, sans toucher aux cartes TV.
+
+    Une carte Leanback est une ImageCardView qui gonfle `lb_image_card_view` :
+    un `main_image` plein cadre et l'info_field. La bibliothèque n'expose aucun
+    attribut d'arrondi, et la racine (ImageCardView) n'est pas dans un layout
+    qu'on puisse éditer. On pose donc sur l'ImageView un outline arrondi
+    transparent (`twouich_phone_card_bg`) + `android:clipToOutline` : la vue
+    rogne son propre dessin sur la silhouette, sans rien peindre au centre.
+    Les deux gabarits `custom_image_card_view*` (autres présentations de carte)
+    reçoivent le même outline sur leur racine ConstraintLayout.
+
+    Ces gabarits vivent dans `layout/`, partagé avec la TV : les versions
+    d'origine sont reposées dans les qualifiers TV (res-tv/), comme pour
+    activity_main/activity_player. Mesure du 23/10 : la TV doit garder ses
+    cartes carrées.
+    """
+    print("[1g/5] UX smartphone (cartes arrondies)")
+    card_attrs = ('android:background="@drawable/twouich_phone_card_bg" '
+                  'android:clipToOutline="true" ')
+    for name in CARD_LAYOUTS:
+        install_tv_layout(decoded, here, name)
+        path = decoded / "res" / "layout" / name
+        if not path.is_file():
+            fail(f"gabarit de carte absent : {path}")
+        text = path.read_text(encoding="utf-8")
+        if "@drawable/twouich_phone_card_bg" in text:
+            log(f"déjà appliqué : carte arrondie ({name})")
+            continue
+        if name == "lb_image_card_view.xml":
+            needle = '<ImageView android:id="@id/main_image" '
+        else:
+            needle = "<androidx.constraintlayout.widget.ConstraintLayout "
+        if text.count(needle) != 1:
+            fail(f"ancre de carte introuvable ou multiple dans {name}")
+        text = text.replace(needle, needle + card_attrs, 1)
+        path.write_text(text, encoding="utf-8", newline="\n")
+        log(f"smartphone : carte arrondie ({name})")
+
+
+CHANNEL_LAYOUTS = ("lb_fullwidth_details_overview.xml",
+                   "lb_fullwidth_details_overview_logo.xml", "lb_action_1_line.xml")
+
+# Gabarits de l'écran de chaîne (téléphone) : la surface de marque devient la
+# surface sombre de la marque, l'avatar devient un disque et le bouton d'action
+# devient une pilule. L'ordre compte : chaque motif est cherché dans le texte
+# courant, donc pas de chevauchement entre deux remplacements.
+# Chaque règle porte un MARQUEUR qui n'existe qu'une fois la greffe posée.
+# C'est lui qui rend le patch idempotent : ni `old in text` (le remplacement
+# contient souvent son motif, une seconde passe empilerait les attributs —
+# aapt2 a refusé le build du 23/10 sur un `duplicate attribute`), ni `new in
+# text` (la surface sombre est la même pour deux sites distincts, le second
+# serait sauté).
+PHONE_CHANNEL_LAYOUTS = {
+    "lb_fullwidth_details_overview.xml": (
+        ('android:background="?defaultBrandColor"',
+         'android:background="@drawable/twouich_phone_channel_card_bg"',
+         '<FrameLayout android:id="@id/details_frame" '
+         'android:background="@drawable/twouich_phone_channel_card_bg"'),
+        ('android:background="?defaultBrandColorDark"',
+         'android:background="@drawable/twouich_phone_channel_card_bg"',
+         'android:id="@id/details_overview_actions_background" '
+         'android:background="@drawable/twouich_phone_channel_card_bg"'),
+    ),
+    "lb_fullwidth_details_overview_logo.xml": (
+        ('android:layout_width="wrap_content" android:layout_height="wrap_content" android:adjustViewBounds="true"',
+         'android:layout_width="wrap_content" android:layout_height="wrap_content" android:adjustViewBounds="true" '
+         'android:scaleType="centerCrop" android:background="@drawable/twouich_phone_avatar_bg" '
+         'android:clipToOutline="true"',
+         'android:background="@drawable/twouich_phone_avatar_bg"'),
+    ),
+    "lb_action_1_line.xml": (
+        ('<Button android:id="@id/lb_action_button" android:layout_width="wrap_content" android:layout_height="@dimen/lb_action_1_line_height" android:lines="1" style="?detailsActionButtonStyle"',
+         '<Button android:id="@id/lb_action_button" android:layout_width="wrap_content" android:layout_height="@dimen/lb_action_1_line_height" android:lines="1" '
+         'android:background="@drawable/twouich_phone_pill_bg" android:textColor="#ffffffff" '
+         'android:paddingStart="18dp" android:paddingEnd="18dp" android:minWidth="0dp" '
+         'style="?detailsActionButtonStyle"',
+         'android:background="@drawable/twouich_phone_pill_bg"'),
+    ),
+}
+
+# Dimens de l'écran de chaîne : (valeur amont, valeur téléphone). La valeur
+# amont est restaurée dans les qualifiers TV (values-sw600dp et values-sw540dp :
+# la Freebox Pop mesure 540 dp), même découpage que pour les layouts.
+PHONE_CHANNEL_DIMENS = {
+    "lb_details_v2_blank_height": ("160.0dp", "270.0dp"),        # bandeau 16:9
+    "lb_details_v2_left": ("270.0dp", "16.0dp"),                 # panneau calé à gauche
+    "lb_details_v2_logo_margin_start": ("128.0dp", "16.0dp"),    # avatar à gauche
+    "lb_details_v2_logo_max_width": ("150.0dp", "88.0dp"),
+    "lb_details_v2_logo_max_height": ("210.0dp", "88.0dp"),
+    "lb_details_v2_description_margin_start": ("24.0dp", "16.0dp"),
+    "lb_details_v2_description_margin_end": ("54.0dp", "16.0dp"),
+}
+TV_DIMEN_QUALIFIERS = ("values-sw600dp", "values-sw540dp")
+
+
+def patch_phone_channel(decoded: pathlib.Path, here: pathlib.Path) -> None:
+    """Refonte téléphone de l'écran de chaîne, shell Leanback (TV) intact.
+
+    L'écran de chaîne est le gabarit Leanback « détails v2 » : une bande de
+    `lb_details_v2_blank_height` (l'image de bannière de la chaîne), puis une
+    carte de couleur de marque, l'avatar à `lb_details_v2_logo_margin_start` et
+    les boutons/description décalés à `lb_details_v2_left` (mesure du 23/10 en
+    720x1280 : bande 240 px, carte 441->861, avatar 225 px en x=192, boutons en
+    x=417). Sur téléphone ça se lit comme un écran de téléviseur réduit.
+
+    Ces positions viennent des DIMENS lues en code par la bibliothèque (et non
+    des marges du layout) : elles sont donc retouchées ici, et la TV est
+    protégée par des surcouches `values-sw600dp`/`values-sw540dp` portant les
+    valeurs d'origine — même découpage que pour les layouts (`install_tv_layout`).
+    """
+    print("[1h/5] UX smartphone (écran de chaîne type référence)")
+    for name in CHANNEL_LAYOUTS:
+        install_tv_layout(decoded, here, name)
+        path = decoded / "res" / "layout" / name
+        if not path.is_file():
+            fail(f"gabarit de l'écran de chaîne absent : {path}")
+        text = path.read_text(encoding="utf-8")
+        original = text
+        for old, new, marker in PHONE_CHANNEL_LAYOUTS[name]:
+            if marker in text:
+                continue
+            if old not in text:
+                fail(f"{name} : motif introuvable pour la greffe téléphone — "
+                     f"l'amont a changé, adapter le patch")
+            text = text.replace(old, new, 1)
+            if marker not in text:
+                fail(f"{name} : greffe téléphone non posée ({marker[:40]}…)")
+        if text != original:
+            path.write_text(text, encoding="utf-8", newline="\n")
+            log(f"smartphone : écran de chaîne refondu ({name})")
+        elif "twouich_phone_" not in text:
+            fail(f"{name} : aucune greffe téléphone posée")
+
+    values = decoded / "res" / "values" / "dimens.xml"
+    dimens = values.read_text(encoding="utf-8")
+    original = dimens
+    for name, (upstream, phone) in PHONE_CHANNEL_DIMENS.items():
+        up_line = f'<dimen name="{name}">{upstream}</dimen>'
+        ph_line = f'<dimen name="{name}">{phone}</dimen>'
+        if ph_line in dimens:
+            continue
+        if up_line not in dimens:
+            fail(f"dimen {name} absente ou modifiée dans values/dimens.xml — "
+                 f"l'amont a changé, adapter le patch")
+        dimens = dimens.replace(up_line, ph_line, 1)
+    if dimens != original:
+        # newline="" : le fichier est en CRLF, le traduire à nouveau produirait\r\n\r\n.
+        values.write_text(dimens, encoding="utf-8", newline="")
+        log("smartphone : bandeau 16:9 et colonne de gauche sur l'écran de chaîne")
+
+    for qualifier in TV_DIMEN_QUALIFIERS:
+        target = decoded / "res" / qualifier / "dimens.xml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        current = (target.read_text(encoding="utf-8") if target.is_file()
+                   else '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n</resources>\n')
+        addition = ""
+        for name, (upstream, _phone) in PHONE_CHANNEL_DIMENS.items():
+            line = f'    <dimen name="{name}">{upstream}</dimen>'
+            if f'<dimen name="{name}">' in current:
+                continue
+            addition += line + "\n"
+        if addition:
+            closing = current.rfind("</resources>")
+            if closing < 0:
+                fail(f"balise </resources> absente de res/{qualifier}/dimens.xml")
+            current = current[:closing] + addition + current[closing:]
+            target.write_text(current, encoding="utf-8", newline="")
+            log(f"dimens TV conservés : res/{qualifier}/dimens.xml")
+
+    install_channel_skin(decoded, here)
+
+
+# Sites de peinture runtime de l'écran de chaîne, dans l'ordre où ils
+# apparaissent dans le fragment : la carte (`details_frame`) et la bande
+# d'actions sont repeintes avec la couleur de marque, ce qui annule la surface
+# sombre du gabarit. Le bouton de la première action (`{v2, v1}`, plus haut dans
+# le fichier) garde sa peinture : c'est l'accent de marque du bouton principal.
+CHANNEL_PAINT_CALLS = (
+    "invoke-virtual {v0, p1}, Landroid/view/View;->setBackgroundColor(I)V",
+    "invoke-virtual {v6, v2}, Landroid/view/View;->setBackgroundColor(I)V",
+    "invoke-virtual {v6, v7}, Landroid/view/View;->setBackgroundColor(I)V",
+    "invoke-virtual {v10, v3}, Landroid/view/View;->setBackgroundColor(I)V",
+    "invoke-virtual {v2, v1}, Landroid/view/View;->setBackgroundColor(I)V",
+    "invoke-virtual {v3, v2}, Landroid/view/View;->setBackgroundColor(I)V",
+)
+
+CHANNEL_PAINT_CALL = "invoke-virtual {vX, vY}, Landroid/view/View;->setBackgroundColor(I)V"
+CHANNEL_BANNER_CALL = ("invoke-virtual {%s, %s}, Landroidx/leanback/app/i;"
+                       "->i(Landroid/graphics/Bitmap;)V")
+CHANNEL_BANNER_CROP = ("invoke-static {%s, %s}, Lcom/twouich/phone/ChannelSkin;"
+                       "->banner(Landroid/content/Context;Landroid/graphics/Bitmap;)"
+                       "Landroid/graphics/Bitmap;")
+# Contexte du fragment pour le bandeau : l'ACTIVITE (`v()` = getActivity), pas
+# le champ `J1` (application context). Mesure du 23/10 : sur un ecran force en
+# 720x1280 par `wm size`, le contexte applicatif annoncait encore 720 dp (TV)
+# et le recadrage ne s'appliquait pas, alors que le contexte de vue, lui, voyait
+# bien 480 dp (c'est ce qui a rendu la carte sombre).
+CHANNEL_CONTEXT = ("invoke-virtual {p0}, Landroidx/fragment/app/f;->v()"
+                   "Landroidx/fragment/app/g;\n\n    move-result-object v12")
+
+
+def install_channel_skin(decoded: pathlib.Path, here: pathlib.Path) -> None:
+    """Achève la refonte téléphone de l'écran de chaîne côté code.
+
+    Le gabarit ne suffit pas : à l'exécution, le fragment repeint la carte et la
+    bande d'actions avec la couleur de marque, puis pose le bitmap de bandeau à
+    largeur pleine en gardant son rapport — d'où l'aplat plein cadre et la bande
+    vide sous l'image. Les appels sont donc redirigés vers `ChannelSkin.paint` et
+    `ChannelSkin.banner`, qui s'effacent sur la TV (même garde que le lecteur).
+
+    Repérage par curseur : les sites sont listés dans l'ordre du fichier. La
+    paire `{v2, v1}` sert aussi au bouton de la première action, plus haut : le
+    curseur garantit qu'on ne touche que l'occurrence de la carte.
+    """
+    print("[1h/5] UX smartphone (surface et bandeau de l'écran de chaîne)")
+    src = here / "smali" / "com" / "twouich" / "phone" / "ChannelSkin.smali"
+    dst = (decoded / "smali_classes2" / "com" / "twouich" / "phone"
+           / "ChannelSkin.smali")
+    if not src.is_file():
+        fail(f"greffon de l'écran de chaîne absent : {src}")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if not dst.is_file() or dst.read_bytes() != src.read_bytes():
+        shutil.copy2(src, dst)
+        log("copié : ChannelSkin.smali")
+
+    frag = (decoded / "smali_classes2" / "com" / "s0und" / "s0undtv"
+            / "fragments" / "ChannelDetailsFragment.smali")
+    if not frag.is_file():
+        fail(f"fragment de l'écran de chaîne absent : {frag}")
+    text = frag.read_text(encoding="utf-8")
+
+    if "Lcom/twouich/phone/ChannelSkin;->paint" in text:
+        log("déjà appliqué : peinture de la carte neutralisée sur téléphone")
+    else:
+        cursor = 0
+        for call in CHANNEL_PAINT_CALLS:
+            pos = text.find(call, cursor)
+            if pos < 0:
+                fail(f"site de peinture introuvable dans {frag.name} : {call}")
+            registers = call[len("invoke-virtual {"):call.index("},")]
+            text = (text[:pos]
+                    + f"invoke-static {{{registers}}}, Lcom/twouich/phone/"
+                      "ChannelSkin;->paint(Landroid/view/View;I)V"
+                    + text[pos + len(call):])
+            cursor = pos + 1
+        frag.write_text(text, encoding="utf-8", newline="")
+        log("smartphone : couleur de marque retirée de la carte de chaîne")
+
+    # Bandeau : le bitmap est recadré en 16:9 avant d'être posé en fond. Les
+    # deux sites du fragment réutilisent le registre du bitmap (il est mort
+    # juste après) ; dans `$b`, `p1` sert aussi à l'avatar, d'où un registre neuf
+    # (le `.locals` du pont est relevé d'autant).
+    #
+    # Le motif de remplacement CONTIENT l'appel d'origine : sans ce garde, un
+    # second passage sur le même arbre empilerait les recadrages (mesure du
+    # 23/10 : quatre copies après quatre `patch.py`).
+    crop = CHANNEL_BANNER_CROP % ("v12", "v0")
+    if crop in text:
+        log("déjà appliqué : bandeau recadré en 16:9 (fragment)")
+    else:
+        # `d3` garde 12 registres locaux : le contexte du bandeau a besoin d'un
+        # treizième (v12), les deux sites sont dans la même méthode.
+        head = (".method public static synthetic d3(Lcom/s0und/s0undtv/fragments/"
+                "ChannelDetailsFragment;Lw0/b;)V\n    .locals 12")
+        if head not in text:
+            fail(f"méthode d3 attendue avec .locals 12, forme changée dans {frag.name}")
+        text = text.replace(head, head.replace(".locals 12", ".locals 13"), 1)
+        context = CHANNEL_CONTEXT
+        for old in (CHANNEL_BANNER_CALL % ("p1", "v0"),
+                    CHANNEL_BANNER_CALL % ("v1", "v0")):
+            if old not in text:
+                fail(f"appel de bandeau introuvable dans {frag.name} : {old}")
+            text = text.replace(
+                old,
+                context + "\n\n    " + crop
+                + "\n\n    move-result-object v0\n\n    " + old,
+                1)
+        if text.count(crop) != 2:
+            fail("bandeau de chaîne : recadrage 16:9 attendu 2 fois, "
+                 f"trouvé {text.count(crop)}")
+    frag.write_text(text, encoding="utf-8", newline="")
+
+    # Le fragment `$c` (pont des actions asynchrones) repeint les mêmes deux
+    # surfaces : les deux occurrences reçoivent le même garde.
+    actions = frag.with_name(frag.stem + "$c.smali")
+    if not actions.is_file():
+        fail(f"pont du fragment de chaîne absent : {actions}")
+    text = actions.read_text(encoding="utf-8")
+    call = CHANNEL_PAINT_CALL.replace("vX, vY", "v1, v0")
+    if "Lcom/twouich/phone/ChannelSkin;->paint" in text:
+        log("déjà appliqué : peinture des actions neutralisée sur téléphone")
+    elif text.count(call) != 2:
+        fail(f"sites de peinture attendus 2 fois dans {actions.name}, "
+             f"trouvés {text.count(call)}")
+    else:
+        text = text.replace(call, f"invoke-static {{v1, v0}}, Lcom/twouich/phone/"
+                                  "ChannelSkin;->paint(Landroid/view/View;I)V")
+        actions.write_text(text, encoding="utf-8", newline="")
+        log("smartphone : couleur de marque retirée des actions de chaîne")
+
+    # Pont Glide de la bannière (`ChannelDetailsFragment$b`) : `.locals 1` ne
+    # laisse aucun registre libre, et `p1` doit rester intact pour l'avatar.
+    bridge = frag.with_name(frag.stem + "$b.smali")
+    if not bridge.is_file():
+        fail(f"pont de chargement de la bannière absent : {bridge}")
+    text = bridge.read_text(encoding="utf-8")
+    call = CHANNEL_BANNER_CALL % ("v0", "p1")
+    if "Lcom/twouich/phone/ChannelSkin;->banner" in text:
+        log("déjà appliqué : bandeau recadré dans le pont de chargement")
+    elif call not in text:
+        fail(f"appel de bandeau introuvable dans {bridge.name}")
+    else:
+        # `.locals 1` ne laisse rien pour le contexte ni pour le bitmap recadré :
+        # v1 = résultat du recadrage, v2 = contexte du fragment (jamais `p0`, qui
+        # porte encore `$b` et sert au chargement de l'avatar juste après).
+        method = (".method public static synthetic a(Lcom/s0und/s0undtv/fragments/"
+                  "ChannelDetailsFragment$b;Landroid/graphics/Bitmap;)V\n"
+                  "    .locals 1")
+        if method not in text:
+            fail(f"pont de bandeau attendu avec .locals 1, forme changée dans {bridge.name}")
+        text = text.replace(method, method.replace(".locals 1", ".locals 3"), 1)
+        context = ("iget-object v2, p0, Lcom/s0und/s0undtv/fragments/"
+                   "ChannelDetailsFragment$b;->n:Lcom/s0und/s0undtv/fragments/"
+                   "ChannelDetailsFragment;\n\n    "
+                   "invoke-virtual {v2}, Landroidx/fragment/app/f;->v()"
+                   "Landroidx/fragment/app/g;\n\n    move-result-object v2")
+        text = text.replace(call,
+                            context + "\n\n    " + CHANNEL_BANNER_CROP % ("v2", "p1")
+                            + "\n\n    move-result-object v1\n\n"
+                            + CHANNEL_BANNER_CALL % ("v0", "v1"), 1)
+        bridge.write_text(text, encoding="utf-8", newline="")
+        log("smartphone : bandeau recadré dans le pont de chargement")
+
+
+# Pastille de points de visionnage : posée après le bouton PiP, en haut à gauche
+# de la vidéo, masquée tant que la chaîne n'a aucun point.
+POINTS_VIEW = (
+    '\n    <TextView android:id="@+id/twouich_phone_points"\n'
+    '        android:layout_width="wrap_content" android:layout_height="wrap_content"\n'
+    '        android:layout_alignTop="@id/ExoPlayer" android:layout_alignStart="@id/ExoPlayer"\n'
+    '        android:layout_marginTop="8dp" android:layout_marginStart="8dp"\n'
+    '        android:background="@drawable/twouich_phone_pill_bg"\n'
+    '        android:paddingStart="12dp" android:paddingEnd="12dp"\n'
+    '        android:paddingTop="6dp" android:paddingBottom="6dp"\n'
+    '        android:textColor="#ffffffff" android:textSize="13sp" android:textStyle="bold"\n'
+    '        android:visibility="gone" android:focusable="false" android:clickable="false" />'
+)
+
+
+def patch_phone_points(decoded: pathlib.Path, here: pathlib.Path) -> None:
+    """Pastille de points de visionnage dans le lecteur téléphone.
+
+    Le comptage vit dans `WatchPoints` : une minute regardée = un point, par
+    chaîne, dans des SharedPreferences dédiées — aucune API, donc rien qui
+    dépende d'une session Twitch. Le lecteur ouvre la session dans
+    `twouichPhonePoints()` (appelé à chaque passe de disposition) et la ferme
+    dans `onPause()`.
+
+    La TV n'est pas touchée : ses layouts n'ont pas la vue (ils viennent de
+    patch/res-tv/) et `twouichPhoneStackedLayout` sort avant l'appel sous
+    600 dp.
+    """
+    print("[1h/5] UX smartphone (points de visionnage)")
+    for plugin in ("WatchPoints", "PointsTicker"):
+        src = here / "smali" / "com" / "twouich" / "phone" / f"{plugin}.smali"
+        dst = (decoded / "smali_classes2" / "com" / "twouich" / "phone"
+               / f"{plugin}.smali")
+        if not src.is_file():
+            fail(f"greffon de points de visionnage absent : {src}")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if not dst.is_file() or dst.read_bytes() != src.read_bytes():
+            shutil.copy2(src, dst)
+            log(f"copié : {plugin}.smali")
+
+    phone = decoded / "res" / "layout" / "activity_player.xml"
+    if not phone.is_file():
+        fail(f"layout lecteur téléphone absent : {phone}")
+    text = phone.read_text(encoding="utf-8")
+    if "twouich_phone_points" not in text:
+        anchor = 'android:onClick="twouichPhonePip" />'
+        if text.count(anchor) != 1:
+            fail("bouton PiP introuvable dans activity_player.xml — cible changée")
+        text = text.replace(anchor, anchor + POINTS_VIEW, 1)
+        phone.write_text(text, encoding="utf-8")
+        log("smartphone : pastille de points posée sur la vidéo")
+    else:
+        log("déjà appliqué : pastille de points")
+
+    # Les layouts TV viennent de patch/res-tv/ : la vue ne doit pas y apparaître.
+    for qualifier in ("layout-television", "layout-sw600dp", "layout-sw540dp"):
+        tv = decoded / "res" / qualifier / "activity_player.xml"
+        if tv.is_file() and "twouich_phone_points" in tv.read_text(encoding="utf-8"):
+            fail(f"pastille de points dans {qualifier}/activity_player.xml — "
+                 f"la TV doit rester intacte")
+
+    player = (decoded / "smali" / "com" / "s0und" / "s0undtv" / "activities"
+              / "PlayerActivity.smali")
+    source = player.read_text(encoding="utf-8")
+    if PHONE_POINTS_LEAVE in source:
+        log("déjà appliqué : session de points fermée à la pause")
+    else:
+        old_leave = ("    invoke-static {p0}, Lcom/twouich/phone/WatchPoints;"
+                     "->leave(Landroid/content/Context;)V")
+        if old_leave in source:
+            # Arbre greffé avant la cadence : il n'arrêtait que le comptage.
+            source = source.replace(old_leave, PHONE_POINTS_LEAVE, 1)
+            player.write_text(source, encoding="utf-8", newline="\n")
+            log("smartphone : cadence des points arrêtée à la pause (réparation)")
+        else:
+            anchor = "    invoke-super {p0}, Landroid/app/Activity;->onPause()V"
+            if source.count(anchor) != 1:
+                fail("onPause du lecteur introuvable (ou multiple) — cible changée")
+            source = source.replace(anchor, anchor + "\n\n" + PHONE_POINTS_LEAVE, 1)
+            player.write_text(source, encoding="utf-8", newline="\n")
+            log("smartphone : session de points fermée à la pause")
+
+
+# Cartes des panneaux du lecteur : listes (qualité, volume, vitesse, chapitres)
+# et aperçus de navigation. Toutes sont des CardView à 2 dp — 3 px à 240 dpi,
+# c'est-à-dire un coin droit à l'écran. Telephone : 14 dp.
+PLAYER_CARD_LAYOUTS = (
+    "viewholder_videoquality.xml",
+    "viewholder_volume_control.xml",
+    "viewholder_playbackspeed.xml",
+    "viewholder_vodchapter.xml",
+    "peek_card_stream.xml",
+    "peek_card_channel.xml",
+    "peek_card_game.xml",
+    "streamnavigation_preview.xml",
+    "streamnavigation_preview_multiview2.xml",
+)
+PLAYER_CARD_RADIUS_OLD = 'app:cardCornerRadius="2.0dp"'
+# `clipToOutline` rogne l'image et l'avatar des aperçus au bord arrondi. Il ne
+# suffit pas à arrondir les deux bandeaux d'aperçu eux-mêmes : leur fond est
+# repeint à l'exécution, voir la note en fin de `patch_phone_round_player_cards`.
+PLAYER_CARD_RADIUS_NEW = ('app:cardCornerRadius="14.0dp" '
+                          'android:clipToOutline="true"')
+
+
+def patch_phone_round_player_cards(decoded: pathlib.Path, here: pathlib.Path) -> None:
+    """Arrondit les cartes des panneaux du lecteur, téléphone seulement.
+
+    Mesure du 23/10 sur BlueStacks (720x1280/240) : les entrées de qualité, de
+    volume, de vitesse et de chapitres sont des CardView à `2 dp` (3 px), donc
+    des rectangles à coins droits par-dessus le chat ; même chose pour les
+    aperçus de navigation en haut de la vidéo. Passe à 14 dp côté téléphone.
+
+    La TV inclut les mêmes panneaux (`layout-television/activity_player.xml`
+    reprend `include_video_quality`, ...), donc son original versionné dans
+    `patch/res-tv/` est reposé dans les trois qualifiers — sans quoi le rayon
+    téléphone atterrirait sur la Freebox.
+    """
+    print("[1j/5] UX smartphone (coins des panneaux du lecteur)")
+    for name in PLAYER_CARD_LAYOUTS:
+        path = decoded / "res" / "layout" / name
+        if not path.is_file():
+            fail(f"layout de panneau absent : {path}")
+        text = path.read_text(encoding="utf-8")
+        if PLAYER_CARD_RADIUS_NEW in text:
+            log(f"déjà appliqué : coins de {name}")
+        elif "cardCornerRadius=\"14.0dp\"" in text and "clipToOutline" not in text:
+            # Arbre greffé avant le clip : la carte rendait un rectangle.
+            path.write_text(
+                text.replace('app:cardCornerRadius="14.0dp"',
+                             PLAYER_CARD_RADIUS_NEW, 1),
+                encoding="utf-8", newline="\n",
+            )
+            log(f"smartphone : clip des cartes de {name} (réparation)")
+        elif text.count(PLAYER_CARD_RADIUS_OLD) == 1:
+            path.write_text(
+                text.replace(PLAYER_CARD_RADIUS_OLD, PLAYER_CARD_RADIUS_NEW, 1),
+                encoding="utf-8", newline="\n",
+            )
+            log(f"smartphone : cartes de {name} à 14 dp")
+        else:
+            fail(f"rayon 2 dp introuvable (ou multiple) dans {name} — cible changée")
+        # La version d'origine part dans les qualifiers TV AVANT toute relecture.
+        install_tv_layout(decoded, here, name)
+
+    # Limite mesurée le 23/10 : les deux bandeaux d'aperçu (« Arcus », suivant)
+    # repeignent leur gris à l'exécution — ni `cardBackgroundColor`, ni le fond
+    # de l'enfant, ni `clipToOutline` ne changent leur rendu (sonde rouge dans
+    # le drawable : le centre passe au rouge, les coins restent #171717). Leur
+    # rayon est posé comme les autres cartes, mais il ne se verra pas tant que
+    # ce fond ne sera pas reposé après coup, côté smali. Les quatre listes, elles,
+    # sont peintes par `cardBackgroundColor` et prennent bien le rayon.
+    stale_card_bg = ' app:cardBackgroundColor="@color/theme_darkgrey_dark"'
+    for name in ("streamnavigation_preview.xml",
+                 "streamnavigation_preview_multiview2.xml"):
+        path = decoded / "res" / "layout" / name
+        text = path.read_text(encoding="utf-8")
+        original = text
+        if stale_card_bg in text:
+            text = text.replace(stale_card_bg, "", 1)
+        if '@drawable/twouich_phone_peek_bg' in text:
+            text = text.replace(
+                'android:background="@drawable/twouich_phone_peek_bg" '
+                'android:clipToOutline="true"',
+                'android:background="@color/theme_darkgrey_dark"', 1)
+        if text != original:
+            path.write_text(text, encoding="utf-8", newline="\n")
+            log(f"smartphone : aperçu {name} remis à son fond d'origine")
+
+    for qualifier in ("layout-television", "layout-sw600dp", "layout-sw540dp"):
+        for name in PLAYER_CARD_LAYOUTS:
+            tv = decoded / "res" / qualifier / name
+            if tv.is_file() and PLAYER_CARD_RADIUS_NEW in tv.read_text(encoding="utf-8"):
+                fail(f"rayon téléphone dans {qualifier}/{name} — la TV doit rester à 2 dp")
+
+
 def patch_smartphone_navigation(decoded: pathlib.Path, here: pathlib.Path) -> None:
     """Ajoute une navigation tactile au shell téléphone, sans modifier le shell TV."""
     print("[1e/5] UX smartphone (navigation tactile)")
@@ -3341,7 +4125,7 @@ def patch_smartphone_navigation(decoded: pathlib.Path, here: pathlib.Path) -> No
     <LinearLayout android:id="@+id/twouich_phone_nav_bar"
         android:layout_width="match_parent" android:layout_height="56dp"
         android:layout_gravity="bottom" android:orientation="vertical"
-        android:background="#0e0e10" android:elevation="16dp">
+        android:background="@drawable/twouich_phone_nav_bg" android:elevation="16dp">
         <View android:layout_width="match_parent" android:layout_height="1dp"
             android:background="#2a2a2e" />
         <LinearLayout android:layout_width="match_parent" android:layout_height="55dp"
@@ -3986,7 +4770,15 @@ def main() -> int:
     patch_phone_login(decoded, here)
     patch_smartphone_tap(decoded)
     patch_smartphone_navigation(decoded, here)
+    patch_phone_cards(decoded, here)
+    patch_phone_channel(decoded, here)
+    # Le PiP AVANT les surfaces : sa vue doit exister pour recevoir le fond
+    # circulaire (l'ordre inverse laissait un carré sur un arbre neuf).
     patch_smartphone_pip(decoded)
+    patch_phone_surfaces(decoded)
+    # Après le PiP : la pastille s'ancre sur son bouton dans le layout.
+    patch_phone_points(decoded, here)
+    patch_phone_round_player_cards(decoded, here)
     patch_smartphone_chat_toggle(decoded)
     install_selftest(decoded)
     repoint_updater(decoded, args.apk_name)
@@ -4092,6 +4884,28 @@ def main() -> int:
         ("res/values/dimens.xml", "twouich_phone_chat_height"),
         ("smali_classes2/com/twouich/adblock/TapClick.smali",
          ".method public static touch(Landroid/view/View;Landroid/view/MotionEvent;)Z"),
+        # Écran de chaîne : la surface et le bandeau passent par le garde
+        # téléphone (aucun aplat de marque, bandeau recadré 16:9).
+        ("smali_classes2/com/twouich/phone/ChannelSkin.smali",
+         "banner(Landroid/content/Context;Landroid/graphics/Bitmap;)"),
+        ("smali_classes2/com/s0und/s0undtv/fragments/ChannelDetailsFragment.smali",
+         "Lcom/twouich/phone/ChannelSkin;->paint"),
+        ("smali_classes2/com/s0und/s0undtv/fragments/ChannelDetailsFragment$c.smali",
+         "Lcom/twouich/phone/ChannelSkin;->paint"),
+        # Points de visionnage : greffon, appel dans le lecteur, fin de session
+        # à la pause et pastille dans le layout téléphone.
+        ("smali_classes2/com/twouich/phone/WatchPoints.smali", "twouich_watch_points"),
+        ("smali_classes2/com/twouich/phone/PointsTicker.smali",
+         ".method public static start(Landroid/app/Activity;)V"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
+         ".method public twouichPhonePoints()V"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "PointsTicker;->start"),
+        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "WatchPoints;->leave"),
+        ("res/layout/activity_player.xml", "twouich_phone_points"),
+        # Panneaux du lecteur : les cartes (qualité, volume, vitesse, chapitres,
+        # aperçus de navigation) portent le rayon téléphone.
+        *[(f"res/layout/{name}", PLAYER_CARD_RADIUS_NEW)
+          for name in PLAYER_CARD_LAYOUTS],
         # UX smartphone : barre basse avec icônes, bouton d'incrustation, et
         # l'activité lecteur déclarée compatible picture-in-picture.
         ("res/drawable/twouich_ic_home.xml", "<vector"),

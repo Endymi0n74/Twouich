@@ -174,7 +174,20 @@
     if-le v5, v4, :no_capture
     invoke-virtual {v3, v4, v5}, Ljava/lang/String;->substring(II)Ljava/lang/String;
     move-result-object v3
-    sput-object v3, Lcom/twouich/adblock/AdBlockDataSource;->lastChannel:Ljava/lang/String;
+    # Validation unique : la meme methode est appelee par le lecteur des
+    # l'ouverture (PlayerActivity.x3), avant la premiere playlist.
+    invoke-static {v3}, Lcom/twouich/adblock/AdBlockDataSource;->twouichSetChannel(Ljava/lang/String;)V
+
+    new-instance v4, Ljava/lang/StringBuilder;
+    invoke-direct {v4}, Ljava/lang/StringBuilder;-><init>()V
+    const-string v5, "chaine captee : "
+    invoke-virtual {v4, v5}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+    invoke-virtual {v4, v3}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+    invoke-virtual {v4}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
+    move-result-object v4
+    const-string v5, "Twouich"
+    invoke-static {v5, v4}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I
+
     :no_capture
     :try_capture_end
     .catch Ljava/lang/Exception; {:try_capture_start .. :try_capture_end} :capture_catch
@@ -383,12 +396,12 @@
 
     move-result-object v3
 
-    invoke-static {v3}, Lcom/twouich/adblock/PlaylistSanitizer;->a(Ljava/lang/String;)Ljava/lang/String;
-
-    move-result-object v3
-
-    # VaFT fallback (TwVodNoAdsJCed processM3U8) - désactivé par défaut : 0 régression
-    # Quand ENABLED=false, VaftFallback.a() retourne p0 tel quel (no-op, try/catch de sécurité)
+    # Flux propre AVANT le nettoyage. Pendant un pod, la playlist de la session
+    # du lecteur ne contient QUE la pub (flux de substitution) : la retirer
+    # laisse ExoPlayer sans segment -> image figee + roue pendant tout le pod.
+    # VaftFallback recoit donc la playlist BRUTE, tente le flux embed (sans pub)
+    # et rend la playlist d'origine au moindre echec — le nettoyage local reste
+    # le filet, jamais l'inverse.
     :try_vaft_start
     invoke-static {v3}, Lcom/twouich/adblock/VaftFallback;->a(Ljava/lang/String;)Ljava/lang/String;
     move-result-object v3
@@ -397,8 +410,12 @@
     goto :vaft_done
     :vaft_fallback_catch
     move-exception v6
-    # on garde v3 tel quel (déjà nettoyé), pas de log bruyant hors debug
+    # echec reseau : playlist brute conservee, le nettoyage local s'applique
     :vaft_done
+
+    invoke-static {v3}, Lcom/twouich/adblock/PlaylistSanitizer;->a(Ljava/lang/String;)Ljava/lang/String;
+
+    move-result-object v3
 
     const-string v4, "UTF-8"
 
@@ -430,4 +447,47 @@
     move-result v0
 
     return v0
+.end method
+
+
+# Point unique de renseignement de la chaine courante.
+#
+# Appele par deux chemins : PlayerActivity.x3() des l'ouverture (la chaine est
+# dans l'intent, donc connue AVANT le premier pod de preroll) et la capture
+# usher de c() (rafraichissement sur l'URL reelle). Les gardes evitent de
+# memoriser un identifiant numerique ou une query (`user_login=...`).
+.method public static twouichSetChannel(Ljava/lang/String;)V
+    .locals 4
+
+    if-eqz p0, :done
+
+    invoke-virtual {p0}, Ljava/lang/String;->length()I
+    move-result v0
+    if-eqz v0, :done
+
+    # un login Twitch ne depasse pas 25 caracteres : au-dela c'est autre chose
+    const/16 v1, 0x19
+    if-gt v0, v1, :done
+
+    const-string v1, "="
+    invoke-virtual {p0, v1}, Ljava/lang/String;->contains(Ljava/lang/CharSequence;)Z
+    move-result v1
+    # contient « = » -> c'est une query, pas un login : on n'ecrase pas
+    if-nez v1, :done
+
+    sput-object p0, Lcom/twouich/adblock/AdBlockDataSource;->lastChannel:Ljava/lang/String;
+
+    # trace : une ligne par ouverture, pour dater la capture face au premier pod
+    new-instance v2, Ljava/lang/StringBuilder;
+    invoke-direct {v2}, Ljava/lang/StringBuilder;-><init>()V
+    const-string v3, "chaine pre-capture : "
+    invoke-virtual {v2, v3}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+    invoke-virtual {v2, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+    invoke-virtual {v2}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
+    move-result-object v2
+    const-string v3, "Twouich"
+    invoke-static {v3, v2}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I
+
+    :done
+    return-void
 .end method

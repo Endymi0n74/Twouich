@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView android:id="@id/ChapterCardView" android:focusable="true" android:layout_width="200.0dp" android:layout_height="60.0dp" android:layout_marginTop="5.0dp" android:layout_marginBottom="5.0dp" app:cardBackgroundColor="@color/video_quality_background_grey" app:cardCornerRadius="2.0dp" app:cardElevation="0.0dp" app:cardPreventCornerOverlap="false"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <androidx.constraintlayout.widget.ConstraintLayout android:layout_width="match_parent" android:layout_height="match_parent">
+        <ImageView android:id="@id/ChapterImage" android:paddingTop="2.0dp" android:paddingBottom="2.0dp" android:layout_width="42.0dp" android:layout_height="wrap_content" android:scaleType="fitStart" android:layout_marginStart="2.0dp" android:paddingVertical="2.0dp" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent" />
+        <TextView android:textSize="16.0sp" android:textColor="@color/white" android:id="@id/ChapterName" android:layout_width="0.0dp" android:layout_height="wrap_content" android:layout_marginTop="2.0dp" android:maxWidth="156.0dp" android:maxLines="2" android:layout_marginStart="5.0dp" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toEndOf="@id/ChapterImage" app:layout_constraintTop_toTopOf="parent" />
+        <TextView android:textSize="12.0sp" android:textColor="@color/light_grey" android:id="@id/ChapterDuration" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="5.0dp" app:layout_constraintStart_toEndOf="@id/ChapterImage" app:layout_constraintTop_toBottomOf="@id/ChapterName" />
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</androidx.cardview.widget.CardView>

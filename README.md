@@ -20,18 +20,20 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 - **Fallback VaFT** `v1.0.16` : si `stitched-ad` survit au stripping (nouveau format), tentative flux propre `GQL PlaybackAccessToken embed` → `usher v2` → variante (5s timeout, repli stripping) (`VaftFallback`, dormant tant que `lastCut>0`)
 - **Build reproductible** : ZIP canonisé (horodatage + ordre), `SELFTEST 31/31`, `check-release.sh` 4/4
 
-## Nouveautés v1.0.23 — 6 octobre 2026
+## Nouveautés v1.0.24 — 24 octobre 2026
 
-- **La rotation pendant la lecture ne disloque plus le lecteur téléphone.** Au passage portrait → paysage, la vidéo garde un 16:9 exact (`1845×1038` dans un écran 2712×1220 simulé) et le chat avec la barre de saisie se rangent en colonne à sa droite — la branche paysage est rejouée avec la géométrie **re-mesurée**, au lieu de la configuration périmée que `onConfigurationChanged` trouvait encore en place.
-- **La barre « Envoyer un message » monte au-dessus du clavier.** Mesurée collée au bord haut de l'IME (`y=1687` avec un clavier ouvert jusqu'à 2712), avec le chat qui se raccourcit d'autant ; clavier fermé, l'empilement portrait d'origine est inchangé. La fenêtre étant edge-to-edge (cible 35), `adjustResize` ne suffit pas — et **les insets IME ne rendent rien sur ce MIUI** : la hauteur du clavier est lue par `getWindowVisibleDisplayFrame`, seule source fiable mesurée sur l'appareil. Une veille de disposition (`PhoneLayoutWatch`) rejoue la géométrie à chaque changement de frame visible, avec garde anti-boucle.
-- Aucun message n'a été envoyé pendant la validation ; aucune session n'a été perdue (`adb install -r`, `firstInstallTime` préservé). Détail des mesures et recettes : `TEST-DEVICE.md` § 8.26.
+- **Les points de visionnage arrivent sur téléphone.** Une minute regardée vaut un point, par chaîne, et la pastille s'affiche en haut à gauche de la vidéo (`0 pt`, `12 pts`). Tout reste sur l'appareil, dans les préférences privées de l'application : aucune session Twitch n'est nécessaire et rien n'est envoyé nulle part. Le compteur suit la lecture (rafraîchi toutes les 15 s) et reprend là où il s'était arrêté après une mise à jour.
+- **Le lecteur et la fiche chaîne prennent les codes de Twitch mobile.** Sur téléphone uniquement : panneau de chat en surface sombre à coins supérieurs arrondis avec 8 dp de respiration sous la vidéo, bouton picture-in-picture circulaire, champ de saisie en pastille, fiche chaîne en surface sombre avec avatar rond et boutons pilule. La télévision garde son rendu d'origine, vérifié ressource par ressource (`layout-sw600dp`, `layout-sw540dp`, `layout-television`) et à l'écran en 1920×1080.
+- **Les listes du lecteur perdent leurs coins droits.** Hauteur, qualité, vitesse de lecture et chapitres de VOD passent de 2 dp — invisibles à l'œil — à 14 dp : les panneaux qui s'ouvrent sur le chat se lisent enfin comme des cartes. Le rayon est posé côté téléphone seulement ; la TV retrouve les 2 dp d'origine.
+- **Le secours anti-pub ne sert plus la playlist brute.** Sept conditions étaient inversées dans le repli : quand le filtre principal échouait, l'app rendait la playlist publicitaire telle quelle. Mesuré sur un pod réel : 2 578 octets remplacés par 15 674 octets de contenu propre, `ads_out=false`. La chaîne est désormais connue dès l'ouverture du lecteur — deep link compris — pour que le repli n'ait pas à la deviner.
+- Aucun message n'a été envoyé et aucune session n'a été perdue pendant la validation (`adb install -r`).
 
 ## Installation
 
-Télécharger [`Twouich_v1.0.23.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.23/Twouich_v1.0.23.apk) depuis la release publiée.
+Télécharger [`Twouich_v1.0.24.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.24/Twouich_v1.0.24.apk) depuis la release publiée.
 
 ```bash
-adb install -r Twouich_v1.0.23.apk
+adb install -r Twouich_v1.0.24.apk
 ```
 
 

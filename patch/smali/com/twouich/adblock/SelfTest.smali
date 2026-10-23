@@ -433,6 +433,13 @@
     return-void
 
     :body
+    # Marqueur : les « playlist nettoyee » qui suivent sont le rejeu des
+    # fixtures, pas un direct. Sans lui, le pod synthetique de 623 octets a
+    # ete pris pour un preroll avant capture de chaine (erreur du 23/10/2026).
+    const-string v2, "Twouich"
+    const-string v3, "self-test : rejeu des fixtures (pas un direct)"
+    invoke-static {v2, v3}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I
+
     const/4 v0, 0x0
 
     const/4 v1, 0x0
