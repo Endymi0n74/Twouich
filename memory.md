@@ -808,3 +808,31 @@ xmltree` : `cardCornerRadius` = 14 dp + `clipToOutline` en `layout/`, **2 dp et 
 `layout-sw600dp` / `layout-sw540dp` / `layout-television`. Non mesuré : les aperçus au doigt (ils
 n'ont pas pu être ouverts lors de cette session), les chapitres VOD (pas de VOD sous la main), et le
 rendu TV à l'écran (seul l'aapt2 le prouve ici).
+
+## 2026-10-24 — Release v1.0.24 (171) publiée depuis le build local, et l'amont a supprimé sa beta
+
+Bump `171` / `v1.0.24`, changelog + `sync-readme.py` (section FR et `WHATS_NEW_EN["v1.0.24"]`), deux README
+alignés. Livrable `517af65c48e374665b3638b2e860524f0894bfee6388e28c182cba07261571f9`, 11 327 613 o,
+`install -r` par-dessus la 170 (`firstInstallTime` inchangé), octets relus sur l'appareil (`pm path` +
+`pull`) **identiques** au livrable. Vérifié en lecture : pastille de points (45 pts retrouvés), panneau
+qualité à 14 dp, 0 entrée dans le tampon crash. `check-release.sh` vert aux quatre étages
+(`update.json` → tag → assets → octets servis).
+
+**Défaut trouvé en comparant un décodage propre au build précédent** : `patch_phone_surfaces()` tournait
+AVANT `patch_smartphone_pip()`, donc sur un arbre neuf le bouton PiP restait le carré `#66000000` amont,
+alors qu'un arbre réutilisé — où le bouton existait déjà d'une passe précédente — recevait le cercle.
+Deux livrables différents pour un même `patch.py` : le premier build de la session donnait `4a1b9cb1…`,
+le second `517af65c…`. L'appel est déplacé après le PiP, un `fail()` garde l'ordre (le motif amont encore
+présent = surfaces appliquées trop tôt), et `test_apk.py` lit désormais **l'attribut dans le layout
+compilé** (`background` du premier `ImageButton` = `drawable/twouich_phone_pip_bg`). Mordance prouvée
+par mutation : un APK reconstruit avec `#66000000` rend `❌ bouton picture-in-picture circulaire`.
+
+**Blocage nouveau, à traiter** : `S0und/S0undTV/releases/download/beta/beta_144.apk` renvoie **404**
+(l'asset a été supprimé ; la release `beta` n'existe plus dans la liste de l'API, et l'archive web n'a
+aucun instantané). Les trois runs CI du jour sont rouges au même endroit — le téléchargement de l'APK
+amont — ce qui veut dire qu'**aucun build ne peut plus partir d'un clone neuf**. Le build local continue
+de fonctionner grâce à `work/upstream/beta_144.apk`, protégé par l'empreinte épinglée. Pistes, dans
+l'ordre : (1) héberger la copie cachetée comme asset du dépôt (nécessite l'accord de Stephane —
+redistribution d'un binaire tiers), (2) rebaser sur la dernière release amont disponible
+(`v1.5.10x`, 143) — gros chantier, tous les motifs d'APK sont à revalider, (3) accepter des releases
+construites localement, CI rouge sur les tags.
