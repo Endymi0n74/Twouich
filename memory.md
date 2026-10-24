@@ -145,6 +145,11 @@ télécharge l'APK déjà présent sur la release et le compare :
   aucune release → `upload=true` ; assets illisibles (502) → échec sans upload ; octets différents → échec sans upload.
   Le garde refuse aussi de publier quand la release existe mais que sa lecture échoue : jamais de repli silencieux
   sur `--clobber`. Le job signé reste donc vert sur une première publication et sur un rebuild identique, rouge sinon.
+- **Prouvé en CI le 24/10 au soir** (tag `v1.0.26` déplacé sur `20ea27e`, run `40131704996`) : l'étape garde échoue avec
+  `❌ l'APK publié (ae82fbac…) diffère du rebuild CI (f0e6aecd…)`, « Publier sur la release » et « Vérifier les octets servis »
+  sont **sautées**, et la release est intacte : `updatedAt` de l'asset inchangé (`19:40:39Z`), taille inchangée, octets servis
+  retéléchargés → `ae82fbac…` = `dist/`. `check-release.sh` reste vert sur les quatre étages. Le run `master` du même commit
+  (`40131702463`) est vert. Le run de tag rouge est **la preuve du garde**, pas une panne : ne pas le supprimer sans raison.
 - Le contrôle « layout TV confronté à la capture de l'amont » est **sauté** (`⏭️`) sur un clone sans APK amont : il dit qu'il
 ne juge pas, les autres gardes TV restent actifs. Sur la machine du mainteneur (amont présent) il mord toujours.
 
