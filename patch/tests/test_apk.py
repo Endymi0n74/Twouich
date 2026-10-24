@@ -880,33 +880,21 @@ def main() -> int:
                     pip_bg_name == "drawable/twouich_phone_pip_bg",
                     f"fond du bouton PiP = {pip_bg_name or pip_bg} au lieu du cercle : "
                     "le carré translucide amont est resté dans le livrable")
-        # Pastille de points : optionnelle depuis le 24/10. Le choix vit dans
-        # les SharedPreferences du compteur (clé « @badge_hidden », impossible
-        # comme login), l'appui long est porté par PointsLongPress, et la
-        # fenêtre d'incrustation ne doit jamais l'afficher. Preuve côté
-        # livrable : la clé et la classe sont dans le dex, et la vue n'existe
-        # QUE dans le layout téléphone (les trois qualifiers TV viennent de
-        # patch/res-tv/, sans elle).
-        ok &= check("pastille de points : choix persistant et appui long compilés",
-                    holds(dex_blob, "@badge_hidden")
-                    and holds(dex_blob, "PointsLongPress")
-                    and holds(dex_blob, "twouich_phone_points")
-                    and holds(dex_blob, "twouichPhonePointsApply")
-                    and holds(dex_blob, "twouichPhonePointsTick"),
-                    "sans la préférence ni le listener, la pastille ne peut pas être masquée")
-        # Le nom même de l'identifiant n'est pas dans le pool du layout compilé
-        # (c'est une RÉFÉRENCE, comme pour le bouton PiP) : on cherche donc sa
-        # valeur d'identifiant, en 32 bits little-endian.
-        points_id = next((rid for rid, rname in shipped_resource_names.items()
-                          if rname == "id/twouich_phone_points"), None)
-        points_ref = points_id.to_bytes(4, "little") if points_id is not None else b""
-        ok &= check("pastille de points : présente au téléphone, absente en TV",
-                    bool(points_ref)
-                    and points_ref in z.read(phone_player)
-                    and all(points_ref not in z.read(name)
-                            for name in (tv_player, tv_television)),
-                    "l'identifiant de la pastille est absent du layout téléphone "
-                    "ou présent dans un layout TV")
+        # La pastille de points a été retirée le 24/10 : le compteur local n'a
+        # jamais été les points de chaîne de Twitch (aucune API, aucune session
+        # dans l'app). Preuve côté livrable : plus aucune des trois classes
+        # greffées dans le dex, et plus une seule référence à l'identifiant de
+        # la vue dans les layouts compilés — un reste laisserait des méthodes
+        # lisant des champs disparus (VerifyError) ou une vue figée.
+        ok &= check("pastille de points retirée du livrable",
+                    not holds(dex_blob, "PointsTicker")
+                    and not holds(dex_blob, "WatchPoints")
+                    and not holds(dex_blob, "twouichPhonePoints")
+                    and not any(rname == "id/twouich_phone_points"
+                                for rname in shipped_resource_names.values())
+                    and all(b"twouich_phone_points" not in z.read(name)
+                            for name in names if name.startswith("res/layout")),
+                    "une greffe de points subsiste dans le dex ou dans un layout")
         # Le bouton masquer/afficher le chat est RETIRÉ depuis la v1.0.12 : le chat
         # vit SOUS la vidéo, donc replier ne changeait plus la taille de l'image
         # (« l'icône à côté du PiP ne sert à rien », 21/09). La preuve est donc

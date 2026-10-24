@@ -20,20 +20,18 @@ Android TV client for Twitch, with local filtering of SSAI ad markers, VOD un-mu
 - **VaFT fallback** `v1.0.16`: if `stitched-ad` survives stripping (new format), attempt clean stream `GQL PlaybackAccessToken embed` → `usher v2` → variant (5s timeout, fallback to stripping) (`VaftFallback`, dormant while `lastCut>0`)
 - **Reproducible build**: canonicalized ZIP (timestamp + order), `SELFTEST 31/31`, `check-release.sh` 4/4
 
-## What's new in v1.0.24 — October 24, 2026
+## What's new in v1.0.26 — October 24, 2026
 
-- **Watch points arrive on phones.** One minute watched is one point, per channel, shown in a badge at the top left of the video (`0 pt`, `12 pts`). Everything stays on the device, in the app's private preferences: no Twitch session is needed and nothing is sent anywhere. The counter follows playback (refreshed every 15 s) and picks up where it left off after an update.
-- **The player and the channel page adopt Twitch mobile's language.** Phone only: chat panel on a dark surface with rounded top corners and 8 dp of breathing room under the video, circular picture-in-picture button, pill-shaped message field, channel page on a dark surface with a round avatar and pill buttons. Television keeps its original rendering, checked resource by resource (`layout-sw600dp`, `layout-sw540dp`, `layout-television`) and on screen at 1920×1080.
-- **The player's lists lose their square corners.** Quality, volume, playback speed and VOD chapters go from 2 dp — invisible to the eye — to 14 dp: the panels opened over the chat finally read as cards. The radius is applied on phones only; TV gets its original 2 dp back.
-- **The anti-ad fallback no longer serves the raw playlist.** Seven conditions were inverted in the fallback: when the main filter failed, the app handed back the advertising playlist as-is. Measured on a real pod: 2 578 bytes replaced by 15 674 bytes of clean content, `ads_out=false`. The channel is now known as soon as the player opens — deep links included — so the fallback does not have to guess it.
-- No message was sent and no session was lost during validation (`adb install -r`).
+- **Watch points are removed.** The v1.0.25 counter invented its numbers: one minute watched counted as one point, while Twitch channel points are not earned that way and the app embeds neither GQL/Helix nor a token to read them. The badge, the counter, its ticker and the long-press go away, together with the composer row view and the player methods. The composer row is back to exactly the message field, the send arrow and the player options.
+- **The defect shipped in v1.0.25 goes with it.** The APK published as `v1.0.25` embedded `PointsTicker.run()` calling `PlayerActivity.twouichPhonePointsTick()`, a method **missing from the dex**: a `NoSuchMethodError` fifteen seconds into playback. Two checks now lock the feature out of the delivered dex and layout.
+- **Everything else in v1.0.25 is unchanged**: phone player (dark chat, circular PiP, pill composer), channel page, portrait and landscape geometry, branding and ad filtering. TV mode stays as it was.
 
 ## Installation
 
-Download [`Twouich_v1.0.24.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.24/Twouich_v1.0.24.apk) from the published release.
+Download [`Twouich_v1.0.26.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.26/Twouich_v1.0.26.apk) from the published release.
 
 ```bash
-adb install -r Twouich_v1.0.24.apk
+adb install -r Twouich_v1.0.26.apk
 ```
 
 

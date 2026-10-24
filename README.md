@@ -20,20 +20,18 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 - **Fallback VaFT** `v1.0.16` : si `stitched-ad` survit au stripping (nouveau format), tentative flux propre `GQL PlaybackAccessToken embed` → `usher v2` → variante (5s timeout, repli stripping) (`VaftFallback`, dormant tant que `lastCut>0`)
 - **Build reproductible** : ZIP canonisé (horodatage + ordre), `SELFTEST 31/31`, `check-release.sh` 4/4
 
-## Nouveautés v1.0.25 — 24 octobre 2026
+## Nouveautés v1.0.26 — 24 octobre 2026
 
-- **Les points de visionnage arrivent sur téléphone.** Une minute regardée vaut un point, par chaîne, et la pastille s'affiche en haut à gauche de la vidéo (`0 pt`, `12 pts`). Tout reste sur l'appareil, dans les préférences privées de l'application : aucune session Twitch n'est nécessaire et rien n'est envoyé nulle part. Le compteur suit la lecture (rafraîchi toutes les 15 s) et reprend là où il s'était arrêté après une mise à jour.
-- **Le lecteur et la fiche chaîne prennent les codes de Twitch mobile.** Sur téléphone uniquement : panneau de chat en surface sombre à coins supérieurs arrondis avec 8 dp de respiration sous la vidéo, bouton picture-in-picture circulaire, champ de saisie en pastille, fiche chaîne en surface sombre avec avatar rond et boutons pilule. La télévision garde son rendu d'origine, vérifié ressource par ressource (`layout-sw600dp`, `layout-sw540dp`, `layout-television`) et à l'écran en 1920×1080.
-- **Les listes du lecteur perdent leurs coins droits.** Hauteur, qualité, vitesse de lecture et chapitres de VOD passent de 2 dp — invisibles à l'œil — à 14 dp : les panneaux qui s'ouvrent sur le chat se lisent enfin comme des cartes. Le rayon est posé côté téléphone seulement ; la TV retrouve les 2 dp d'origine.
-- **Le secours anti-pub ne sert plus la playlist brute.** Sept conditions étaient inversées dans le repli : quand le filtre principal échouait, l'app rendait la playlist publicitaire telle quelle. Mesuré sur un pod réel : 2 578 octets remplacés par 15 674 octets de contenu propre, `ads_out=false`. La chaîne est désormais connue dès l'ouverture du lecteur — deep link compris — pour que le repli n'ait pas à la deviner.
-- Aucun message n'a été envoyé et aucune session n'a été perdue pendant la validation (`adb install -r`).
+- **Les points de visionnage sont retirés.** Le compteur de la v1.0.25 inventait ses chiffres : une minute de lecture y valait un point, alors que les points de chaîne Twitch ne se gagnent pas ainsi et que l'application n'embarque ni GQL/Helix ni jeton pour les lire. La pastille, le compteur, la cadence et l'appui long disparaissent — greffons `WatchPoints`, `PointsTicker`, `PointsLongPress`, vue de la rangée de saisie et méthodes du lecteur. La rangée de saisie retrouve exactement le champ, la flèche d'envoi et les options du lecteur.
+- **Le défaut de la v1.0.25 publiée disparaît avec la fonctionnalité.** L'APK publié sous `v1.0.25` embarquait `PointsTicker.run()` appelant `PlayerActivity.twouichPhonePointsTick()`, méthode **absente du dex** : `NoSuchMethodError` au premier tir, quinze secondes après le début de lecture. `remove_phone_points()` nettoie aussi un arbre de travail réutilisé et échoue bruyamment s'il reste une trace ; deux contrôles verrouillent l'absence (aucune classe de points dans le dex livré, plus aucune vue dans le layout).
+- **Le reste de la v1.0.25 est inchangé** : lecteur téléphone (chat sombre, PiP circulaire, saisie en pastille), fiche chaîne, géométrie portrait/paysage, identité visuelle et anti-pub. Le mode TV reste intact.
 
 ## Installation
 
-Télécharger [`Twouich_v1.0.25.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.25/Twouich_v1.0.25.apk) depuis la release publiée.
+Télécharger [`Twouich_v1.0.26.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.26/Twouich_v1.0.26.apk) depuis la release publiée.
 
 ```bash
-adb install -r Twouich_v1.0.25.apk
+adb install -r Twouich_v1.0.26.apk
 ```
 
 

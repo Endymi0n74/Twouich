@@ -775,76 +775,6 @@ PHONE_CHAT_ABOVE_OLD = (
 )
 
 
-# Pastille de points de visionnage : méthode ajoutée au lecteur (téléphone
-# seulement — `twouichPhoneStackedLayout` sort avant sur la TV, et la vue
-# n'existe pas dans les layouts TV).
-PHONE_POINTS_METHOD = r'''
-.method public twouichPhonePoints()V
-    .locals 6
-
-    sget-object v0, Lcom/twouich/adblock/AdBlockDataSource;->lastChannel:Ljava/lang/String;
-
-    invoke-static {p0, v0}, Lcom/twouich/phone/WatchPoints;->enter(Landroid/content/Context;Ljava/lang/String;)V
-
-    const-string v1, "twouich_phone_points"
-
-    invoke-direct {p0, v1}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneId(Ljava/lang/String;)I
-    move-result v1
-
-    invoke-virtual {p0, v1}, Landroid/app/Activity;->findViewById(I)Landroid/view/View;
-    move-result-object v1
-
-    check-cast v1, Landroid/widget/TextView;
-
-    if-eqz v1, :points_done
-
-    invoke-static {p0, v0}, Lcom/twouich/phone/WatchPoints;->label(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;
-    move-result-object v2
-
-    if-eqz v2, :points_hide
-
-    invoke-virtual {v1, v2}, Landroid/widget/TextView;->setText(Ljava/lang/CharSequence;)V
-
-    const/4 v2, 0x0
-
-    invoke-virtual {v1, v2}, Landroid/view/View;->setVisibility(I)V
-
-    goto :points_done
-
-    :points_hide
-    const/16 v2, 0x8
-
-    invoke-virtual {v1, v2}, Landroid/view/View;->setVisibility(I)V
-
-    # Trace : sans elle, une pastille absente ne dit pas si la chaine est
-    # inconnue ou si la cadence ne tourne plus.
-    const-string v3, "Twouich"
-
-    const-string v4, "points : chaine inconnue, pastille masquee"
-
-    invoke-static {v3, v4}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
-
-    :points_done
-    invoke-static {p0}, Lcom/twouich/phone/PointsTicker;->start(Landroid/app/Activity;)V
-
-    return-void
-.end method
-'''
-# `invoke-virtual` : la methode est publique (PointsTicker l'appelle depuis une
-# autre classe). Un `invoke-direct` la declare directe et ART refuse la classe
-# entiere a l'execution — « expected to be of type direct but instead was found
-# to be of type virtual », releve sur BlueStacks le 23/10.
-PHONE_POINTS_CALL = (
-    "    invoke-virtual {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;"
-    "->twouichPhonePoints()V\n"
-)
-PHONE_POINTS_LEAVE = (
-    "    invoke-static {}, Lcom/twouich/phone/PointsTicker;->stop()V\n"
-    "\n"
-    "    invoke-static {p0}, Lcom/twouich/phone/WatchPoints;"
-    "->leave(Landroid/content/Context;)V"
-)
-
 # onResume est le point d'entrée fiable du démarrage (le callback focus
 # n'était pas dispatché sur BlueStacks/API 33). Canoniser toute la séquence ici
 # évite qu'une migration répétée empile les appels dans un arbre apktool réutilisé.
@@ -2385,28 +2315,6 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
                                                 PHONE_CHAT_FOCUS_RESTORED, 1)
     if PHONE_CHAT_FOCUS_RESTORED not in player_methods:
         fail("relecture absente du rappel de focus dans le gabarit")
-    # Pastille de points de visionnage : la méthode et son appel vivent dans la
-    # source unique du lecteur, donc présents à l'identique sur un arbre vierge
-    # et sur un arbre réparé (la réparation canonique reprend ce corps).
-    if "->twouichPhonePoints()V" not in player_methods:
-        window = "\n\n.method private twouichPhoneWindow()V"
-        if player_methods.count(window) != 1:
-            fail("ancre twouichPhoneWindow introuvable dans le gabarit du lecteur")
-        player_methods = player_methods.replace(
-            window, "\n" + PHONE_POINTS_METHOD + window, 1)
-        start = player_methods.index(".method private twouichPhoneStackedLayout()V")
-        end = player_methods.index("\n.end method", start)
-        body = player_methods[start:end]
-        guard = ("    iget v1, v1, Landroid/content/res/Configuration;"
-                 "->smallestScreenWidthDp:I\n"
-                 "    const/16 v2, 0x258\n"
-                 "    if-ge v1, v2, :return_phone_layout\n")
-        if body.count(guard) != 1:
-            fail("garde télévision introuvable dans twouichPhoneStackedLayout")
-        body = body.replace(guard, guard + "\n" + PHONE_POINTS_CALL, 1)
-        player_methods = player_methods[:start] + body + player_methods[end:]
-    if PHONE_POINTS_METHOD not in player_methods or PHONE_POINTS_CALL not in player_methods:
-        fail("pastille de points de visionnage absente du gabarit du lecteur")
     # Picture-in-picture (API 26) : bouton dans le lecteur téléphone, fenêtre
     # 16:9, et disparition du chat pendant que la vidéo est en incrustation.
     # Les trois overrides de callback du framework sont PUBLICS : Activity
@@ -2937,28 +2845,9 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
                             + canonical_layout.group(0)
                             + player_fixed[current_layout.end():])
             phone_chat_layout_patched = True
-    # La pastille de points a change de signature (privee -> publique) et gagne
-    # une cadence : un arbre deja greffe garderait l'ancienne methode privee, que
-    # PointsTicker ne peut pas appeler (IllegalAccessError au premier tir). Elle
-    # est donc canonisee ici, comme la disposition : une seule source.
-    points_repaired = False
-    canonical_points = PHONE_POINTS_METHOD.replace("\r\n", "\n").strip()
-    current_points = re.search(
-        r"(?ms)^\.method [^\n]*twouichPhonePoints\(\)V\n.*?^\.end method$",
-        player_fixed,
-    )
-    if current_points is None:
-        player_fixed = player_fixed.rstrip() + "\n\n" + canonical_points + "\n"
-        points_repaired = True
-    elif current_points.group(0).strip() != canonical_points:
-        player_fixed = (player_fixed[:current_points.start()]
-                        + canonical_points
-                        + player_fixed[current_points.end():])
-        points_repaired = True
     # Veille : le service suit le lecteur. onResume est normalisé plus haut,
     # donc ce passage ne peut plus ajouter un second démarrage du service.
     player_fixed, service_calls = _patch_playback_calls(player_fixed)
-
     # Passerelle publique de la veille : un arbre déjà canonique mais qui ne
     # l'aurait pas recevrait un invoke non résolu (NoSuchMethodError) au
     # premier changement de boîte — forcer l'écriture quand elle manque.
@@ -2983,7 +2872,7 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         log("smartphone : chat repliable rebranché sur le lecteur (réparation)")
     elif (player_fixed != player_text or tv_guard_count or screen_off_patched
           or service_calls or resume_normalized or send_added or phone_chat_guard_patched
-          or phone_chat_layout_patched or relayout_missing or points_repaired):
+          or phone_chat_layout_patched or relayout_missing):
         write_player(player_fixed)
         log("smartphone : correction des paramètres du lecteur empilé")
     else:
@@ -2997,8 +2886,7 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         "\n".join((CHAT_METHODS, player_methods, pip_methods, TV_INTERFACE_METHOD,
                     PHONE_CHAT_OWN_FADE_METHOD, PHONE_CHAT_FADE_GUARD,
                     PHONE_CHAT_LAYOUT_VISIBLE, PHONE_SCREEN_OFF_GUARD,
-                    PHONE_SCREEN_OFF_KEPT, PHONE_POINTS_METHOD,
-                    PHONE_POINTS_LEAVE)).encode("utf-8")
+                    PHONE_SCREEN_OFF_KEPT)).encode("utf-8")
     ).hexdigest()
 
     values = decoded / "res/values/dimens.xml"
@@ -3006,7 +2894,11 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         fail(f"ressources dimens absentes : {values}")
     dims = values.read_text(encoding="utf-8")
     dim = '<dimen name="twouich_phone_chat_height">280dp</dimen>'
-    if dim not in dims:
+    # Détection par NOM, pas par la ligne littérale : un arbre redécodé écrit
+    # la valeur en `280.0dp` (aapt2), et une comparaison exacte y insérait une
+    # SECONDE définition — `duplicate value for resource`, donc build impossible
+    # depuis le repli `BASELINE_URL`.
+    if 'name="twouich_phone_chat_height"' not in dims:
         insertion = "\n    " + dim
         anchor = "</resources>"
         if anchor not in dims:
@@ -3936,87 +3828,89 @@ def install_channel_skin(decoded: pathlib.Path, here: pathlib.Path) -> None:
         log("smartphone : bandeau recadré dans le pont de chargement")
 
 
-# Pastille de points de visionnage : posée après le bouton PiP, en haut à gauche
-# de la vidéo, masquée tant que la chaîne n'a aucun point.
-POINTS_VIEW = (
-    '\n    <TextView android:id="@+id/twouich_phone_points"\n'
-    '        android:layout_width="wrap_content" android:layout_height="wrap_content"\n'
-    '        android:layout_alignTop="@id/ExoPlayer" android:layout_alignStart="@id/ExoPlayer"\n'
-    '        android:layout_marginTop="8dp" android:layout_marginStart="8dp"\n'
-    '        android:background="@drawable/twouich_phone_pill_bg"\n'
-    '        android:paddingStart="12dp" android:paddingEnd="12dp"\n'
-    '        android:paddingTop="6dp" android:paddingBottom="6dp"\n'
-    '        android:textColor="#ffffffff" android:textSize="13sp" android:textStyle="bold"\n'
-    '        android:visibility="gone" android:focusable="false" android:clickable="false" />'
-)
+def remove_phone_points(decoded: pathlib.Path) -> None:
+    """Retire la pastille de points, abandonnée le 24/10.
 
-
-def patch_phone_points(decoded: pathlib.Path, here: pathlib.Path) -> None:
-    """Pastille de points de visionnage dans le lecteur téléphone.
-
-    Le comptage vit dans `WatchPoints` : une minute regardée = un point, par
-    chaîne, dans des SharedPreferences dédiées — aucune API, donc rien qui
-    dépende d'une session Twitch. Le lecteur ouvre la session dans
-    `twouichPhonePoints()` (appelé à chaque passe de disposition) et la ferme
-    dans `onPause()`.
-
-    La TV n'est pas touchée : ses layouts n'ont pas la vue (ils viennent de
-    patch/res-tv/) et `twouichPhoneStackedLayout` sort avant l'appel sous
-    600 dp.
+    Le compteur n'a jamais été les points de chaîne de Twitch : sans API ni
+    session, l'app n'a aucun moyen de les lire, et la pastille affichait donc un
+    nombre inventé. La fonctionnalité est retirée entièrement — vue, classes
+    greffées, méthodes du lecteur, champ d'état, appel de pause et rappel
+    d'incrustation — pour qu'aucun arbre ne garde une fonctionnalité morte dont
+    plus rien ne met à jour l'affichage.
     """
-    print("[1h/5] UX smartphone (points de visionnage)")
-    for plugin in ("WatchPoints", "PointsTicker"):
-        src = here / "smali" / "com" / "twouich" / "phone" / f"{plugin}.smali"
-        dst = (decoded / "smali_classes2" / "com" / "twouich" / "phone"
-               / f"{plugin}.smali")
-        if not src.is_file():
-            fail(f"greffon de points de visionnage absent : {src}")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if not dst.is_file() or dst.read_bytes() != src.read_bytes():
-            shutil.copy2(src, dst)
-            log(f"copié : {plugin}.smali")
+    print("[1h/5] UX smartphone (sans points de chaîne)")
+    for name in ("WatchPoints", "PointsTicker", "PointsLongPress"):
+        stale = (decoded / "smali_classes2" / "com" / "twouich" / "phone"
+                 / f"{name}.smali")
+        if stale.is_file():
+            stale.unlink()
+            log(f"retiré : {name}.smali")
 
-    phone = decoded / "res" / "layout" / "activity_player.xml"
-    if not phone.is_file():
-        fail(f"layout lecteur téléphone absent : {phone}")
-    text = phone.read_text(encoding="utf-8")
-    if "twouich_phone_points" not in text:
-        anchor = 'android:onClick="twouichPhonePip" />'
-        if text.count(anchor) != 1:
-            fail("bouton PiP introuvable dans activity_player.xml — cible changée")
-        text = text.replace(anchor, anchor + POINTS_VIEW, 1)
-        phone.write_text(text, encoding="utf-8")
-        log("smartphone : pastille de points posée sur la vidéo")
-    else:
-        log("déjà appliqué : pastille de points")
-
-    # Les layouts TV viennent de patch/res-tv/ : la vue ne doit pas y apparaître.
-    for qualifier in ("layout-television", "layout-sw600dp", "layout-sw540dp"):
-        tv = decoded / "res" / qualifier / "activity_player.xml"
-        if tv.is_file() and "twouich_phone_points" in tv.read_text(encoding="utf-8"):
-            fail(f"pastille de points dans {qualifier}/activity_player.xml — "
-                 f"la TV doit rester intacte")
+    # Vue : elle vivait dans la rangée de saisie. Les layouts sont réécrits par
+    # patch_phone_chat depuis patch/res/, mais un arbre réutilisé peut encore
+    # porter l'incrustation d'origine (au-dessus de la vidéo).
+    view = re.compile(r'\s*<TextView android:id="@\+id/twouich_phone_points".*?/>',
+                      re.S)
+    for layout in [decoded / "res" / "layout" / "activity_player.xml"] + [
+            decoded / "res" / q / "activity_player.xml"
+            for q in ("layout-television", "layout-sw600dp", "layout-sw540dp")]:
+        if not layout.is_file():
+            continue
+        text = layout.read_text(encoding="utf-8")
+        stripped = view.sub("", text, count=1)
+        if stripped != text:
+            layout.write_text(stripped, encoding="utf-8")
+            log(f"retiré : pastille dans {layout.parent.name}/activity_player.xml")
+    row = decoded / "res" / "layout" / "include_send_chat_message_window_phone.xml"
+    if row.is_file():
+        text = row.read_text(encoding="utf-8")
+        stripped = view.sub("", text, count=1)
+        if stripped != text:
+            row.write_text(stripped, encoding="utf-8")
+            log("retiré : pastille de la rangée de saisie")
 
     player = (decoded / "smali" / "com" / "s0und" / "s0undtv" / "activities"
               / "PlayerActivity.smali")
-    source = player.read_text(encoding="utf-8")
-    if PHONE_POINTS_LEAVE in source:
-        log("déjà appliqué : session de points fermée à la pause")
+    if not player.is_file():
+        fail(f"activité lecteur absente : {player}")
+    text = player.read_text(encoding="utf-8")
+    original = text
+    # Les trois méthodes greffées, avec leurs instructions.
+    for method in ("twouichPhonePoints", "twouichPhonePointsApply",
+                   "twouichPhonePointsTick"):
+        text = re.sub(
+            r"(?ms)^\.method [^\n]*\b" + method + r"\(\)V\n.*?^\.end method\n?",
+            "", text,
+        )
+    # L'appel de x3() : le bloc entier, label compris (un label orphelin ferait
+    # refuser le fichier par apktool).
+    text = re.sub(r"\n    # points de chaine :.*?\n    :tw_ch_points_ready\n",
+                  "", text, flags=re.S)
+    # L'appel de la passe de disposition.
+    text = text.replace(
+        "    invoke-virtual {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;"
+        "->twouichPhonePoints()V\n\n", "")
+    # La fin de session à la pause (cadence + compteur).
+    text = re.sub(
+        r"\n\n    invoke-static \{\}, Lcom/twouich/phone/PointsTicker;->stop\(\)V"
+        r"\n\n    invoke-static \{p0\}, Lcom/twouich/phone/WatchPoints;"
+        r"->leave\(Landroid/content/Context;\)V\n", "", text)
+    # Le rappel d'incrustation.
+    text = text.replace(
+        "    # La pastille suit le chat : le proprietaire unique lit lui-meme\n"
+        "    # l'etat d'incrustation, ce rappel ne decide de rien.\n"
+        "    invoke-virtual {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;"
+        "->twouichPhonePointsApply()V\n\n", "")
+    # Le champ d'état de l'appui long.
+    text = text.replace("\n.field private twouichPointsBound:Z", "")
+    if "twouichPhonePoints" in text or "twouichPointsBound" in text:
+        fail("greffe de points résiduelle dans le lecteur — nettoyage incomplet")
+    if text != original:
+        player.write_text(text, encoding="utf-8", newline="\n")
+        log("retiré : greffe de points du lecteur")
     else:
-        old_leave = ("    invoke-static {p0}, Lcom/twouich/phone/WatchPoints;"
-                     "->leave(Landroid/content/Context;)V")
-        if old_leave in source:
-            # Arbre greffé avant la cadence : il n'arrêtait que le comptage.
-            source = source.replace(old_leave, PHONE_POINTS_LEAVE, 1)
-            player.write_text(source, encoding="utf-8", newline="\n")
-            log("smartphone : cadence des points arrêtée à la pause (réparation)")
-        else:
-            anchor = "    invoke-super {p0}, Landroid/app/Activity;->onPause()V"
-            if source.count(anchor) != 1:
-                fail("onPause du lecteur introuvable (ou multiple) — cible changée")
-            source = source.replace(anchor, anchor + "\n\n" + PHONE_POINTS_LEAVE, 1)
-            player.write_text(source, encoding="utf-8", newline="\n")
-            log("smartphone : session de points fermée à la pause")
+        log("déjà appliqué : aucune greffe de points dans le lecteur")
+
 
 
 # Cartes des panneaux du lecteur : listes (qualité, volume, vitesse, chapitres)
@@ -4060,7 +3954,14 @@ def patch_phone_round_player_cards(decoded: pathlib.Path, here: pathlib.Path) ->
         if not path.is_file():
             fail(f"layout de panneau absent : {path}")
         text = path.read_text(encoding="utf-8")
-        if PLAYER_CARD_RADIUS_NEW in text:
+        # Le même état peut s'écrire dans un autre ordre d'attributs : un arbre
+        # redécodé depuis une release déjà greffée (repli `BASELINE_URL`) rend
+        # `android:clipToOutline` AVANT `app:cardCornerRadius`. La détection doit
+        # donc porter sur le couple, pas sur la chaîne exacte, sinon le repli
+        # échoue sur un arbre pourtant déjà au bon rayon.
+        if PLAYER_CARD_RADIUS_NEW in text or (
+                'app:cardCornerRadius="14.0dp"' in text
+                and "android:clipToOutline" in text):
             log(f"déjà appliqué : coins de {name}")
         elif "cardCornerRadius=\"14.0dp\"" in text and "clipToOutline" not in text:
             # Arbre greffé avant le clip : la carte rendait un rectangle.
@@ -4479,12 +4380,30 @@ def install_branding(decoded: pathlib.Path, here: pathlib.Path, version_name: st
     elif f"<h1>Twouich {version_name}" in changelog_source:
         fail(f"page Nouveautés : date de {version_name} introuvable pour mise à jour")
     else:
-        replace_once(
-            changelog,
-            CHANGELOG_OLD,
-            changelog_new,
-            "page Nouveautés : entrée Twouich",
+        # Un arbre déjà patché par une version ANTÉRIEURE ne contient plus le
+        # bloc `beta_144` : c'est exactement le cas du repli `BASELINE_URL`, qui
+        # part de notre dernière release publiée — sa page Nouveautés cite SA
+        # version (`Twouich v1.0.25 (2026.10.24)`). Exiger le bloc d'origine y
+        # échouait, donc tout clone neuf (et la CI) tombait ici au premier bump.
+        # On réécrit alors le titre de l'entrée Twouich existante.
+        previous = re.search(
+            r"<h1>Twouich (v[0-9][^<(]*?) \(([^)]*)\)</h1>", changelog_source
         )
+        if previous:
+            changelog.write_text(
+                changelog_source[:previous.start()]
+                + f"<h1>Twouich {version_name} ({release_date})</h1>"
+                + changelog_source[previous.end():],
+                encoding="utf-8", newline="\n",
+            )
+            log(f"mis à jour : page Nouveautés : {previous.group(1)} → {version_name}")
+        else:
+            replace_once(
+                changelog,
+                CHANGELOG_OLD,
+                changelog_new,
+                "page Nouveautés : entrée Twouich",
+            )
     replace_once(changelog, "background-color: #a30f2d;", "background-color: #0e0e10;",
                  "page Nouveautés : fond rouge → sombre")
     # Repartir de zéro signifie réellement supprimer l'historique HTML hérité :
@@ -4536,6 +4455,20 @@ def force_stable_channel(decoded: pathlib.Path) -> None:
     if BETA_FLAG_NEW in text:
         log("déjà appliqué : flag beta désactivé (canal stable par défaut)")
         return
+    # `= false` est la valeur par défaut d'un booléen en Dalvik : apktool ne
+    # l'écrit pas quand il redécode un dex déjà patché. Le champ nu (`a:Z`, sans
+    # valeur) vaut donc déjà false — c'est l'état d'un arbre reparti de notre
+    # dernière release (repli `BASELINE_URL`), et le refuser bloquait tout clone
+    # neuf. On l'écrit explicitement : la forme canonique est celle que les
+    # contrôles de fin de chaîne exigent.
+    bare = re.search(r"(?m)^\.field public static final a:Z\s*$", text)
+    if bare:
+        path.write_text(
+            text[:bare.start()] + BETA_FLAG_NEW + text[bare.end():],
+            encoding="utf-8",
+        )
+        log("appliqué : flag beta désactivé (forme nue du dex redécodé)")
+        return
     if BETA_FLAG_OLD not in text:
         fail(f"champ beta introuvable dans {BETA_FLAG_PATH} (attendu : {BETA_FLAG_OLD!r})")
     path.write_text(text.replace(BETA_FLAG_OLD, BETA_FLAG_NEW, 1), encoding="utf-8")
@@ -4561,12 +4494,31 @@ def repoint_updater(decoded: pathlib.Path, apk_name: str) -> None:
 
     service = decoded / "smali_classes2/com/s0und/s0undtv/service/AutoUpdateService.smali"
     if service.is_file():
-        replace_once(
-            service,
-            DEAD_UPDATE_URL,
-            f"https://github.com/{REPO}/releases/latest/download/{apk_name}",
-            "AutoUpdateService : endpoint cloudns mort",
+        desired = f"https://github.com/{REPO}/releases/latest/download/{apk_name}"
+        text = service.read_text(encoding="utf-8")
+        # Trois états possibles pour cette URL : celle d'amont (cloudns, morte),
+        # celle d'une release de CE dépôt qui n'est pas la version construite —
+        # c'est le cas du repli `BASELINE_URL`, qui part de la dernière release et
+        # cite donc son nom d'APK —, et l'URL cible. Sans le cas intermédiaire,
+        # tout clone neuf échouait ici au premier bump.
+        published = re.search(
+            r"https://github\.com/[^\"\s]+/releases/latest/download/[^\"\s]+\.apk", text
         )
+        if desired in text:
+            log("déjà appliqué : AutoUpdateService : endpoint cloudns mort")
+        elif published:
+            service.write_text(
+                text[:published.start()] + desired + text[published.end():],
+                encoding="utf-8",
+            )
+            log(f"mis à jour : AutoUpdateService : {published.group(0).rsplit('/', 1)[-1]} → {apk_name}")
+        else:
+            replace_once(
+                service,
+                DEAD_UPDATE_URL,
+                desired,
+                "AutoUpdateService : endpoint cloudns mort",
+            )
 
 
 def check_brand_assets(decoded: pathlib.Path, here: pathlib.Path) -> int:
@@ -4716,12 +4668,44 @@ def app_info_targets(code: int, name: str,
 
 
 def patch_app_info(decoded: pathlib.Path, code: int, name: str,
-                   release_date: str) -> None:
-    """Réécrit les métadonnées de build gravées en dur dans le smali."""
+                   release_date: str, previous: tuple[str, int] = ("", 0)) -> None:
+    """Réécrit les métadonnées de build gravées en dur dans le smali.
+
+    Les motifs d'amont (`beta_144`, `0x90`) n'existent plus dans un arbre déjà
+    livré : le repli `BASELINE_URL` repart de notre dernière release, où ces
+    littéraux portent SA version. On accepte donc aussi la forme « greffée par
+    la release précédente », dont l'identité est lue dans `apktool.yml` avant le
+    bump — et on refuse toujours un motif absent, c'est le signal d'un amont qui
+    a changé.
+    """
+    previous_name, previous_code = previous
     for rel, old, new, what in app_info_targets(code, name, release_date):
         if rel == APP_INFO_BUILD:
             continue  # date de build : gérée ci-dessous
-        replace_once(decoded / rel, old, new, what)
+        path = decoded / rel
+        text = path.read_text(encoding="utf-8")
+        if new in text:
+            log(f"déjà appliqué : {what}")
+            continue
+        # Le littéral d'amont apparaît nu (`"beta_144"`) comme à l'intérieur
+        # d'une phrase (`"Version name: beta_144"`, `"… | 144"`) : on propage
+        # donc le remplacement dans toute la chaîne, nom puis code.
+        candidates = [old]
+        if previous_name and previous_name != "beta_144":
+            candidates += [c.replace("beta_144", previous_name) for c in candidates]
+        if previous_code and previous_code != 144:
+            candidates += [
+                c.replace(" 0x90", f" 0x{previous_code:x}")
+                 .replace(' 144"', f' {previous_code}"')
+                for c in candidates
+            ]
+        for candidate in candidates:
+            if text.count(candidate) == 1:
+                path.write_text(text.replace(candidate, new, 1), encoding="utf-8")
+                log(f"appliqué : {what}")
+                break
+        else:
+            fail(f"motif introuvable ({what}) dans {path} — la cible a changé, adapter patch.py")
     # La date de build n'est pas gravée en clair : c'est un epoch. On la
     # reconstruit donc à partir de la seule constante lisible dans <clinit>, ce
     # qui rend le correctif tolérant à un VERSION_RELEASE_DATE changé sans bump
@@ -4785,13 +4769,26 @@ def main() -> int:
     patch_smartphone_pip(decoded)
     patch_phone_surfaces(decoded)
     # Après le PiP : la pastille s'ancre sur son bouton dans le layout.
-    patch_phone_points(decoded, here)
+    remove_phone_points(decoded)
     patch_phone_round_player_cards(decoded, here)
     patch_smartphone_chat_toggle(decoded)
     install_selftest(decoded)
     repoint_updater(decoded, args.apk_name)
+    # Identité de l'arbre AVANT le bump : un arbre reparti d'une release
+    # publiée la porte encore, et c'est elle qui permet de reconnaître les
+    # littéraux déjà greffés (voir patch_app_info).
+    yml_text = (decoded / "apktool.yml").read_text(encoding="utf-8")
+    previous_name = ""
+    previous_code = 0
+    m = re.search(r"(?m)^\s*versionName:\s*\S+", yml_text)
+    if m:
+        previous_name = m.group(0).split(":", 1)[1].strip()
+    m = re.search(r"(?m)^\s*versionCode:\s*(\d+)", yml_text)
+    if m:
+        previous_code = int(m.group(1))
     bump_version(decoded, args.version_code, args.version_name)
-    patch_app_info(decoded, args.version_code, args.version_name, args.release_date)
+    patch_app_info(decoded, args.version_code, args.version_name, args.release_date,
+                   (previous_name, previous_code))
 
     print("[5/5] Contrôles")
     checks = 0
@@ -4900,20 +4897,15 @@ def main() -> int:
          "Lcom/twouich/phone/ChannelSkin;->paint"),
         ("smali_classes2/com/s0und/s0undtv/fragments/ChannelDetailsFragment$c.smali",
          "Lcom/twouich/phone/ChannelSkin;->paint"),
-        # Points de visionnage : greffon, appel dans le lecteur, fin de session
-        # à la pause et pastille dans le layout téléphone.
-        ("smali_classes2/com/twouich/phone/WatchPoints.smali", "twouich_watch_points"),
-        ("smali_classes2/com/twouich/phone/PointsTicker.smali",
-         ".method public static start(Landroid/app/Activity;)V"),
-        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali",
-         ".method public twouichPhonePoints()V"),
-        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "PointsTicker;->start"),
-        ("smali/com/s0und/s0undtv/activities/PlayerActivity.smali", "WatchPoints;->leave"),
-        ("res/layout/activity_player.xml", "twouich_phone_points"),
         # Panneaux du lecteur : les cartes (qualité, volume, vitesse, chapitres,
-        # aperçus de navigation) portent le rayon téléphone.
-        *[(f"res/layout/{name}", PLAYER_CARD_RADIUS_NEW)
-          for name in PLAYER_CARD_LAYOUTS],
+        # aperçus de navigation) portent le rayon téléphone ET le clip. Deux
+        # contrôles plutôt qu'une chaîne exacte : un AXML redécodé ne conserve
+        # pas l'ordre d'écriture des attributs, et exiger la séquence complète
+        # faisait échouer un arbre pourtant correct (repli `BASELINE_URL`).
+        *[(f"res/layout/{name}", needle)
+          for name in PLAYER_CARD_LAYOUTS
+          for needle in ('app:cardCornerRadius="14.0dp"',
+                         'android:clipToOutline="true"')],
         # UX smartphone : barre basse avec icônes, bouton d'incrustation, et
         # l'activité lecteur déclarée compatible picture-in-picture.
         ("res/drawable/twouich_ic_home.xml", "<vector"),
@@ -5034,9 +5026,31 @@ def main() -> int:
     checks += 1
     # Polarité du garde de relecture : la faute qui a coûté une session (le
     # corps ne s'exécutait jamais, sans le moindre journal — 21/09).
-    if PHONE_CHAT_RESTORE_GUARD_NEW not in player_src:
+    # Le contrôle porte sur la FORME du garde dans la méthode, pas sur un nom
+    # d'étiquette : un arbre redécodé depuis un APK déjà greffé (repli
+    # `BASELINE_URL`) a perdu nos étiquettes — le compilateur les a remplacées
+    # par des `:cond_0`, `:cond_1`, et une comparaison littérale échouait sur un
+    # corps pourtant correct.
+    restore_head = player_src.find(".method private twouichChatRestore()V")
+    if restore_head < 0:
+        fail("contrôle échoué : twouichChatRestore absent du lecteur")
+    restore_body = player_src[restore_head:player_src.find(".end method", restore_head)]
+    # Première INSTRUCTION après la lecture du champ, commentaires, blancs et
+    # directives `.line` ignorés : c'est la seule chose qui compte, et elle
+    # survit à la fois aux commentaires de notre greffe et à un redécodage.
+    guard_at = restore_body.find("twouichChatRestored:Z")
+    if guard_at < 0:
         fail("contrôle échoué : garde de la relecture du chat absent — l'état ne serait jamais relu")
-    if PHONE_CHAT_RESTORE_GUARD_OLD in player_src:
+    first_insn = ""
+    for line in restore_body[guard_at:].splitlines()[1:]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith(".line"):
+            continue
+        first_insn = stripped
+        break
+    if not re.match(r"if-(?:eqz|nez) v\d+,", first_insn):
+        fail("contrôle échoué : garde de la relecture du chat absent — l'état ne serait jamais relu")
+    if not first_insn.startswith("if-nez"):
         fail("contrôle échoué : garde de la relecture du chat à polarité inversée (if-eqz)")
     checks += 1
     # Contrat de la persistance : le fichier et la clé sont écrits par
@@ -5129,11 +5143,20 @@ def main() -> int:
         fail("contrôle échoué : l'état d'incrustation n'est pas écrit par le rappel")
     # Le garde de twouichPhoneView a été écrit à l'envers : il rendait null dès
     # que l'identifiant était trouvé, donc le rappel PiP sortait aussitôt.
-    if f"    {PHONE_PIP_VIEW_OLD.strip()}" in player_src:
+    # Contrôle de forme (le nom d'étiquette ne survit pas à un redécodage).
+    view_head = player_src.find(".method private twouichPhoneView(")
+    if view_head < 0:
+        fail("contrôle échoué : twouichPhoneView absent du lecteur")
+    view_body = player_src[view_head:player_src.find(".end method", view_head)]
+    view_guard = re.search(
+        r"twouichPhoneId\([^)]*\)I\s+move-result v(\d+)\s+(if-eqz|if-nez) v\1,",
+        view_body,
+    )
+    if not view_guard:
+        fail("contrôle échoué : garde d'identifiant absent de twouichPhoneView")
+    if view_guard.group(2) != "if-eqz":
         fail("contrôle échoué : twouichPhoneView est inversé — le rappel PiP "
              "sortirait sans rien masquer")
-    if PHONE_PIP_VIEW_NEW not in player_src:
-        fail("contrôle échoué : garde d'identifiant absent de twouichPhoneView")
     checks += 5
     # Ordre : le garde précède la mise en place de l'empilement, et l'écriture de
     # l'état précède la restauration appelée à la sortie d'incrustation.
@@ -5142,7 +5165,12 @@ def main() -> int:
     exo_at = player_src.find('const-string v1, "ExoPlayer"', stacked_at)
     pip_at = player_src.find(".method public onPictureInPictureModeChanged")
     write_at = player_src.find(pip_write)
-    restore_at = player_src.find(":restore_pip_layout", pip_at)
+    # Ancre de la restauration : la TRACE qu'elle écrit, pas le nom d'étiquette
+    # (un arbre redécodé a perdu nos `:restore_pip_layout` au profit de
+    # `:cond_N` — le littéral de journal, lui, survit à tout redécodage).
+    restore_at = player_src.find(
+        "picture-in-picture : disposition empilee restauree", pip_at
+    )
     if not (stacked_at != -1 and guard_at != -1 and exo_at != -1 and guard_at < exo_at):
         fail("contrôle échoué : le garde d'incrustation arrive après la mise en "
              "place de l'empilement")
@@ -5166,8 +5194,30 @@ def main() -> int:
     # BaseGridView, sinon la grille consomme le premier appui et la carte reste
     # activable au seul second appui (le défaut constaté au doigt).
     grid_src = find_base_grid(decoded).read_text(encoding="utf-8")
-    if TAP_HOOK_CALL not in grid_src or TAP_HOOK_LABEL not in grid_src:
+    # Le nom d'étiquette ne survit pas à un redécodage : le contrôle porte donc
+    # sur la position RÉELLE du crochet — première instruction de la méthode.
+    grid_body_match = re.search(
+        r"\.method public dispatchTouchEvent\(Landroid/view/MotionEvent;\)Z\s*"
+        r"\.locals \d+\s*(.*?)\.end method",
+        grid_src, re.S,
+    )
+    if not grid_body_match:
+        fail("contrôle échoué : dispatchTouchEvent absent de BaseGridView")
+    grid_body = grid_body_match.group(1)
+    # `\s*` du motif a consommé l'indentation de tête : on compare instruction
+    # nue à instruction nue, jamais l'indentation.
+    hook_line = TAP_HOOK_CALL.strip()
+    if hook_line not in grid_body:
         fail("contrôle échoué : tap → clic absent de BaseGridView.dispatchTouchEvent")
+    grid_first = next(
+        (line.strip() for line in grid_body.splitlines()
+         if line.strip() and not line.strip().startswith("#")
+         and not line.strip().startswith(".line")),
+        "",
+    )
+    if grid_first != hook_line:
+        fail("contrôle échoué : le tap → clic est branché après la logique d'origine "
+             "— la grille consommerait le premier appui")
     if grid_src.index(TAP_HOOK_CALL) > grid_src.index("iget-object v0, p0, Landroidx/leanback/widget/e;->g1"):
         fail("contrôle échoué : tap → clic branché après la logique de la grille")
     checks += 2

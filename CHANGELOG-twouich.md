@@ -1,5 +1,19 @@
 # Journal des modifications — Twouich
 
+## v1.0.26 — 24 octobre 2026
+
+> **Publié le 24 octobre 2026** (`versionCode 173`) : tag `v1.0.26`, release avec l'APK et `changelog.html`, `update.json` poussée après la publication. APK publié : 11 323 517 o, SHA-256 `ae82fbacc1a72331cd03def99ad46e8dcacb6e2b7d3a35f95e8b1705a7705c80`. Le repli `BASELINE_URL` de `patch/build.sh` (dernière release publiée, l'asset amont `beta_144` ayant disparu) est réparé dans la même passe : un clone neuf reconstruit à nouveau, et la CI repasse au vert.
+
+- **Les points de visionnage sont retirés.** Le compteur de la v1.0.25 inventait ses chiffres : une minute de lecture y valait un point, alors que les points de chaîne Twitch ne se gagnent pas ainsi et que l'application n'embarque ni GQL/Helix ni jeton pour les lire. La pastille, le compteur, la cadence et l'appui long disparaissent — greffons `WatchPoints`, `PointsTicker`, `PointsLongPress`, vue de la rangée de saisie et méthodes du lecteur. La rangée de saisie retrouve exactement le champ, la flèche d'envoi et les options du lecteur.
+- **Le défaut de la v1.0.25 publiée disparaît avec la fonctionnalité.** L'APK publié sous `v1.0.25` embarquait `PointsTicker.run()` appelant `PlayerActivity.twouichPhonePointsTick()`, méthode **absente du dex** : `NoSuchMethodError` au premier tir, quinze secondes après le début de lecture. `remove_phone_points()` nettoie aussi un arbre de travail réutilisé et échoue bruyamment s'il reste une trace ; deux contrôles verrouillent l'absence (aucune classe de points dans le dex livré, plus aucune vue dans le layout).
+- **Le reste de la v1.0.25 est inchangé** : lecteur téléphone (chat sombre, PiP circulaire, saisie en pastille), fiche chaîne, géométrie portrait/paysage, identité visuelle et anti-pub. Le mode TV reste intact.
+
+## v1.0.25 — 24 octobre 2026
+
+> **Publié le 24 octobre 2026** (`versionCode 172`) : tag `v1.0.25`, release avec l'APK et `changelog.html`. APK publié : 11 327 613 o, SHA-256 `23d23872acb51c7127abf2621f61595591d0f4eae0b58dddcbcfcc965c4b5e4c`. Cette version est **remplacée par la v1.0.26**, qui retire les points (voir ci-dessus) ; son asset reste publié parce qu'il sert de référence de reconstruction à `patch/build.sh` (`BASELINE_URL`).
+
+- **Les points de visionnage arrivent sur téléphone** (retirés en v1.0.26) : une minute regardée valait un point, par chaîne, dans une pastille posée sur la rangée de saisie. Le compteur était local et ne lisait aucun point réel de Twitch.
+
 ## v1.0.24 — 24 octobre 2026
 
 > **Publié le 24 octobre 2026** (`versionCode 171`) : tag `v1.0.24`, release avec l'APK et `changelog.html`, `update.json` poussée après publication (`ReleaseDate` = `publishedAt`, `2026-10-23T22:47:12Z`). APK publié : 11 327 613 o, SHA-256 `517af65c48e374665b3638b2e860524f0894bfee6388e28c182cba07261571f9` — **identique aux octets servis**, et aux octets relus sur l'appareil après `adb install -r`. `check-release.sh` vert sur les quatre étages. **Limite de la chaîne, nouvelle et durable** : l'amont a **supprimé** son asset `S0undTV/releases/download/beta/beta_144.apk` (404 le 24/10, aucun instantané d'archive) ; la CI ne peut donc plus reconstruire, et ce livrable vient du build local à partir de la copie cachetée dans `work/upstream/`, vérifiée par l'empreinte épinglée de `patch/build.sh`.

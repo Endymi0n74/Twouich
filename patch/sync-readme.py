@@ -77,6 +77,24 @@ EN_SECTION_RE = re.compile(r"^## What's new in (v[0-9][\w.]*)")
 # anglais resté sans traduction — c'est le trou qui a laissé README.en.md
 # glisser jusqu'en v1.0.20 pendant que le français avançait.
 WHATS_NEW_EN: dict[str, list[str]] = {
+    "v1.0.26": [
+        "**Watch points are removed.** The v1.0.25 counter invented its "
+        "numbers: one minute watched counted as one point, while Twitch "
+        "channel points are not earned that way and the app embeds neither "
+        "GQL/Helix nor a token to read them. The badge, the counter, its "
+        "ticker and the long-press go away, together with the composer row "
+        "view and the player methods. The composer row is back to exactly "
+        "the message field, the send arrow and the player options.",
+        "**The defect shipped in v1.0.25 goes with it.** The APK published as "
+        "`v1.0.25` embedded `PointsTicker.run()` calling "
+        "`PlayerActivity.twouichPhonePointsTick()`, a method **missing from "
+        "the dex**: a `NoSuchMethodError` fifteen seconds into playback. Two "
+        "checks now lock the feature out of the delivered dex and layout.",
+        "**Everything else in v1.0.25 is unchanged**: phone player (dark "
+        "chat, circular PiP, pill composer), channel page, portrait and "
+        "landscape geometry, branding and ad filtering. TV mode stays as it "
+        "was.",
+    ],
     "v1.0.24": [
         "**Watch points arrive on phones.** One minute watched is one point, "
         "per channel, shown in a badge at the top left of the video (`0 pt`, "
