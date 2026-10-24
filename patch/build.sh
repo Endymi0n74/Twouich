@@ -17,21 +17,24 @@ cd "$ROOT"
 
 # ── APK de référence : deux sources, une seule empreinte chacune ─────────────
 # 1. la copie locale de l'APK amont (beta_144) : la chaîne d'origine.
-# 2. à défaut, NOTRE DERNIÈRE RELEASE PUBLIÉE, téléchargée depuis ce dépôt.
+# 2. à défaut, L'APK AMONT ARCHIVÉ SUR NOTRE RELEASE v1.0.25, téléchargé d'ici.
 #
 # L'amont a SUPPRIMÉ son asset `S0undTV/releases/download/beta/beta_144.apk`
 # (404 mesurée le 24/10, aucun instantané d'archive) : sans ce repli, aucun
 # clone neuf ne peut plus reconstruire — les trois runs CI du 24/10 sont tous
-# tombés sur ce téléchargement. La baseline publiée est ÉPINGLÉE à une version
-# (elle ne suit pas les bumps) : patch.py y rejoue tous les greffages, donc le
-# livrable ne dépend pas du choix de la source — un arbre déjà greffé repatché
-# converge vers l'arbre de référence (contrôlé : seul l'ordre des attributs XML
-# et les noms d'étiquettes changent, le dex recompilé est le même).
+# tombés sur ce téléchargement. Le repli servait d'abord notre propre release
+# v1.0.25 : la CI repartait alors d'un arbre DÉJÀ greffé et réencodé, ce qui
+# ne redonnait pas les octets du livrable de référence (`classes.dex` à
+# 128 octets d'écart) — d'où un run de tag qui remplaçait l'APK publié.
+# Depuis le 24/10 au soir, c'est l'APK amont lui-même (octets d'origine,
+# SHA-256 épinglé) qui est archivé sur la release v1.0.25 : la CI et le
+# mainteneur partent ainsi de la MÊME source, condition pour produire les
+# mêmes octets.
 UPSTREAM_APK="work/upstream/beta_144.apk"
 UPSTREAM_SHA256="578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0"
-BASELINE_URL="https://github.com/Endymi0n74/Twouich/releases/download/v1.0.25/Twouich_v1.0.25.apk"
-BASELINE_APK="work/upstream/baseline_v1.0.25.apk"
-BASELINE_SHA256="23d23872acb51c7127abf2621f61595591d0f4eae0b58dddcbcfcc965c4b5e4c"
+BASELINE_URL="https://github.com/Endymi0n74/Twouich/releases/download/v1.0.25/beta_144.apk"
+BASELINE_APK="work/upstream/baseline_beta_144.apk"
+BASELINE_SHA256="578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0"
 DECODED="work/decoded"
 BUILD_DIR="work/build"
 APKTOOL="tools/apktool-3.0.3.jar"
@@ -99,7 +102,7 @@ if [ -f "$UPSTREAM_APK" ] \
     echo "✅ APK amont en place (SHA-256) — chaîne d'origine"
 else
     echo "⬇️  APK amont absent (l'amont a supprimé son asset) :"
-    echo "    repli sur la dernière release publiée de ce dépôt"
+    echo "    repli sur l'APK amont archivé sur la release v1.0.25"
     if [ ! -f "$BASELINE_APK" ]; then
         curl -sSL --max-time 300 --retry 3 -o "$BASELINE_APK" "$BASELINE_URL"
     fi
