@@ -91,7 +91,7 @@ par le redécodage) : les deux chemins ne produisent donc **pas** les mêmes oct
 - Page « Application info » à l'écran : **Version name `v1.0.26`**, **Version code `173`**, Build type RELEASE, branche
   « Twouich master (fork de S0undTV) », Build time `24/10/2026 14:00` (date de release figée, 12:00 UTC).
 
-## Parcours de mise à jour 1.0.25 → 1.0.26 rejoué (BlueStacks, 24/10)^
+## Parcours de mise à jour 1.0.25 → 1.0.26 rejoué (BlueStacks, 24/10)
 
 - Rétrogradation volontaire : `adb install -r -d dist/Twouich_v1.0.25.apk` (`23d23872…`, l'asset de la release v1.0.25)
   → `versionCode 172`, `firstInstallTime` toujours `2026-10-05 14:13:09`.
