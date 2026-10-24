@@ -96,7 +96,9 @@ par le redécodage) : les deux chemins ne produisent donc **pas** les mêmes oct
 
 ## Ce qui a été publié et vérifié
 
-- v1.0.26 : release créée avec l'APK (11 323 517 o, `ae82fbac…`) et `changelog.html` ; `update.json` poussée après publication ; `check-release.sh` vert sur les quatre étages (livrable → `update.json` → tag → octets servis)
+- v1.0.26 : release créée avec l'APK (11 323 517 o, `ae82fbac…`) et `changelog.html` ; `update.json` poussée après publication
+(`ReleaseDate` = `publishedAt`, `2026-10-24T19:17:56Z`) ; `check-release.sh` vert sur les quatre étages, **octets servis
+revérifiés après le run de tag** ; CI verte : `40126044259` (master, non signée) et `40126046782` (tag, signée + publication)
 - v1.0.25 : release créée, APK + changelog uploadés, SHA-256 local = SHA-256 servi (vérifié par curl). **Asset remplacé depuis** : le rebuild sans points avait été poussé sur le dépôt, la release publiée garde `23d23872…` (source du repli baseline)
 - v1.0.24 : supprimée (tag distant `v1.0.24` supprimé, release supprimée)
 - anciennes releases v1.0.19–v1.0.23 : toutes supprimées (n'existaient pas sur GitHub à la date du nettoyage)
@@ -106,9 +108,13 @@ par le redécodage) : les deux chemins ne produisent donc **pas** les mêmes oct
 
 ## Ce qu'il reste à faire / surveiller
 
-- La CI reconstruit depuis le repli baseline et **écrase l'asset** au tag (étape `gh release upload --clobber`) : après un run
-de tag, revérifier que les octets servis sont bien ceux de `dist/` (`bash patch/check-release.sh`) et re-poser le livrable local
-si la CI a clobbéré un build différent. Constaté le 24/10 : la CI substitue un APK non testé sur appareil.
+- La CI reconstruit depuis le repli baseline et **écrase l'asset** au tag (étape `gh release upload --clobber`). Constaté le
+24/10 sur la v1.0.26 : le run de tag (vert, `40126046782`) a publié son propre build (`f0e6aecd…`, même taille, `classes2.dex`
+identique, `classes.dex` à 128 octets d'écart — ordre des attributs/étiquettes revisité par le redécodage). Le livrable
+`beta_144` (`ae82fbac…`) a été re-poussé après le run, et `check-release.sh` confirme `servi = local`. **Après chaque release :
+relancer `bash patch/check-release.sh` et re-poser `dist/` si la CI a substitué un build.**
+- Le contrôle « layout TV confronté à la capture de l'amont » est **sauté** (`⏭️`) sur un clone sans APK amont : il dit qu'il
+ne juge pas, les autres gardes TV restent actifs. Sur la machine du mainteneur (amont présent) il mord toujours.
 
 ## Preuves sur appareil (mesures du 24/10)
 
