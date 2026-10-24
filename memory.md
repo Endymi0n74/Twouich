@@ -82,6 +82,15 @@ par le redécodage) : les deux chemins ne produisent donc **pas** les mêmes oct
 - `device_ui` : 99/99 (harnais hors appareil, double adb)
 - self-test : 31/31
 
+## Vérification v1.0.26 sur BlueStacks (24/10, après publication)
+
+- `adb install -r dist/Twouich_v1.0.26.apk` → `Success` ; `firstInstallTime` inchangé (2026-10-05 14:13:09), session conservée.
+- **Octets installés = livrable** : `adb pull` de `base.apk` → SHA-256 `ae82fbacc1a72331cd03def99ad46e8dcacb6e2b7d3a35f95e8b1705a7705c80`, identique à `dist/`.
+- Lancement à froid (`force-stop` + `am start MainActivity`) : `SELFTEST 31/31 verifications, flux filtre : 328 octets`,
+  **0 FATAL / 0 ANR**, `topResumedActivity` = `MainActivity` puis `SettingsActivity`.
+- Page « Application info » à l'écran : **Version name `v1.0.26`**, **Version code `173`**, Build type RELEASE, branche
+  « Twouich master (fork de S0undTV) », Build time `24/10/2026 14:00` (date de release figée, 12:00 UTC).
+
 ## Devices (deux devices Android TV attachés)
 
 - TV : Android TV 11, 1920×1080, `RM-17325` (reste intact à chaque session de test téléphone)
