@@ -51,8 +51,14 @@ def load(name):
 
 
 def all_smali():
-    """Tout le greffon : un nouveau fichier smali est surveille sans rien changer ici."""
-    files = sorted(SMALI.glob("*.smali"))
+    """Tout le greffon : un nouveau fichier smali est surveille sans rien changer ici.
+
+    Les deux paquets du greffon comptent : `adblock/` (lecture, self-test) et
+    `phone/` (pastille de points, veille, disposition). Oublier `phone/` ici
+    laissait ses fichiers hors des regles d'opcodes ambigus et d'ecriture dans
+    un registre de parametre — precisement les deux fautes muettes de septembre.
+    """
+    files = sorted(SMALI.glob("*.smali")) + sorted(SMALI.parent.joinpath("phone").glob("*.smali"))
     if not files:
         raise SystemExit(f"aucun smali dans {SMALI}")
     return {f.name: f.read_text(encoding="utf-8") for f in files}
@@ -1212,6 +1218,162 @@ def main():
           and "if-nez v2, :done" in ticker_src,
           "isFinishing() non nul -> plus rien a rafraichir (`if-eqz` "
           "rafraichissait une activite morte et sautait les vivantes).")
+
+    # Pastille optionnelle (24/10) : appui long, choix persistant, et absence
+    # en incrustation. Ces trois gardes se ressemblent — deux tests de booleen
+    # et un seuil d'API — et une inversion ne se voit ni au build ni a
+    # l'installation : la pastille resterait simplement affichee.
+    gesture = phone / "PointsLongPress.smali"
+    gesture_src = gesture.read_text(encoding="utf-8") if gesture.is_file() else ""
+    check("points : le choix persistant et l'incrustation masquent la pastille",
+          "WatchPoints;->hidden(Landroid/content/Context;)Z" in joined
+          and "    if-nez v3, :points_gone_choice" in joined
+          and "    if-nez v4, :points_gone_pip" in joined
+          and "    if-eqz v3, :points_gone_choice" not in joined
+          and "    if-eqz v4, :points_gone_pip" not in joined
+          and "    if-lt v4, v5, :points_show" in joined
+          and "    if-ge v4, v5, :points_show" not in joined
+          and ":points_no_channel" in joined,
+          "attendu : `hidden` vrai (1) ET `isInPictureInPictureMode` vrai (1) "
+          "-> masquee, donc DEUX `if-nez` : `if-eqz` masquait la pastille quand "
+          "le choix etait faux, c'est-a-dire toujours (mesure du 24/10). "
+          "L'appel PiP n'a lieu qu'a partir de l'API 24 (`if-lt`) ; avec "
+          "`if-ge`, tout appareil moderne saute le test et la pastille reste "
+          "dans la petite fenetre.")
+    check("points : la cle du choix ne peut pas etre un login de chaine",
+          watch_src.count('"@badge_hidden"') >= 2
+          and '"badge_hidden"' not in watch_src.replace('"@badge_hidden"', "")
+          and "KEY_HIDDEN" not in watch_src
+          and "->getBoolean(Ljava/lang/String;Z)Z" in watch_src,
+          "les compteurs sont ranges sous le login de la chaine : une cle sans "
+          "« @ » (caractere impossible dans un login Twitch) ecraserait le "
+          "compteur d'une chaine portant ce nom.")
+    check("points : appui long pose une seule fois, sur les deux commandes",
+          "    if-nez v2, :points_bound" in joined
+          and "iput-boolean v2, p0, Lcom/s0und/s0undtv/activities/"
+              "PlayerActivity;->twouichPointsBound:Z" in joined
+          and joined.count("setOnLongClickListener") >= 2
+          and 'const-string v2, "twouich_phone_pip"' in joined
+          and '.implements Landroid/view/View$OnLongClickListener;' in gesture_src
+          and ".field private twouichPointsBound:Z" in patcher,
+          "le listener est repose a chaque rafraichissement (15 s) s'il n'est "
+          "pas marque : un appui en cours perdrait alors sa cible. Le bouton "
+          "d'incrustation doit AUSSI le recevoir : c'est le seul retour quand "
+          "la pastille est masquee. Et sans le champ declare, la classe est "
+          "rejetee par ART.")
+    hide_method = re.search(
+        r"(?ms)^\.method public static hide\(Landroid/view/View;Ljava/lang/String;\)V\n"
+        r".*?^\.end method$", watch_src)
+    hide_src = hide_method.group(0) if hide_method else ""
+    check("points : le journal ne dit que les passages, avec la raison",
+          hide_src.count("    if-nez v0, :done") == 1
+          and "    if-eqz v0, :done" not in hide_src
+          and hide_src.index("getVisibility()I") < hide_src.index("setVisibility(I)V")
+          and "WatchPoints;->hide(Landroid/view/View;Ljava/lang/String;)V" in joined
+          and '"points : pastille masquee (choix)"' in joined
+          and '"points : pastille masquee (incrustation)"' in joined
+          and "    if-eqz v3, :points_text" in joined,
+          "la cadence repasse toutes les 15 s : tracer chaque refus remplirait "
+          "le journal. `if-nez` sur la visibilite lue AVANT le masquage evite "
+          "le doublon quand elle etait deja GONE. La raison (chaine, choix, "
+          "incrustation) doit rester lisible sur place.")
+    check("points : l'appui long bascule dans le bon sens",
+          "    if-eqz v2, :hide_badge" in gesture_src
+          and -1 < gesture_src.find("const/4 v1, 0x1")
+          < gesture_src.find("if-eqz v2, :hide_badge")
+          and "WatchPoints;->toggle(Landroid/content/Context;)Z" in gesture_src
+          and "WatchPoints;->setHidden(Landroid/content/Context;Z)V" in gesture_src,
+          "la pastille (toggle = false) doit se masquer ; le bouton "
+          "d'incrustation bascule. `if-nez` inverserait les deux gestes : "
+          "un appui long sur la pastille l'afficherait.")
+    apply_src = patcher.split("PHONE_POINTS_APPLY_METHOD = r'''", 1)[-1].split("'''", 1)[0]
+    tick_src = patcher.split("PHONE_POINTS_TICK_METHOD = r'''", 1)[-1].split("'''", 1)[0]
+    wrapper_src = patcher.split("PHONE_POINTS_METHOD = r'''", 1)[-1].split("'''", 1)[0]
+    check("points : la visibilite a un seul proprietaire, sans effet de bord",
+          "WatchPoints;->enter" not in apply_src
+          and "PointsTicker;->start" not in apply_src
+          and "WatchPoints;->enter" in wrapper_src
+          and "PointsTicker;->start" in wrapper_src
+          and "twouichPhonePointsApply()V" in wrapper_src
+          and "invoke-static {p0}, Lcom/twouich/phone/WatchPoints;->tick" in tick_src
+          and "twouichPhonePointsApply()V" in tick_src
+          and "WatchPoints;->enter" not in tick_src
+          and "PointsTicker;->start" not in tick_src
+          and "twouichPhonePointsTick()V" in ticker_src
+          and "twouichPhonePointsApply()V" in gesture_src
+          and "twouichPhonePoints()V" not in ticker_src
+          and "twouichPhonePoints()V" not in gesture_src,
+          "l'appui long et la cadence ne doivent appeler que le proprietaire "
+          "de la vue : appeler twouichPhonePoints rouvrait la session (points "
+          "comptes en pause) et rearmerait le ticker.")
+    capture_points = constant("CHANNEL_POINTS_CALL")
+    check("points : la chaine captee ouvre la session au bon endroit",
+          "->twouichPhonePoints()V" in capture_points
+          and "->twouichTvInterface()Z" in capture_points
+          and "    if-nez v0, :tw_ch_points_ready" in capture_points
+          and "CHANNEL_CAPTURE_CALL_INSN + CHANNEL_POINTS_CALL" in patcher
+          and "CHANNEL_POINTS_CALL not in text" in patcher,
+          "a la premiere ouverture, x3() est le premier point ou lastChannel "
+          "est connu, apres onResume et la derniere passe de disposition : "
+          "sans cet appel, enter(null) sort et le compteur reste fige jusqu'a "
+          "un HOME + relance (mesure du 24/10 : 138 pts pendant cinq minutes). "
+          "Le garde TV evite d'ouvrir une session sans pastille.")
+    stop_src = re.search(
+        r"(?ms)^\.method public static stop\(\)V\n.*?^\.end method$", ticker_src)
+    check("points : stop() journalise sans deborder ses registres",
+          stop_src is not None and ".locals 3" in stop_src.group(0)
+          and "points : cadence arretee" in stop_src.group(0),
+          "une declaration `.locals 2` avec une chaine en v2 fait rejeter la "
+          "classe entiere par le verificateur ART (VerifyError mesure le "
+          "24/10 : le lecteur ne s'ouvre plus).")
+    check("points : la cadence survit a son propre tir",
+          "twouichPhonePointsTick()V" in ticker_src
+          and "Lcom/twouich/phone/PointsTicker;->ticker:Lcom/twouich/phone/PointsTicker;"
+              in ticker_src
+          and ticker_src.count("postDelayed(Ljava/lang/Runnable;J)Z") == 2
+          and "PointsTicker;->start" not in ticker_src.split(".method public run()V", 1)[-1]
+              .split(".end method", 1)[0]
+          and "sput-boolean v2, Lcom/twouich/phone/PointsTicker;->scheduled:Z" in ticker_src,
+          "le tir ne doit plus dependre de `twouichPhonePoints()` pour se "
+          "reprogrammer : cette methode ne touche plus que la vue. Sans le "
+          "`postDelayed` de `run()`, la pastille se fige apres 15 s (mesure "
+          "du 24/10 : 97 pts pendant deux minutes).")
+    leave_src = re.search(
+        r"(?ms)^\.method public static leave\(Landroid/content/Context;\)V\n"
+        r".*?^\.end method$", watch_src)
+    check("points : une pause de lecture ne fabrique pas de minute",
+          ".method public static setPlaying(Landroid/content/Context;Z)V" in watch_src
+          and ".field private static carry:J" in watch_src
+          and "->setPlaying(Landroid/content/Context;Z)V" in tick_src
+          and "    if-eqz p1, :paused" in watch_src
+          and "    if-nez p1, :paused" not in watch_src
+          and "invoke-interface {v1}, LG2/e1;->isPlaying()Z" in tick_src
+          and "LG6/i;->h()LG2/B;" in tick_src
+          and ".catch Ljava/lang/Exception; {:try_start_points .. :try_end_points} "
+              ":catch_points" in tick_src
+          and leave_src
+          and "carry:J" in leave_src.group(0)
+          and "sput-wide v0, Lcom/twouich/phone/WatchPoints;->carry:J" in watch_src,
+          "la cadence doit lire l'etat de lecture : en pause, le temps couru "
+          "passe dans `carry` au lieu d'etre solde. `leave()` remet ce reliquat "
+          "a zero, sinon une pause d'application rendrait des minutes d'une "
+          "autre session.")
+    check("points : la bascule rend bien l'etat inverse",
+          "    if-eqz v0, :apply" in watch_src
+          and -1 < watch_src.find("const/4 v1, 0x1")
+          < watch_src.find("if-eqz v0, :apply")
+          and "const/4 v1, 0x0" in watch_src,
+          "visible (0) -> masquer (1) ; deja masquee -> afficher (0). "
+          "Un `if-nez` rendrait le bouton inoperant : il remasquerait une "
+          "pastille deja masquee.")
+    pip_points = constant("PHONE_PIP_POINTS_APPLY")
+    check("points : l'incrustation passe par le proprietaire unique",
+          "->twouichPhonePointsApply()V" in pip_points
+          and "setVisibility(I)V" not in pip_points
+          and "''' + PHONE_PIP_POINTS_APPLY + PHONE_PIP_HIDE_TRACE + r'''" in patcher,
+          "le callback ne decide plus lui-meme : il appelle le proprietaire "
+          "unique, qui lit isInPictureInPictureMode a l'entree ET a la sortie "
+          "— c'est le retour de la pastille, jamais mesure jusqu'ici.")
 
     # --- rapport ----------------------------------------------------------------
     width = max(len(label) for label, _, _ in checks)

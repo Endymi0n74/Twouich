@@ -119,7 +119,7 @@
 
 # Arrete la cadence (lecteur en pause) : le message en attente est retire.
 .method public static stop()V
-    .locals 2
+    .locals 3
 
     const/4 v0, 0x0
 
@@ -137,13 +137,19 @@
 
     invoke-virtual {v1, v0}, Landroid/os/Handler;->removeCallbacks(Ljava/lang/Runnable;)V
 
+    const-string v1, "Twouich"
+
+    const-string v2, "points : cadence arretee"
+
+    invoke-static {v1, v2}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
+
     :done
     return-void
 .end method
 
 
 .method public run()V
-    .locals 3
+    .locals 4
 
     const/4 v0, 0x0
 
@@ -170,7 +176,28 @@
     # `if-nez` : l'activite se termine (non nul) -> plus rien a rafraichir.
     if-nez v2, :done
 
-    invoke-virtual {v1}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhonePoints()V
+    # Solde la minute courue puis rafraichit la VUE : ni enter (ouvrir une
+    # session) ni start (se rearmarmer). C'est le cycle de vie qui ouvre/ferme.
+    invoke-virtual {v1}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhonePointsTick()V
+
+    # Le tir se reprogramme lui-meme : la methode de points ne touche plus que
+    # la vue et ne rearme donc plus la cadence. Un `start()` ici journaliserait
+    # « cadence posee » toutes les 15 s ; on repose directement le message.
+    sget-object v1, Lcom/twouich/phone/PointsTicker;->ticker:Lcom/twouich/phone/PointsTicker;
+
+    if-eqz v1, :done
+
+    invoke-static {}, Lcom/twouich/phone/PointsTicker;->handler()Landroid/os/Handler;
+
+    move-result-object v0
+
+    const/4 v2, 0x1
+
+    sput-boolean v2, Lcom/twouich/phone/PointsTicker;->scheduled:Z
+
+    const-wide/16 v2, 0x3a98
+
+    invoke-virtual {v0, v1, v2, v3}, Landroid/os/Handler;->postDelayed(Ljava/lang/Runnable;J)Z
 
     :done
     return-void

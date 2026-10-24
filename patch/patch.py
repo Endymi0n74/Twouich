@@ -517,7 +517,7 @@ def install_early_channel_capture(text: str) -> str:
             fail("PlayerActivity.onCreate : invoke-super ambigu, capture precoce "
                  "impossible")
         text = text.replace(ONCREATE_SUPER, ONCREATE_SUPER + ONCREATE_CHANNEL_CAPTURE, 1)
-    if CHANNEL_CAPTURE_CALL not in text:
+    if CHANNEL_CAPTURE_CALL_INSN not in text:
         start = text.find(X3_SIGNATURE)
         if start < 0:
             fail("PlayerActivity.x3(int, String, P6.d.o) introuvable : la chaine "
@@ -528,7 +528,7 @@ def install_early_channel_capture(text: str) -> str:
         if locals_match is None:
             fail("PlayerActivity.x3 : directive .locals absente")
         at = start + locals_match.end()
-        text = text[:at] + "\n" + CHANNEL_CAPTURE_CALL + text[at:]
+        text = text[:at] + "\n" + CHANNEL_CAPTURE_CALL_INSN + text[at:]
     return text
 
 

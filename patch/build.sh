@@ -4,19 +4,34 @@
 # ═══════════════════════════════════════════════════════════════════════
 # Usage :  cd /d/Codex/Twouich && bash patch/build.sh
 #
-# Chaîne : APK upstream → apktool d → patch.py → apktool b → signature
+# Chaîne : APK de référence → apktool d → patch.py → apktool b → signature
 #          v1+v2+v3 → vérification → dist/Twouich_v1.0.1.apk
-# Tout est rejouable : les patchs sont dans patch/, l'APK upstream est
-# retéléchargé si besoin, la clé vit dans keys/ (jamais versionnée).
+# Tout est rejouable : les patchs sont dans patch/, l'APK de référence est
+# retéléchargé si besoin (empreinte épinglée), la clé vit dans keys/ (jamais
+# versionnée).
 # ═══════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-UPSTREAM_URL="https://github.com/S0und/S0undTV/releases/download/beta/beta_144.apk"
+# ── APK de référence : deux sources, une seule empreinte chacune ─────────────
+# 1. la copie locale de l'APK amont (beta_144) : la chaîne d'origine.
+# 2. à défaut, NOTRE DERNIÈRE RELEASE PUBLIÉE, téléchargée depuis ce dépôt.
+#
+# L'amont a SUPPRIMÉ son asset `S0undTV/releases/download/beta/beta_144.apk`
+# (404 mesurée le 24/10, aucun instantané d'archive) : sans ce repli, aucun
+# clone neuf ne peut plus reconstruire — les trois runs CI du 24/10 sont tous
+# tombés sur ce téléchargement. La baseline publiée est ÉPINGLÉE à une version
+# (elle ne suit pas les bumps) : patch.py y rejoue tous les greffages, donc le
+# livrable ne dépend pas du choix de la source — un arbre déjà greffé repatché
+# converge vers l'arbre de référence (contrôlé : seul l'ordre des attributs XML
+# et les noms d'étiquettes changent, le dex recompilé est le même).
 UPSTREAM_APK="work/upstream/beta_144.apk"
 UPSTREAM_SHA256="578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0"
+BASELINE_URL="https://github.com/Endymi0n74/Twouich/releases/download/v1.0.25/Twouich_v1.0.25.apk"
+BASELINE_APK="work/upstream/baseline_v1.0.25.apk"
+BASELINE_SHA256="517af65c48e374665b3638b2e860524f0894bfee6388e28c182cba07261571f9"
 DECODED="work/decoded"
 BUILD_DIR="work/build"
 APKTOOL="tools/apktool-3.0.3.jar"
@@ -53,9 +68,9 @@ if [ "$SKIP_SIGNING" != "1" ] && [ -z "$KEY_PASS" ]; then
     exit 1
 fi
 
-VERSION_CODE=171
-VERSION_NAME="v1.0.24"
-APK_NAME="Twouich_v1.0.24.apk"
+VERSION_CODE=172
+VERSION_NAME="v1.0.25"
+APK_NAME="Twouich_v1.0.25.apk"
 # Date AFFICHÉE dans la page « Nouveautés » embarquée — constante figée par
 # version, jamais la date du jour : sinon chaque rebuild change les octets du
 # livrable (build reproductible). À faire évoluer au prochain bump de version.
@@ -76,15 +91,21 @@ else
 fi
 command -v python >/dev/null 2>&1 || { echo "❌ python introuvable"; exit 1; }
 
-# ── 1. APK upstream (vérification d'intégrité) ──
+# ── 1. APK de référence (vérification d'intégrité) ──
 mkdir -p work/upstream work/build dist
-if [ ! -f "$UPSTREAM_APK" ]; then
-    echo "⬇️  Téléchargement de l'APK upstream…"
-    curl -sSL --max-time 300 -o "$UPSTREAM_APK" "$UPSTREAM_URL"
+if [ -f "$UPSTREAM_APK" ] \
+        && echo "$UPSTREAM_SHA256  $UPSTREAM_APK" | sha256sum -c - >/dev/null 2>&1; then
+    echo "✅ APK amont en place (SHA-256) — chaîne d'origine"
+else
+    echo "⬇️  APK amont absent (l'amont a supprimé son asset) :"
+    echo "    repli sur la dernière release publiée de ce dépôt"
+    if [ ! -f "$BASELINE_APK" ]; then
+        curl -sSL --max-time 300 --retry 3 -o "$BASELINE_APK" "$BASELINE_URL"
+    fi
+    echo "$BASELINE_SHA256  $BASELINE_APK" | sha256sum -c - >/dev/null \
+        || { echo "❌ SHA-256 de la baseline publiée inattendu — abandon"; exit 1; }
+    echo "✅ Baseline publiée conforme (SHA-256)"
 fi
-echo "$UPSTREAM_SHA256  $UPSTREAM_APK" | sha256sum -c - >/dev/null \
-    || { echo "❌ SHA-256 de l'APK upstream inattendu — abandon"; exit 1; }
-echo "✅ APK upstream conforme (SHA-256)"
 
 # ── 2. Désassemblage ──
 # L'arbre est réutilisé d'un build à l'autre (le désassemblage coûte cher), mais un

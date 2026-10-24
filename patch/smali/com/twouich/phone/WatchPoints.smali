@@ -21,6 +21,11 @@
 
 .field private static since:J
 
+# Temps deja couru avant une pause de lecture, rendu a la reprise. Une pause
+# ne doit pas fabriquer de minute : la cadence met le temps de cote au lieu de
+# le solder, et `leave()` (onPause) remet ce reliquat a zero.
+.field private static carry:J
+
 
 .method public constructor <init>()V
     .locals 0
@@ -163,6 +168,10 @@
 
     sput-wide v0, Lcom/twouich/phone/WatchPoints;->since:J
 
+    const-wide/16 v0, 0x0
+
+    sput-wide v0, Lcom/twouich/phone/WatchPoints;->carry:J
+
     const-string v2, "Twouich"
 
     const-string v3, "points : session ouverte"
@@ -170,6 +179,94 @@
     invoke-static {v2, v3}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
 
     :done
+    return-void
+.end method
+
+
+# Met le compteur en accord avec l'etat de lecture. En pause, le temps couru
+# passe dans `carry` et `since` revient a zero : plus aucune minute ne se
+# solde tant que la video est arretee. A la reprise, `since` repart en arriere
+# de `carry`, donc le reliquat est rendu sans etre invente.
+.method public static setPlaying(Landroid/content/Context;Z)V
+    .locals 6
+
+    sget-wide v2, Lcom/twouich/phone/WatchPoints;->since:J
+
+    const-wide/16 v0, 0x0
+
+    cmp-long v4, v2, v0
+
+    # `if-eqz` : p1 faux (0) -> branche de pause. Un `if-nez` inversait
+    # pause et lecture, donc le compteur se figeait des le premier tir
+    # (mesure du 24/10 : `lecture en cours` suivi de `pause lecture`).
+    if-eqz p1, :paused
+
+    # Deja en cours : rien a rendre.
+    if-nez v4, :done
+
+    sget-object v4, Lcom/twouich/phone/WatchPoints;->channel:Ljava/lang/String;
+
+    # Sans chaine, il n'y a pas de session a reprendre.
+    if-eqz v4, :done
+
+    sget-wide v2, Lcom/twouich/phone/WatchPoints;->carry:J
+
+    invoke-static {}, Ljava/lang/System;->currentTimeMillis()J
+
+    move-result-wide v0
+
+    sub-long v2, v0, v2
+
+    sput-wide v2, Lcom/twouich/phone/WatchPoints;->since:J
+
+    const-wide/16 v2, 0x0
+
+    sput-wide v2, Lcom/twouich/phone/WatchPoints;->carry:J
+
+    const-string v2, "Twouich"
+
+    const-string v3, "points : reprise lecture"
+
+    invoke-static {v2, v3}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
+
+    return-void
+
+    :paused
+    # Deja en pause : le temps est deja mis de cote.
+    if-eqz v4, :done
+
+    invoke-static {}, Ljava/lang/System;->currentTimeMillis()J
+
+    move-result-wide v0
+
+    sget-wide v2, Lcom/twouich/phone/WatchPoints;->since:J
+
+    sub-long v0, v0, v2
+
+    sput-wide v0, Lcom/twouich/phone/WatchPoints;->carry:J
+
+    const-wide/16 v0, 0x0
+
+    sput-wide v0, Lcom/twouich/phone/WatchPoints;->since:J
+
+    const-string v2, "Twouich"
+
+    const-string v3, "points : pause lecture"
+
+    invoke-static {v2, v3}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
+
+    :done
+    return-void
+.end method
+
+
+# Solde la session en cours sans l'ouvrir ni la fermer : c'est le geste de la
+# cadence (rafraichir l'etiquette chaque minute), jamais un redemarrage.
+.method public static tick(Landroid/content/Context;)V
+    .locals 0
+
+    invoke-static {p0}, Lcom/twouich/phone/WatchPoints;->flush(Landroid/content/Context;)V
+
     return-void
 .end method
 
@@ -188,7 +285,131 @@
 
     sput-wide v0, Lcom/twouich/phone/WatchPoints;->since:J
 
+    sput-wide v0, Lcom/twouich/phone/WatchPoints;->carry:J
+
     return-void
+.end method
+
+
+# Cle du choix : « @ » ne peut pas commencer un login Twitch, donc elle ne peut
+# pas ecraser le compteur d'une chaine (pas de champ dedie : smali n'en a pas
+# besoin et un champ mort se relit comme une intention).
+# La pastille est-elle masquee par choix ? Defaut : affichee (false).
+.method public static hidden(Landroid/content/Context;)Z
+    .locals 3
+
+    const/4 v1, 0x0
+
+    # Sans contexte, on ne masque pas : un appel defectueux ne doit pas faire
+    # disparaitre l'affichage, seulement le laisser tel qu'il est.
+    if-eqz p0, :answer
+
+    invoke-static {p0}, Lcom/twouich/phone/WatchPoints;->prefs(Landroid/content/Context;)Landroid/content/SharedPreferences;
+
+    move-result-object v0
+
+    const-string v2, "@badge_hidden"
+
+    invoke-interface {v0, v2, v1}, Landroid/content/SharedPreferences;->getBoolean(Ljava/lang/String;Z)Z
+
+    move-result v1
+
+    :answer
+    return v1
+.end method
+
+
+# Enregistre le choix : une ecriture par appui, pas une par minute.
+.method public static setHidden(Landroid/content/Context;Z)V
+    .locals 4
+
+    if-eqz p0, :done
+
+    invoke-static {p0}, Lcom/twouich/phone/WatchPoints;->prefs(Landroid/content/Context;)Landroid/content/SharedPreferences;
+
+    move-result-object v0
+
+    invoke-interface {v0}, Landroid/content/SharedPreferences;->edit()Landroid/content/SharedPreferences$Editor;
+
+    move-result-object v1
+
+    const-string v2, "@badge_hidden"
+
+    invoke-interface {v1, v2, p1}, Landroid/content/SharedPreferences$Editor;->putBoolean(Ljava/lang/String;Z)Landroid/content/SharedPreferences$Editor;
+
+    move-result-object v1
+
+    invoke-interface {v1}, Landroid/content/SharedPreferences$Editor;->apply()V
+
+    # Une ligne par choix : elle dit au journal si la pastille a disparu par
+    # preference ou pour une autre raison.
+    if-eqz p1, :visible
+
+    const-string v2, "points : pastille masquee (choix)"
+
+    goto :trace
+
+    :visible
+    const-string v2, "points : pastille affichee (choix)"
+
+    :trace
+    const-string v3, "Twouich"
+
+    invoke-static {v3, v2}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
+
+    :done
+    return-void
+.end method
+
+
+# Masque la pastille et ne trace QUE le passage visible -> masquee : la cadence
+# repasse toutes les 15 s, une ligne par passage remplirait le journal. La
+# raison vient de l'appelant (chaine inconnue, choix, incrustation).
+.method public static hide(Landroid/view/View;Ljava/lang/String;)V
+    .locals 3
+
+    if-eqz p0, :done
+
+    invoke-virtual {p0}, Landroid/view/View;->getVisibility()I
+
+    move-result v0
+
+    const/16 v1, 0x8
+
+    invoke-virtual {p0, v1}, Landroid/view/View;->setVisibility(I)V
+
+    # `if-nez` : deja masquee (non nul) -> rien de neuf a dire.
+    if-nez v0, :done
+
+    const-string v1, "Twouich"
+
+    invoke-static {v1, p1}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
+
+    :done
+    return-void
+.end method
+
+
+# Bascule le choix et renvoie le nouvel etat (true = masquee).
+.method public static toggle(Landroid/content/Context;)Z
+    .locals 2
+
+    invoke-static {p0}, Lcom/twouich/phone/WatchPoints;->hidden(Landroid/content/Context;)Z
+
+    move-result v0
+
+    const/4 v1, 0x1
+
+    # `if-eqz` : visible (0) -> on masque, v1 reste 1. Deja masquee -> on
+    # affiche (v1 = 0). Inverser ces deux cas rendrait le bouton inoperant.
+    if-eqz v0, :apply
+
+    const/4 v1, 0x0
+
+    :apply
+    invoke-static {p0, v1}, Lcom/twouich/phone/WatchPoints;->setHidden(Landroid/content/Context;Z)V
+
+    return v1
 .end method
 
 

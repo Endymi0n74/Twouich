@@ -1710,13 +1710,18 @@ premiers avaient dérivé du troisième sans que rien ne le dise — ils étaien
 donc verts, et le self-test affichait `28/28` sur l'écart. C'est la réextraction du graphe depuis
 l'APK **livré** qui a tranché.
 
-**Relire le comparateur dans les octets publiés** (aucune installation, aucun arbre de travail) :
+**Relire le comparateur dans les octets publiés** (aucune installation) :
 
 ```bash
-java -jar tools/apktool-3.0.3.jar d -f -r -o work/verify/upd2 dist/Twouich_v1.0.15.apk
-# -r : ressources sautées (inutiles ici), -s : sources java sautées
+# L'APK qui portait la mesure (v1.0.15) n'existe plus — ni en local, ni sur une
+# release. Le ménage du 24/10 a aussi retiré l'arbre décodé de cette vérification :
+# on relit les octets publiés courants (même branche b()V) et l'arbre se recrée
+# dans work/verify/upd.
+curl -sSL -o /tmp/twouich-publie.apk\
+  https://github.com/Endymi0n74/Twouich/releases/download/v1.0.24/Twouich_v1.0.24.apk
+java -jar tools/apktool-3.0.3.jar d -f -r -o work/verify/upd /tmp/twouich-publie.apk
 sed -n '/^\.method b()V/,/^\.end method/p' \
-  work/verify/upd2/smali_classes2/com/s0und/s0undtv/helpers/a.smali
+  work/verify/upd/smali_classes2/com/s0und/s0undtv/helpers/a.smali
 ```
 
 Ce qu'on y lit (et ce que les miroirs ne disaient pas) : la branche Beta charge l'entrée **stable**
@@ -2886,3 +2891,34 @@ quittée, en plus de celle de la saisie), `chat-video` (145×830 px de recouvrem
 `chat-saisie` (867×208 px). `test_device_ui.sh` **88 → 99 vérifications** ; **mordance** : `chat_node`
 rendu aveugle → 10 échecs nommés ; restauré, 99/99. Le harnais tourne dans la CI à chaque push
 et chaque release (branche le 07/10, verdict `88/88` observé dans le log du run `37583376296`).
+
+### 8.27 Appui long et PiP : le geste, ses coordonnées, et la sortie d'incrustation (24/10/2026)
+
+**L'appui long s'injecte avec un `swipe` immobile** — c'est le seul moyen sans instrumenter
+l'application :
+
+```bash
+ADB="/c/Program Files/BlueStacks_nxt/HD-Adb.exe"; S=emulator-5554
+"$ADB" -s $S shell input swipe 57 71 57 71 800     # appui long de 800 ms en (57,71)
+```
+
+Un `input tap` ne déclenche PAS un `OnLongClickListener` (durée nulle). En dessous de ~500 ms,
+Android ne le voit pas non plus. **800 ms** est passé sur BlueStacks comme sur le téléphone.
+
+**Piège de coordonnées (payé)** : `dumpsys activity top`, dans sa section `View Hierarchy:`, affiche
+les positions **relatives au parent** (`mLeft`/`mTop`), pas les coordonnées écran. La pastille de
+points y apparaît `12,12-103,58` alors qu'à l'écran elle est à `y=48` (parent `container` décalé de
+36 px par la barre d'état) : un appui long à `(57,35)` tombe dans la barre d'état et ne fait rien.
+Prendre les bornes dans `uiautomator dump` (coordonnées écran) ou ajouter l'origine du parent.
+
+**Preuve d'un masquage** : `dumpsys activity top | grep twouich_phone_points` donne l'état de la vue
+(`V…` visible, `G…` gone) et ses bornes — c'est plus fiable qu'une capture pour dire *pourquoi* une
+pastille est absente. Les traces du greffon disent la raison sur passage : `points : pastille
+masquee (choix)` ou `(incrustation)`.
+
+**Sortie d'incrustation sur BlueStacks** : les contrôles du PiP (engrenage, croix, agrandir)
+n'apparaissent qu'au premier tap dans la fenêtre et disparaissent en ~3 s ; deux taps enchaînés
+(`input tap` puis `input tap` sur l'icône « agrandir ») n'ont pas été rejoués avec succès dans cette
+session. Ce qui marche à coup sûr : `am force-stop com.s0und.s0undtv` (le PiP meurt avec
+l'activité), puis relancer et rouvrir le direct — la préférence d'affichage survit, ce qui prouve
+la persistance mais **pas** le retour immédiat à la sortie du PiP.

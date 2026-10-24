@@ -836,3 +836,220 @@ l'ordre : (1) héberger la copie cachetée comme asset du dépôt (nécessite l'
 redistribution d'un binaire tiers), (2) rebaser sur la dernière release amont disponible
 (`v1.5.10x`, 143) — gros chantier, tous les motifs d'APK sont à revalider, (3) accepter des releases
 construites localement, CI rouge sur les tags.
+
+## 2026-10-24 — Pastille de points optionnelle : appui long, préférence, et absence en incrustation
+
+**Sur disque, ni commité ni publié** (l'APK 171 publié garde la pastille permanente ; pas de bump de
+version, donc `update.json` reste exact et `test_apk` vert). L'entrée de `CHANGELOG-twouich.md`
+viendra au prochain bump, avec la release.
+
+**Ce que ça fait.** La pastille du lecteur téléphone est devenue optionnelle : **appui long sur la
+pastille** → elle disparaît, et le choix est écrit dans les SharedPreferences du compteur
+(`twouich_watch_points`, clé `@badge_hidden` — le `@` ne peut pas commencer un login Twitch, donc
+aucune collision avec un compteur de chaîne ; défaut : affichée). Une fois masquée, elle n'est plus
+atteignable : **appui long sur le bouton picture-in-picture** bascule le choix dans l'autre sens, et
+le Toast du masquage nomme ce chemin de retour (« Points masqués — appui long sur le bouton PiP pour
+les réafficher »). En **incrustation**, la pastille est retirée deux fois : explicitement à l'entrée
+(`PHONE_PIP_POINTS_HIDE`, après le garde TV du rappel PiP) et à chaque rafraîchissement par un test
+`isInPictureInPictureMode` gardé API 24. La **TV ne bouge pas** : appel des points après
+`twouichTvInterface()` dans `twouichPhoneStackedLayout`, vue absente des trois qualifiers
+(`aapt2 dump xmltree` : identifiant `0x7f0b03cd` présent **1** fois en `layout/`, **0** en
+`layout-television`/`sw600dp`/`sw540dp`), et masquage PiP placé lui aussi après le garde TV.
+
+**Nouveaux fichiers/points d'accroche** : `patch/smali/com/twouich/phone/PointsLongPress.smali`
+(`View$OnLongClickListener`, deux modes : masquer / basculer, Toast) ; champ
+`twouichPointsBound:Z` dans `PlayerActivity` pour ne poser le listener qu'une fois (sinon le
+rafraîchissement de 15 s le remplaçait pendant un appui) ; `WatchPoints.hidden/setHidden/toggle/
+hide(View,String)` — `hide` ne trace que le **passage** visible → masquée, avec la raison (chaîne,
+choix, incrustation), sinon la cadence remplissait le journal.
+
+**Deux polarités inversées, trouvées à l'écran, pas au build.** Première version : `if-eqz` sur le
+résultat de `hidden()` et sur `isInPictureInPictureMode()`. En Dalvik `if-eqz` branche quand la
+valeur est **fausse** (0) : la pastille était donc masquée exactement quand le choix disait
+« affichée » — invisible en permanence, sans une erreur. Correction en `if-nez` aux deux endroits,
+et le test de `§23` refuse désormais explicitement les formes `if-eqz`. C'est la même famille que
+les six inversions du 23/10 : **le build et `aapt2` ne voient rien**, seul l'appareil le dit. Le
+diagnostic a coûté trois builds parce que le journal ne traçait que les passages : la trace
+inconditionnelle temporaire a été retirée après la mesure.
+
+**Doublon silencieux** : sur un arbre **neuf**, `twouichPhonePoints` arrivait par deux chemins (la
+canonisation de `patch.py` puis le gabarit `player_methods`), donc **deux** déclarations dans
+`PlayerActivity`. Le dex les fusionnait (même SHA avant/après), mais la source était fausse. La
+déduplication vit maintenant dans `write_player()`, seul point qui voit le texte final.
+
+**Mesures BlueStacks 720×1280/240, flux live (Coffee).** Pastille `23 pts` : vue `12,12-103,58`
+dans le parent `container` (écran `y=48`), 91×46 px. Appui long 800 ms → vue `G`, journal
+`points : pastille masquee (choix)` deux fois (écriture + application), Toast affiché, vidéo
+dégagée (`work/pill_off.png`, avec le Toast dans `work/pill_off_toast.png`). Appui long PiP →
+`points : pastille affichee (choix)` puis `points : pastille affichee`, vue `V`. Tap PiP →
+`points : pastille masquee (incrustation)` + `picture-in-picture : video plein cadre, chat, saisie
+et points masques`, tâche `mode=pinned`, fenêtre 293×165 **sans pastille** (`work/pip_off.png`,
+agrandie dans `work/pip_off_zoom.png`). Préférence conservée après `am force-stop` et relance :
+pastille de retour (`work/pill_back.png`).
+
+**Suites** : `test_smali_branches` **93/93** (+7, dont la polarité des deux gardes et la trace de
+passage, mordance vérifiée par mutation sur une copie : `if-eqz` → 1 KO, garde de `hide` inversée →
+2 KO), `test_apk` **76 verdicts** (+2 : clé `@badge_hidden` + `PointsLongPress` dans le dex,
+identifiant de la pastille présent au téléphone et absent des layouts TV), `patch.py` **236
+contrôles** (+6), `test_sanitizer`, `test_update_check` 26/26, `test_script_paths` 51/51,
+`test_brand`, `test_normalize_apk`, `test_radar`, `test_check_secrets`, `device_ui` 99/99,
+`analyzer` 11/11, `check-secrets`, `sync-readme --check`. Livrable de travail :
+`dist/Twouich_v1.0.24.apk`, SHA-256 `3e31a569ceb8d539bdae47e281aef9aef9d3015b7fce2913a7b4a7f879378321`,
+installé par `install -r` (octets relus identiques).
+
+**Non mesuré** : le retour **immédiat** de la pastille à la sortie d'incrustation — impossible de
+quitter le PiP de BlueStacks au doigt dans cette session (les contrôles système disparaissent en
+~3 s ; `am force-stop` a servi, ce qui prouve la persistance mais pas ce chemin). Le rendu TV n'a
+pas été rouvert à l'écran (preuve `aapt2` + ordre du code). Le ménage demandé (`work/`, runs CI,
+dépôt distant) n'a pas été entamé : passe séparée.
+
+## Ménage du 24/10/2026 — `work/`, CI, dépôt distant
+
+**Avant/après.** `work/` pesait **2 063 Mo / 225 753 fichiers** ; il en reste **211 Mo / 16 506**.
+Retirés : 23 dossiers d'atelier (1 297 Mo) — `decoded.stale`, `decoded-no-quick-actions`,
+`fresh-check`, `cmp-published`, `cmp-local`, `repro-local`, `repro-remote`,
+`repro-normalized-{local,remote}`, `verify-pass1`, `ddec`, `idec`, `idem_ref`, `inst_check`,
+`pristine_tv`, `idex`, `faux`, `emu35_seq`, `bs33_seq`, `fuite_00999d6`, `ibk`, `__pycache__`,
+`build` — et **477 fichiers racine non cités** (441 Mo) : 18 copies d'APK, `dex{,2,3}.txt`
+(98 Mo), `vaft-live.log` (20 Mo), 195 captures, 91 journaux, 115 xml/txt, 25 scripts `apply_*`.
+
+**Gardé, et pourquoi.** `work/upstream/beta_144.apk` (empreinte `578da49b…` revérifiée) : seule
+source de build depuis la 404 amont. `work/decoded` (114 Mo) + `decoded.twouich-greffes` : arbre de
+travail courant, régénérable, gardé pour ne pas repayer le décodage (et parce que l'empreinte des
+greffes doit rester avec lui). `work/device-test` (79 Mo) : preuves citées par `AUDIT.md`
+(`pods/`, `mutate_check.py`, `verify_dumps.py`, `logcat-sentinel-live-18-09.txt`). `work/captures`
+et `work/tmp` réduits à leurs fichiers cités ; images de preuve de la pastille
+(`pill_on`, `pill_off`, `pill_off_toast`, `pip_off`, `pip_off_zoom`, `pip_tap_zoom` + `_small`) et
+`SelfTest.good.smali`, `changelog.html`, `etat1.txt`, `ui.xml`, `mordance_beta.py`,
+`mutate_selftest_beta.py` conservés. Critère : tout chemin cité dans `AGENTS.md`, `AUDIT.md`,
+`CHANGELOG`, `memory.md`, `TEST-DEVICE.md` est gardé ; le reste est de l'atelier.
+
+**Une exception assumée.** `work/verify/upd2` (arbre décodé de `v1.0.15`, cité par `TEST-DEVICE.md`
+pour relire `helpers/a.smali`) a été emporté : son APK source n'existe plus ni en local (`dist/`
+commence à `v1.0.19`) ni sur GitHub (pas de release `v1.0.15`). La recette était donc déjà non
+rejouable localement ; le constat, lui, reste écrit.
+
+**Dépôt distant : rien de mort.** Une branche (`master`), 23 tags (v1.0.0→v1.0.24), 4 releases (v1.0.21→24),
+**0 artefact**, **0 cache**, aucun run annulé. Les 4 seuls runs en échec (23/10, v1.0.24) sont
+conservés : ils sont la trace de la 404 amont et donc du diagnostic CI. Le tag `v1.0.24` n'existe
+qu'à distance (absent en local) — sans effet sur la chaîne, `update.json` pointe le tag publié.
+
+**Piège à ne pas rouvrir.** `dist/Twouich_v1.0.24.apk` est le **rebuild local** de la pastille
+optionnelle (`3e31a569…`), pas les octets publiés (`517af65c…`) : `check-release.sh` est donc rouge
+à l'étage 4, et c'est normal tant qu'aucun bump n'est publié. Ne pas annoncer cette version.
+Le ménage n'a pas touché `dist/`, `keys/`, `patch/` ni `update.json`.
+
+## Build froid sur l'arbre élagué (24/10/2026)
+
+Arbre chaud mis de côté, puis **désassemblage neuf** depuis `work/upstream/beta_144.apk` (SHA-256
+vérifiée), `patch.py`, `apktool b`, normalisation ZIP, signature : `EXIT=0`, signature
+`verified [v1, v2, v3]`. Le livrable est **identique octet pour octet** au build d'avant le ménage :
+`3e31a569ceb8d539bdae47e281aef9aef9d3015b7fce2913a7b4a7f879378321` (`cmp` avec la copie de
+sauvegarde). L'empreinte des greffes `ec73e25f…` est revenue identique sur l'arbre neuf.
+
+Toutes les suites repassent : `test_apk` **76 verdicts** sur ce livrable (dont `@badge_hidden`,
+`PointsLongPress`, `twouich_phone_points` présent au téléphone et absent des trois layouts TV),
+`test_smali_branches` 93/93, `test_update_check` 26/26, `test_script_paths` 51/51,
+`test_normalize_apk` OK **avec ses six contrôles sur l'APK réel** (plus aucun saut : `work/build`
+existe), `test_sanitizer`, `test_brand`, `test_radar` 10/10, `test_vaft` 20/20,
+`test_check_secrets`, `check-secrets` (136 fichiers), `sync-readme --check`, `phone_geometry`,
+`analyzer` 11/11, `device_ui` 99/99. Self-test embarqué sur l'appareil : **SELFTEST 31/31**.
+
+`work/` pèse 222 Mo après reconstruction (dont `work/build` 10,6 Mo et `work/testlogs`). Rien de
+cassé par le ménage ; rien republié ni commité. `check-release.sh` reste rouge à l'étage 4 pour la
+raison déjà consignée (livrable local `3e31a5…` ≠ octets publiés `517af65c…`).
+
+## Pastille optionnelle : un seul propriétaire, et la cadence se réarme seule (24/10/2026)
+
+L'audit avait raison sur le fond : le geste d'appui long appelait `twouichPhonePoints()`, qui
+rouvrait la session de comptage et réarmait la cadence. Trois propriétaires de la visibilité
+(garde dans `twouichPhonePoints`, callback PiP, ticker) sont réduits à un :
+**`twouichPhonePointsApply()` ne fait que la vue** — ni `WatchPoints.enter`, ni
+`PointsTicker.start`. Le cycle de vie (`twouichPhonePoints`) ouvre la session et arme la cadence ;
+le ticker solde (`WatchPoints.tick`) et rappelle `apply` ; le geste et le callback PiP appellent
+`apply` seuls. Le champ mort `KEY_HIDDEN` a disparu et `TEST-DEVICE.md` ne cite plus
+`work/verify/upd2` (la recette décode désormais `work/verify/upd`).
+
+**Régression trouvée en cours de route** : le tir de la cadence ne se reprogrammait que par effet
+de bord de `twouichPhonePoints()` ; comme la méthode ne fait plus que la vue, la pastille s'est
+figée à `97 pts` après 15 s. `PointsTicker.run()` repose maintenant lui-même le message
+(`postDelayed`) sans repasser par `start()`, donc sans journaliser « cadence posée » toutes les 15 s.
+
+**Minutes fantômes** : `twouichPhonePointsTick()` lit `isPlaying()` (même source que le bouton
+lecture/pause amont) et `WatchPoints.setPlaying()` met le temps couru de côté (`carry`) quand la
+lecture est arrêtée ; la reprise rend ce reliquat sans compter la durée de pause. `leave()` remet
+`carry` à zéro. Deux pièges ART mesurés : `if-nez` sur le booléen `playing` inversait pause et
+lecture (compteur figé, `lecture en cours` suivi de `pause lecture`), et un `const-string v2` dans
+`stop()` avec `.locals 2` faisait rejeter `PointsTicker` (`VerifyError`, lecteur impossible à
+ouvrir). Les deux ont un verrou dans `test_smali_branches` (97/97).
+
+**Preuves appareil (BlueStacks API 33, 720×1280)** — build `dc2991d8…` :
+- appui long sur la pastille pendant la lecture : seules deux lignes « pastille masquee (choix) »,
+  **aucun** `session ouverte` ni `cadence posee` ; vidéo dégagée (capture `work/final-hidden.png`) ;
+- pastille masquée puis `HOME` 75 s : `cadence arretee` au pause, **aucun `solde ecrit`** pendant
+  la pause, valeur **138 pts avant et après** la reprise (aucune minute fantôme) ;
+- sortie de PiP **selon la préférence** : préférence visible → `pastille affichee` + pastille à
+  l'écran ; préférence masquée → aucune ligne `pastille affichee`, pastille absente. Le PiP
+  s'entre/sort au clic **souris** (`input mouse tap`) sur l'icône système : les taps tactiles
+  n'atteignent pas le menu PiP de BlueStacks ;
+- TV : `wm size 1920x1080` → `interface : TV (mode systeme ou ecran large)`, vidéo plein écran,
+  aucune pastille ni bouton PiP, **aucune ligne `points :`** (le garde 600 dp sort avant l'appel).
+  Réglage restauré ensuite (`wm size 720x1280`).
+
+Livrable local `dist/Twouich_v1.0.24.apk`, SHA-256 `dc2991d8783260365218fb502610aa5a350f6a94b19d02844a8156fa2d0cdcbc`
+(rebuild local, **pas** les octets publiés : `check-release.sh` reste rouge à l'étage 4 comme
+consigné plus haut). `test_apk` conforme, `test_smali_branches` 97/97, `test_normalize_apk`,
+`test_update_check` 26/26, `test_script_paths` 51/51, self-test **31/31**. Rien publié, rien commité.
+
+## Pause reelle du lecteur : la branche « lecture arretee » est mesuree (24/10/2026)
+
+Le lecteur n'a pas de bouton pause (controleur ExoPlayer desactive), mais il **lit les touches
+multimedia** : `onKeyUp` journalise `onKeyUp: can do short press:true` et `B1(85,false)` suit la table
+des raccourcis distants. Par defaut `pref_remote_playpause = 4`, donc la touche 85 (MEDIA_PLAY_PAUSE)
+change la **taille video**. En mettant ce reglage sur **« Play / Pause »** (Reglages → Stream settings
+→ Remote shortcuts → Play/pause), `adb shell input keyevent 85` appelle `A1()` et met ExoPlayer en
+pause. Le reglage a ete remis a « Video size » apres la mesure.
+
+**Preuve** (build installe `dc2991d8…`, BlueStacks API 33) :
+- journal : `session ouverte` 11:38:35.645, **`pause lecture` 11:38:50.646**, **`reprise lecture`
+  11:41:20.658**, `solde ecrit` 11:42:05.660 puis 11:43:05.666 ; **0 `solde ecrit`** entre l'arret et
+  la reprise ;
+- pastille : **141 pts** au moment de la pause, **141 pts** apres ~2 min 30 s d'arret, **142 pts**
+  45 s apres la reprise (le reliquat `carry` d'avant la pause, ~15 s), **143 pts** 105 s apres ;
+- image : deux captures a 3 s d'intervalle, **0 pixel different** dans la zone video pendant la
+  pause ; **25 529** apres la reprise (bbox `0,0-720,361`).
+
+Limite de la mesure : la pause est detectee au tir de 15 s, donc jusqu'a 15 s de l'arret peuvent
+entrer dans `carry` (la duree entiere n'est jamais comptee, mais le reliquat peut avancer d'un tir).
+
+**Defaut corrige le 24/10** : a la **premiere** ouverture depuis l'accueil, `lastChannel` etait
+renseigne par `x3()` **apres** `onResume` et la derniere passe de disposition. `twouichPhonePoints()`
+recevait donc `null`, `enter(null)` sortait sans rien ouvrir et `since` restait a 0 : la pastille
+restait figee (138 pts pendant 5 min), et **la preuve « 138 avant / 138 apres » de la passe
+precedente etait vide** (aucune session ouverte). Le correctif est dans
+`install_early_channel_capture` : `CHANNEL_POINTS_CALL` est pose **juste apres la capture, dans
+`x3()`**, et garde par `twouichTvInterface()` (TV : aucun appel, aucune session). La cadence ne
+rouvre toujours rien ; elle ne fait que solder. Verrou ajoute dans `test_smali_branches` (98/98).
+
+**Preuve depuis un lancement froid** (build `02921fbc…`, installe par-dessus le precedent) :
+- force-stop, lancement, carte « Coffee » ouverte : `session ouverte` **12:02:27.304**, `solde ecrit`
+  **12:03:42.261**, pastille **146 → 147** — **sans HOME ni relance** ;
+- pause (raccourci Play/Pause) : `pause lecture` 12:04:42.265, pastille **147** ; apres **2 min 37**
+  d'arret, toujours **147**, **0 `solde ecrit`** ;
+- reprise 12:07:57.270 : `reprise lecture` + `solde ecrit` dans le meme tir → **148** (reliquat des
+  75 s deja courees avant la pause), puis **149** a 12:08:57.272 ; image : 0 pixel different pendant
+  la pause, 185 862 apres la reprise.
+
+Limite : la pause est echantillonnee au tir de 15 s ; le reliquat peut donc inclure jusqu'a 15 s de
+l'arret, jamais la duree entiere (195 s d'arret n'ont produit qu'un point, celui des 75 s deja
+courees avant la pause).
+
+Preuves dans `work/proof-pause-*` et `work/coldpause-*` (captures, journaux complets, extraits).
+Livrable local `dist/Twouich_v1.0.24.apk`, SHA-256
+`02921fbcaf2d7ca890cda0f3fe3b66cc6ea19c79582f50b30447f118947c6e97` (rebuild local, **pas** les octets
+publies : `check-release.sh` reste rouge a l'etage 4). `test_apk` conforme, `test_smali_branches`
+98/98, `test_vaft` 20/20, `test_update_check` 26/26, `test_script_paths` 51/51, `test_normalize_apk`
+avec ses controles reels, `test_sanitizer`, `test_brand`, `test_radar` 10/10, `test_check_secrets`,
+`check-secrets` (136 fichiers), `sync-readme --check`, `phone_geometry`, `analyzer` 11/11,
+`device_ui` 99/99, self-test **31/31**. Rien publie, rien commite ; reglage restaure, fichiers de
+test retires de `/sdcard/Download`.
