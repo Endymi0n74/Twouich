@@ -34,7 +34,15 @@ redécodage : `:restore_done` → `:cond_1`, `:restore_pip_layout`, `:twouich_ta
 name="twouich_phone_chat_height">` était détecté par la ligne littérale (`280dp`) alors qu'un arbre redécodé écrit `280.0dp` —
 la seconde définition rendait `aapt2` muet sur un `duplicate value`, donc build impossible depuis le repli.
 
-Mesure : décodage de l'asset v1.0.25 → `patch.py` **exit 0** (233 contrôles) → `apktool b` **exit 0** (11 112 086 o non signé).
+Deux autres défauts de la même famille, trouvés par le run CI de la release : la pastille de points restait dans
+`activity_player.xml` (la vue y était écrite `@id` et non `@+id`, donc non reconnue) et son identifiant survivait dans
+`ids.xml`/`public.xml` — le contrôle « pastille retirée du livrable » la retrouvait. `remove_phone_points()` nettoie
+désormais les trois. Et `test_apk` ne peut plus échouer sur l'absence de l'APK amont (il **dit** qu'il saute, avec `⏭️`) :
+ce contrôle comparait le layout TV à une capture de l'APK amont, disparu depuis le 24/10.
+
+Mesure : décodage de l'asset v1.0.25 → `patch.py` **exit 0** (233 contrôles) → `apktool b` **exit 0** (11 112 086 o non signé),
+puis `bash patch/build.sh` sur un clone sans amont (`SKIP_SIGNING=1`) : **exit 0**, hash non signé `07273a51…`,
+identique à deux exécutions.
 `classes2.dex` est **identique** au build `beta_144` ; `classes.dex` diffère de 128 octets (ordre des attributs/étiquettes revisité
 par le redécodage) : les deux chemins ne produisent donc **pas** les mêmes octets. C'est pourquoi la release publie le build
 `beta_144` (chaîne d'origine, testée sur appareil) et non celui de la CI.

@@ -133,6 +133,17 @@ def check(name: str, condition: bool, detail: str = "") -> bool:
 #   python patch/tests/test_apk.py --apk work/upstream/beta_144.apk
 
 
+def skip_check(name: str, detail: str) -> bool:
+    """Contrôle non applicable ici — dit explicitement qu'il n'a pas jugé.
+
+    Un « ✅ » sur un contrôle qu'on n'a pas pu exécuter serait un mensonge ; un
+    « ❌ » rendrait la CI éternellement rouge pour une dépendance disparue
+    (l'amont a supprimé son APK le 24/10). On nomme donc le saut.
+    """
+    print(f"⏭️  {name} — non applicable : {detail}")
+    return True
+
+
 def holds(blob: bytes, text: str) -> bool:
     """Le texte est-il présent, quel que soit l'encodage du pool de chaînes ?"""
     return text.encode("utf-8") in blob or text.encode("utf-16-le") in blob
@@ -729,8 +740,9 @@ def main() -> int:
             #     vraiment dans l'archive, et une dimension changee d'unite.
             reference, reference_names = upstream_tv_layout(upstream)
             if reference is None:
-                ok &= check("layout TV confronte a la capture de l'amont", False,
-                            f"APK d'amont illisible ({upstream}) : le garde ne peut pas juger")
+                ok &= skip_check("layout TV confronte a la capture de l'amont",
+                                 f"APK d'amont absent ({upstream.name}) — l'amont a "
+                                 "supprime son asset ; les autres gardes TV restent actifs")
             else:
                 shipped_names = _arsc_id_names(arsc)
                 differences = tv_layout_offenders(tv_bytes, reference, shipped_names,

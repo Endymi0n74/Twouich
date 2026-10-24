@@ -3849,7 +3849,11 @@ def remove_phone_points(decoded: pathlib.Path) -> None:
     # Vue : elle vivait dans la rangée de saisie. Les layouts sont réécrits par
     # patch_phone_chat depuis patch/res/, mais un arbre réutilisé peut encore
     # porter l'incrustation d'origine (au-dessus de la vidéo).
-    view = re.compile(r'\s*<TextView android:id="@\+id/twouich_phone_points".*?/>',
+    # `@+id` (source) comme `@id` (arbre redécodé) : c'est la même vue, et
+    # l'ancienne forme laissait la pastille dans `activity_player.xml` d'un
+    # arbre reparti d'une release — le contrôle du livrable la retrouvait dans
+    # le layout compilé.
+    view = re.compile(r'\s*<TextView [^>]*@\+?id/twouich_phone_points[^>]*/>',
                       re.S)
     for layout in [decoded / "res" / "layout" / "activity_player.xml"] + [
             decoded / "res" / q / "activity_player.xml"
@@ -3868,6 +3872,27 @@ def remove_phone_points(decoded: pathlib.Path) -> None:
         if stripped != text:
             row.write_text(stripped, encoding="utf-8")
             log("retiré : pastille de la rangée de saisie")
+
+    # L'identifiant lui-même : une release précédente l'a déclaré, et il survit
+    # au redécodage dans les deux tables de ressources. Le laisser ferait
+    # échouer le contrôle « pastille retirée du livrable » sur un id mort.
+    ids = decoded / "res" / "values" / "ids.xml"
+    if ids.is_file():
+        text = ids.read_text(encoding="utf-8")
+        stripped = re.sub(r"\s*<id name=\"twouich_phone_points\"\s*/>", "", text)
+        if stripped != text:
+            ids.write_text(stripped, encoding="utf-8")
+            log("retiré : identifiant de pastille dans ids.xml")
+    public = decoded / "res" / "values" / "public.xml"
+    if public.is_file():
+        text = public.read_text(encoding="utf-8")
+        stripped = re.sub(
+            r"\s*<public type=\"id\" name=\"twouich_phone_points\" id=\"[^\"]*\"\s*/>",
+            "", text,
+        )
+        if stripped != text:
+            public.write_text(stripped, encoding="utf-8")
+            log("retiré : identifiant de pastille dans public.xml")
 
     player = (decoded / "smali" / "com" / "s0und" / "s0undtv" / "activities"
               / "PlayerActivity.smali")
