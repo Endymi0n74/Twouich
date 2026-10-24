@@ -4,7 +4,7 @@
 
 - `cd D:/Codex/Twouich && bash patch/build.sh`
 - APK amont : `work/upstream/beta_144.apk` (SHA-256 `578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0`)
-- Fallback si amont absent : télécharge `beta_144.apk` — l'APK **amont d'origine**, archivé sur la release v1.0.25 — SHA-256 verrouillé `578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0` (même source que le mainteneur, donc mêmes octets ; cf. « Source du repli » plus bas)
+- APK de référence, par ordre de préférence : `patch/upstream/beta_144.apk` (**versionné dans le dépôt** — un clone construit hors ligne), puis `work/upstream/beta_144.apk`, puis le miroir de la release v1.0.25. Une seule empreinte pour les trois : `578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0`
 - Sortie : `dist/Twouich_v1.0.26.apk` — 24/10 au soir, **sans les points** : 11 323 517 octets, SHA-256 `ae82fbacc1a72331cd03def99ad46e8dcacb6e2b7d3a35f95e8b1705a7705c80`, signé v1+v2+v3 (versionCode 173). Deux builds successifs du même arbre donnent la même empreinte, y compris après les corrections de `patch.py` de cette passe.
 - outils : `tools/apktool-3.0.3.jar`, `tools/uber-apk-signer.jar` (téléchargés par build.sh, ignorés par .gitignore)
 - clé : `keys/twouich.keystore`, alias `twouich-dev`, mot de passe dans `KEY_PASS` (jamais écrit, ignoré par .gitignore)
@@ -55,6 +55,21 @@ et donc le garde `published_guard`. La source du repli est maintenant l'APK **am
   `ae82fbac…05c80`, 11 323 517 octets, identique à `dist/` et à l'asset publié ;
 - conséquence : le garde répond « octets identiques », la publication est **sautée** et le run est vert — les mêmes octets
   circulent du build local à la CI et à la release.
+
+### L'entrée de build ne peut plus se perdre (24/10, nuit)
+
+L'APK amont ne vivait que sur un asset de release : une suppression accidentelle de l'asset (ou un nettoyage de releases)
+rendait tout clone incapable de reconstruire. Il est désormais **versionné** : `patch/upstream/beta_144.apk`
+(10 398 408 o, `578da49b…`), et `build.sh` le prend en premier — l'asset de la release v1.0.25 reste comme miroir, plus le
+`work/upstream/` du mainteneur. Un clone construit donc **sans réseau ni release**. Procédure d'un clone propre, éprouvée :
+
+1. `git clone` (le dépôt apporte `patch/upstream/beta_144.apk`, `dist/`, les patchs — ni `work/`, ni `tools/`, ni `keys/`) ;
+2. copier `keys/` (jamais versionné) et télécharger `tools/apktool-3.0.3.jar` + `tools/uber-apk-signer.jar` avec leurs
+   empreintes épinglées (c'est ce que fait la CI dans son étape « Outils provisionnés ») ;
+3. `bash patch/build.sh` → **`ae82fbac…05c80`**, 11 323 517 o, identique au livrable publié.
+
+Mesuré sur un clone fait depuis le dépôt (`work/clone-test`, jeté après) : journal `✅ APK amont versionné (SHA-256) —
+chaîne d'origine, aucune dépendance réseau`, `EXIT=0`, empreinte égale à `dist/`. CI verte sur `67e0d35` (`40134088742`).
 
 Mesure : décodage de l'asset v1.0.25 → `patch.py` **exit 0** (233 contrôles) → `apktool b` **exit 0** (11 112 086 o non signé),
 puis `bash patch/build.sh` sur un clone sans amont (`SKIP_SIGNING=1`) : **exit 0**, hash non signé `07273a51…`,
@@ -131,7 +146,7 @@ par le redécodage) : les deux chemins ne produisent donc **pas** les mêmes oct
 ## Ressources
 
 - dépôt upstream amont : S0undTV (code source non redistribué, uniquement binaires patchés)
-- APK amont `beta_144.apk` : l'amont a supprimé son asset `S0undTV/releases/download/beta/beta_144.apk` (404 mesurée 24/10). Il est donc archivé sur la release v1.0.25 (`beta_144.apk`, `578da49b…`) : c'est la source du repli pour un clone neuf et pour la CI, et c'est ce qui garantit les mêmes octets à la sortie
+- APK amont `beta_144.apk` : l'amont a supprimé son asset `S0undTV/releases/download/beta/beta_144.apk` (404 mesurée 24/10). Il est donc **versionné** dans `patch/upstream/` (`578da49b…`) et doublé en miroir sur la release v1.0.25 : c'est l'entrée de build d'un clone neuf et de la CI, et ce qui garantit les mêmes octets à la sortie
 - CI : `.github/workflows/build.yml` — job `build` (sans signature, détection de rupture) + job `release` (signé, publication, vérification octets servis)
 - CI secondaire : `.github/workflows/radar.yml` (radar-ads, scheduling, marche)
 
