@@ -474,8 +474,16 @@ def _patch_playback_calls(text: str) -> tuple[str, int]:
 X3_SIGNATURE = ".method private x3(ILjava/lang/String;LP6/d$o;)V"
 CHANNEL_CAPTURE_CALL = (
     "    # secours anti-pub : la chaine est connue AVANT la premiere playlist.\n"
-    "    # Le pod de preroll arrive avant l'ouverture usher ; sans cela le\n"
+    "    # Le pod de preroll arrive avant l'ouvertureusher ; sans cela le\n"
     "    # secours ne peut pas s'armer et le lecteur attend la playlist reelle.\n"
+    "    invoke-static {p2}, Lcom/twouich/adblock/AdBlockDataSource;->"
+    "twouichSetChannel(Ljava/lang/String;)V\n"
+)
+
+# Instruction smali sans commentaires : la partie invoke-only de CHANNEL_CAPTURE_CALL.
+# Utilisee par install_early_channel_capture pour ancrer la capture de chaine
+# independamment du fait que l'arbre smali decode ait des commentaires ou non.
+CHANNEL_CAPTURE_CALL_INSN = (
     "    invoke-static {p2}, Lcom/twouich/adblock/AdBlockDataSource;->"
     "twouichSetChannel(Ljava/lang/String;)V\n"
 )
