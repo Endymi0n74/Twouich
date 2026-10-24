@@ -91,6 +91,22 @@ par le redécodage) : les deux chemins ne produisent donc **pas** les mêmes oct
 - Page « Application info » à l'écran : **Version name `v1.0.26`**, **Version code `173`**, Build type RELEASE, branche
   « Twouich master (fork de S0undTV) », Build time `24/10/2026 14:00` (date de release figée, 12:00 UTC).
 
+## Parcours de mise à jour 1.0.25 → 1.0.26 rejoué (BlueStacks, 24/10)^
+
+- Rétrogradation volontaire : `adb install -r -d dist/Twouich_v1.0.25.apk` (`23d23872…`, l'asset de la release v1.0.25)
+  → `versionCode 172`, `firstInstallTime` toujours `2026-10-05 14:13:09`.
+- Lancement froid : **UpdateActivity s'ouvre seule 10 s après** `MainActivity` (« New update available! », Version v1.0.26,
+  code 173) — aucune navigation, aucun compte nécessaire.
+- Appui « Install update » → `D/S0undTV_AutoUpdateSrv: onStartCommand:
+  https://github.com/Endymi0n74/Twouich/releases/download/v1.0.26/Twouich_v1.0.26.apk`, puis
+  `START … dat=content://com.s0und.s0undtv.provider/... typ=application/vnd.android.package-archive
+  cmp=com.android.packageinstaller/.InstallStart` (uid 10093) et `PackageInstallerActivity` au premier plan.
+- Appui « METTRE À JOUR » → `versionCode 173`, `lastUpdateTime 22:04:31`, **`firstInstallTime` inchangé** : mise à jour en
+  place, session conservée.
+- **Octets installés = octets servis** : `base.apk` relu (`adb pull`) → `ae82fbac…05c80` = asset téléchargé par curl =
+  `dist/Twouich_v1.0.26.apk`.
+- Relance après mise à jour : `MainActivity` (aucune `UpdateActivity`), `SELFTEST 31/31`, 0 FATAL/ANR — l'annonce ne boucle pas.
+
 ## Devices (deux devices Android TV attachés)
 
 - TV : Android TV 11, 1920×1080, `RM-17325` (reste intact à chaque session de test téléphone)
