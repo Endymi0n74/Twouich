@@ -40,7 +40,7 @@ adb install -r Twouich_v1.0.26.apk
 
 Twouich est basé sur le projet d'origine [S0undTV](https://github.com/S0und/S0undTV). Merci à ses auteurs et contributeurs pour le travail initial et les bibliothèques utilisées.
 
-Ce dépôt redistribue uniquement des binaires patchés et les patchs associés ; il ne redistribue pas le code source original. Voir [`CREDITS.md`](CREDITS.md) pour les détails.
+Ce dépôt redistribue les binaires patchés, les patchs associés et l'APK amont d'origine qui sert d'entrée de build (`patch/upstream/beta_144.apk`, nécessaire pour qu'un clone reconstruise à l'identique) ; il ne redistribue pas le code source original. Voir [`CREDITS.md`](CREDITS.md) pour les détails.
 
 
 

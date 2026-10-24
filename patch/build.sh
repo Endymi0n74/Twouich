@@ -15,21 +15,23 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# ── APK de référence : deux sources, une seule empreinte chacune ─────────────
-# 1. la copie locale de l'APK amont (beta_144) : la chaîne d'origine.
-# 2. à défaut, L'APK AMONT ARCHIVÉ SUR NOTRE RELEASE v1.0.25, téléchargé d'ici.
+# ── APK de référence : trois sources, une seule empreinte ────────────────────
+# 1. `patch/upstream/beta_144.apk` — VERSIONNÉ dans le dépôt : un clone neuf,
+#    une CI propre et un poste sans réseau partent tous de ces octets. C'est la
+#    seule copie qu'aucune suppression de release ou de dossier work/ ne peut
+#    emporter : perdre l'entrée de build était le vrai risque, pas le patch.
+# 2. la copie locale `work/upstream/beta_144.apk` (même empreinte, mainteneur).
+# 3. à défaut seulement, l'APK amont archivé sur la release v1.0.25 (miroir).
 #
 # L'amont a SUPPRIMÉ son asset `S0undTV/releases/download/beta/beta_144.apk`
-# (404 mesurée le 24/10, aucun instantané d'archive) : sans ce repli, aucun
-# clone neuf ne peut plus reconstruire — les trois runs CI du 24/10 sont tous
-# tombés sur ce téléchargement. Le repli servait d'abord notre propre release
-# v1.0.25 : la CI repartait alors d'un arbre DÉJÀ greffé et réencodé, ce qui
-# ne redonnait pas les octets du livrable de référence (`classes.dex` à
-# 128 octets d'écart) — d'où un run de tag qui remplaçait l'APK publié.
-# Depuis le 24/10 au soir, c'est l'APK amont lui-même (octets d'origine,
-# SHA-256 épinglé) qui est archivé sur la release v1.0.25 : la CI et le
-# mainteneur partent ainsi de la MÊME source, condition pour produire les
-# mêmes octets.
+# (404 mesurée le 24/10, aucun instantané d'archive). Le repli servait d'abord
+# notre propre release v1.0.25 : la CI repartait alors d'un arbre DÉJÀ greffé et
+# réencodé, ce qui ne redonnait pas les octets du livrable de référence
+# (`classes.dex` à 128 octets d'écart) — d'où un run de tag qui remplaçait
+# l'APK publié. Depuis le 24/10 au soir la source est l'APK amont lui-même,
+# versionné ici et doublé sur la release : la CI et le mainteneur partent de la
+# MÊME source, condition pour produire les mêmes octets.
+UPSTREAM_ARCHIVE="patch/upstream/beta_144.apk"
 UPSTREAM_APK="work/upstream/beta_144.apk"
 UPSTREAM_SHA256="578da49bcab05b1bf0448bbf638f88af71ad7188052cd65c3319093ee5b151b0"
 BASELINE_URL="https://github.com/Endymi0n74/Twouich/releases/download/v1.0.25/beta_144.apk"
@@ -96,27 +98,31 @@ command -v python >/dev/null 2>&1 || { echo "❌ python introuvable"; exit 1; }
 
 # ── 1. APK de référence (vérification d'intégrité) ──
 mkdir -p work/upstream work/build dist
-if [ -f "$UPSTREAM_APK" ] \
+if [ -f "$UPSTREAM_ARCHIVE" ] \
+        && echo "$UPSTREAM_SHA256  $UPSTREAM_ARCHIVE" | sha256sum -c - >/dev/null 2>&1; then
+    REFERENCE_APK="$UPSTREAM_ARCHIVE"
+    echo "✅ APK amont versionné (SHA-256) — chaîne d'origine, aucune dépendance réseau"
+elif [ -f "$UPSTREAM_APK" ] \
         && echo "$UPSTREAM_SHA256  $UPSTREAM_APK" | sha256sum -c - >/dev/null 2>&1; then
     REFERENCE_APK="$UPSTREAM_APK"
-    echo "✅ APK amont en place (SHA-256) — chaîne d'origine"
+    echo "✅ APK amont en place (SHA-256) — copie locale"
 else
-    echo "⬇️  APK amont absent (l'amont a supprimé son asset) :"
-    echo "    repli sur l'APK amont archivé sur la release v1.0.25"
+    echo "⬇️  APK amont absent du dépôt et de work/ :"
+    echo "    repli sur le miroir de la release v1.0.25"
     if [ ! -f "$BASELINE_APK" ]; then
         curl -sSL --max-time 300 --retry 3 -o "$BASELINE_APK" "$BASELINE_URL"
     fi
     echo "$BASELINE_SHA256  $BASELINE_APK" | sha256sum -c - >/dev/null \
         || { echo "❌ SHA-256 de la baseline publiée inattendu — abandon"; exit 1; }
     REFERENCE_APK="$BASELINE_APK"
-    echo "✅ Baseline publiée conforme (SHA-256)"
+    echo "✅ Miroir de release conforme (SHA-256)"
 fi
 # La source retenue, pas la source espérée : le désassemblage ci-dessous DOIT
 # lire le fichier qui vient d'être vérifié. Il lisait `$UPSTREAM_APK` en dur,
 # donc le repli téléchargeait la baseline puis `apktool d` échouait sur l'APK
 # amont absent — c'était la cause racine des runs CI en échec du 24/10.
 if [ -z "${REFERENCE_APK:-}" ]; then
-    echo "❌ aucune source d'APK de référence — ni amont ni baseline"
+    echo "❌ aucune source d'APK de référence — ni versionnée, ni locale, ni miroir"
     exit 1
 fi
 echo "   source de référence : $REFERENCE_APK"
