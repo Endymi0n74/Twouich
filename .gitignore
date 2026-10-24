@@ -1,0 +1,28 @@
+# Keystore and signing keys - NEVER commit
+keys/
+
+# Build tools (downloaded by build.sh)
+tools/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*$py.class
+
+# Build output
+work/build/
+work/decoded/
+work/captures/
+work/*.log
+work/*.png
+work/*.smali
+
+# Unsigned/aligned intermediate files
+twouich_unsigned-aligned-signed.apk*
+dist/*.idsig
+
+# OS files
+.DS_Store
+Thumbs.db
