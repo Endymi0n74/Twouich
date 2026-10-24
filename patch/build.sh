@@ -95,6 +95,7 @@ command -v python >/dev/null 2>&1 || { echo "❌ python introuvable"; exit 1; }
 mkdir -p work/upstream work/build dist
 if [ -f "$UPSTREAM_APK" ] \
         && echo "$UPSTREAM_SHA256  $UPSTREAM_APK" | sha256sum -c - >/dev/null 2>&1; then
+    REFERENCE_APK="$UPSTREAM_APK"
     echo "✅ APK amont en place (SHA-256) — chaîne d'origine"
 else
     echo "⬇️  APK amont absent (l'amont a supprimé son asset) :"
@@ -104,8 +105,18 @@ else
     fi
     echo "$BASELINE_SHA256  $BASELINE_APK" | sha256sum -c - >/dev/null \
         || { echo "❌ SHA-256 de la baseline publiée inattendu — abandon"; exit 1; }
+    REFERENCE_APK="$BASELINE_APK"
     echo "✅ Baseline publiée conforme (SHA-256)"
 fi
+# La source retenue, pas la source espérée : le désassemblage ci-dessous DOIT
+# lire le fichier qui vient d'être vérifié. Il lisait `$UPSTREAM_APK` en dur,
+# donc le repli téléchargeait la baseline puis `apktool d` échouait sur l'APK
+# amont absent — c'était la cause racine des runs CI en échec du 24/10.
+if [ -z "${REFERENCE_APK:-}" ]; then
+    echo "❌ aucune source d'APK de référence — ni amont ni baseline"
+    exit 1
+fi
+echo "   source de référence : $REFERENCE_APK"
 
 # ── 2. Désassemblage ──
 # L'arbre est réutilisé d'un build à l'autre (le désassemblage coûte cher), mais un
@@ -133,7 +144,7 @@ fi
 rm -f "$DECODED.twouich-greffes"
 if [ ! -f "$DECODED/apktool.yml" ]; then
     echo "📦 apktool d…"
-    java -jar "$APKTOOL" d -f -o "$DECODED" "$UPSTREAM_APK" >/dev/null
+    java -jar "$APKTOOL" d -f -o "$DECODED" "$REFERENCE_APK" >/dev/null
 fi
 echo "✅ Arbre apktool : $DECODED"
 
