@@ -133,21 +133,36 @@ revérifiés après le run de tag** ; CI verte : `40126044259` (master, non sign
 
 ## Ce qu'il reste à faire / surveiller
 
-- La CI reconstruit depuis le repli baseline et **écrase l'asset** au tag (étape `gh release upload --clobber`). Constaté le
-24/10 sur la v1.0.26 : le run de tag (vert, `40126046782`) a publié son propre build (`f0e6aecd…`, même taille, `classes2.dex`
-identique, `classes.dex` à 128 octets d'écart — ordre des attributs/étiquettes revisité par le redécodage). Le livrable
-`beta_144` (`ae82fbac…`) a été re-poussé après le run, et `check-release.sh` confirme `servi = local`. **Après chaque release :
-relancer `bash patch/check-release.sh` et re-poser `dist/` si la CI a substitué un build.**
+- **La CI n'écrase plus l'asset publié** (garde `published_guard`, 24/10 au soir). Constaté sur la v1.0.26 : le run de tag
+(`40126046782`, vert) avait publié son propre build (`f0e6aecd…`, même taille, `classes2.dex` identique, `classes.dex` à
+128 octets d'écart) à la place du build `beta_144` testé sur appareil (`ae82fbac…`). Désormais, avant tout upload, le workflow
+télécharge l'APK déjà présent sur la release et le compare :
+  - identique → `upload=false`, rien n'est téléversé (run vert, résumé dans le job summary) ;
+  - différent → **échec du job sans aucun upload**, avec les deux empreintes dans le résumé et la commande
+    `gh release delete-asset <tag> <apk>` à lancer volontairement pour publier un rebuild ;
+  - aucun asset → upload normal (première publication).
+  Éprouvé hors CI avec un faux `gh` sur cinq cas : asset identique → `upload=false` ; release sans APK → `upload=true` ;
+  aucune release → `upload=true` ; assets illisibles (502) → échec sans upload ; octets différents → échec sans upload.
+  Le garde refuse aussi de publier quand la release existe mais que sa lecture échoue : jamais de repli silencieux
+  sur `--clobber`. Le job signé reste donc vert sur une première publication et sur un rebuild identique, rouge sinon.
 - Le contrôle « layout TV confronté à la capture de l'amont » est **sauté** (`⏭️`) sur un clone sans APK amont : il dit qu'il
 ne juge pas, les autres gardes TV restent actifs. Sur la machine du mainteneur (amont présent) il mord toujours.
 
-## Preuves sur appareil (mesures du 24/10)
+## Smoke test du lecteur en conditions réelles (BlueStacks, v1.0.26, 24/10 au soir)
 
-- première ouverture depuis l'accueil (lancement froid) : session ouverte 12:02:27.304, solde écrit 12:03:42.261, pastille 146→147 — sans HOME ni relance
-- pause (raccourci Play/Pause) : pastille 147, après 2 min 37 d'arrêt toujours 147, 0 solde écrit — 0 pixel différent dans la zone vidéo pendant la pause
-- reprise : 148 (reliquat des 75 s déjà courues avant la pause), puis 149 — 185 862 pixels différents après reprise
-- PiP : sortie rend la pastille selon préférence (chemin jamais mesuré jusqu'ici)
-- rotation : pas de pixel différent pendant la pause, capture confirmée
+- Ouverture depuis l'accueil (chaîne Recalbox, en direct) : `PlayerActivity` au premier plan en ~15 s, sans HOME ni relance.
+  Journal : `chaine pre-capture : recalbox`, `chaine captee : recalbox`, `chat affiche`, `chat restaure affiche`.
+- Lecture continue 22:24:08 → 22:33 (≈9 min) : `playlist nettoyee` toutes les ~2 s, **206 playlists** filtrées, aucun
+  `E Twouich`, aucun FATAL, aucun ANR ; `dumpsys media_session` = `state=3` (PLAYING) à chaque contrôle ; les images vidéo
+  diffèrent d'une capture à l'autre (le direct avance).
+- Chat : messages, follows et réponses de l'utilisateur (`endymi0n`) défilent sans interruption, y compris pendant la saisie.
+- Saisie : tap sur la pastille → `InputMethodManager showSoftInput view=… app:id/ET_SendMessage`, `inputType=1` ; texte visible
+  à l'écran avec curseur. **Rien n'a été envoyé** (pas de message publié dans le chat d'autrui) ; champ vidé ensuite.
+- Anti-pub : le sanitizer tourne sur **chaque** rafraîchissement de playlist (206 fois), **0 segment pub retiré** — aucun pod
+  SSAI servi pendant la fenêtre : c'est le branchement qui est prouvé, pas le retrait d'un pod.
+- **Défaut trouvé, non corrigé** : un appui sur RETOUR dans le lecteur masque `SendMessageWindow` (`dumpsys activity top` :
+  `V.E` → `G.E`) alors que le joueur reste ouvert et le chat visible ; la barre ne revient pas (tap inopérant) et un second
+  RETOUR sort du lecteur. Reproductible clavier ouvert comme fermé, à chaque ouverture ; il faut quitter puis rouvrir la
+  chaîne pour recomposer. Le RETOUR upstream masque la saisie (comportement TV) sans que notre empilement la rétablisse.
 
-Preuves dans `work/proof-pause-*` et `work/coldpause-*` (captures, journaux complets, extraits).
-Livrable local `dist/Twouich_v1.0.25.apk`, SHA-256 `23d23872...` (rebuild local, mis à jour, fait shRNAke256sum sur la release).
+Captures et journaux : `work/smoke_*`, `work/rep_*`, `work/smoke_2min.log`.

@@ -7,7 +7,9 @@ name: build
 # Sur un push de branche : chaîne SANS signature (SKIP_SIGNING=1), aucun secret.
 # Sur un tag v* : le job `release` reconstruit, SIGNÉ avec le keystore des
 # secrets chiffrés, publie l'APK + changelog.html sur la release du tag et
-# vérifie sa propre publication (octets servis).
+# vérifie sa propre publication (octets servis). Un APK DÉJÀ publié n'est
+# jamais écrasé par un rebuild : les octets publiés sont ceux qui ont été
+# testés, un rebuild n'a pas à les remplacer (garde `published_guard`).
 # Le lancement manuel (workflow_dispatch) est une RÉPÉTITION SIGNÉE : le job
 # `release` s'exécute (keystore, signature, vérifications) mais ne publie rien.
 # `update.json` n'est jamais touché par la CI : son push manuel reste le verrou
@@ -220,8 +222,87 @@ jobs:
         run: |
           sha256sum dist/*.apk
 
-      - name: Publier sur la release du tag (APK + changelog.html)
+      # Les octets publiés sont la RÉFÉRENCE : la CI ne les remplace jamais par
+      # un rebuild, même fonctionnellement équivalent. Un arbre reconstruit
+      # depuis le repli baseline ne redonne pas les octets de la chaîne amont
+      # `beta_144` (classes.dex diffère de 128 octets, l'ordre des attributs
+      # étant revisité par le redécodage). Constaté le 24/10 sur la v1.0.26 :
+      # le run de tag a remplacé l'APK testé sur appareil par un binaire jamais
+      # installé, sans que rien ne le signale. Ici l'asset existant est
+      # téléchargé et comparé ; s'il diffère, le job s'arrête AVANT tout
+      # upload et la release garde ses octets.
+      - name: Refuser d'écraser un APK déjà publié (octets différents)
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        id: published_guard
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION_NAME="$(sed -n 's/^VERSION_NAME=//p' patch/build.sh | head -1 | tr -d '"')"
+          APK_NAME="$(sed -n 's/^APK_NAME=//p' patch/build.sh | head -1 | tr -d '"')"
+          # Garde-fou : le tag poussé doit concorder avec la version du build.sh,
+          # sinon on comparerait (et publierait) des octets décalés.
+          if [ "${GITHUB_REF_NAME}" != "$VERSION_NAME" ]; then
+            echo "❌ le tag poussé (${GITHUB_REF_NAME}) ne correspond pas au VERSION_NAME de build.sh ($VERSION_NAME)"
+            exit 1
+          fi
+          LOCAL="$(sha256sum "dist/$APK_NAME" | awk '{print $1}')"
+          # Jamais de repli silencieux : une release illisible ou une lecture en
+          # échec arrête le job plutôt que de laisser passer un `--clobber`.
+          ASSETS=""
+          if gh release view "$VERSION_NAME" >/dev/null 2>&1; then
+            ASSETS="$(gh release view "$VERSION_NAME" --json assets --jq '.assets[].name')" \
+              || { echo "❌ la release $VERSION_NAME existe mais ses assets sont illisibles : rien n'est publié"; exit 1; }
+          else
+            # Absente, ou lecture en échec ? `gh release list` tranche : si le tag
+            # y figure, la release existe et on refuse de publier à l'aveugle.
+            TAGS="$(gh release list --limit 300 --json tagName --jq '.[].tagName')" \
+              || { echo "❌ impossible de lister les releases : rien n'est publié"; exit 1; }
+            if printf '%s\n' "$TAGS" | grep -qx "$VERSION_NAME"; then
+              echo "❌ la release $VERSION_NAME existe mais est illisible : rien n'est publié"
+              exit 1
+            fi
+          fi
+          PUBLISHED=""
+          if [ -n "$ASSETS" ] && printf '%s\n' "$ASSETS" | grep -qx "$APK_NAME"; then
+            mkdir -p /tmp/published
+            gh release download "$VERSION_NAME" --pattern "$APK_NAME" --dir /tmp/published --clobber
+            PUBLISHED="$(sha256sum "/tmp/published/$APK_NAME" | awk '{print $1}')"
+          fi
+          {
+            echo "### Livrable du tag \`$VERSION_NAME\`"
+            echo ""
+            echo "| source | SHA-256 |"
+            echo "| --- | --- |"
+            echo "| rebuild CI | \`$LOCAL\` |"
+            echo "| déjà publié | ${PUBLISHED:-aucun} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$PUBLISHED" ]; then
+            echo "upload=true" >> "$GITHUB_OUTPUT"
+            echo "aucun APK publié pour ce tag : le rebuild fait foi et sera publié"
+            exit 0
+          fi
+          if [ "$PUBLISHED" != "$LOCAL" ]; then
+            {
+              echo ""
+              echo "**❌ rien n'a été remplacé.** L'APK déjà en ligne (octets testés) est"
+              echo "conservé ; ce rebuild n'est pas publié."
+              echo ""
+              echo "Pour publier un rebuild malgré tout, retirer d'abord l'asset :"
+              echo ""
+              echo '```'
+              echo "gh release delete-asset $VERSION_NAME $APK_NAME"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "❌ l'APK publié ($PUBLISHED) diffère du rebuild CI ($LOCAL)"
+            echo "   la release garde les octets testés ; rien n'a été téléversé"
+            exit 1
+          fi
+          echo "upload=false" >> "$GITHUB_OUTPUT"
+          echo "✅ octets identiques : le rebuild n'apporte rien, aucun upload"
+
+      - name: Publier sur la release du tag (APK + changelog.html)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && steps.published_guard.outputs.upload == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
