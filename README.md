@@ -20,7 +20,7 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 - **Fallback VaFT** `v1.0.16` : si `stitched-ad` survit au stripping (nouveau format), tentative flux propre `GQL PlaybackAccessToken embed` → `usher v2` → variante (5s timeout, repli stripping) (`VaftFallback`, dormant tant que `lastCut>0`)
 - **Build reproductible** : ZIP canonisé (horodatage + ordre), `SELFTEST 31/31`, `check-release.sh` 4/4
 
-## Nouveautés v1.0.24 — 24 octobre 2026
+## Nouveautés v1.0.25 — 24 octobre 2026
 
 - **Les points de visionnage arrivent sur téléphone.** Une minute regardée vaut un point, par chaîne, et la pastille s'affiche en haut à gauche de la vidéo (`0 pt`, `12 pts`). Tout reste sur l'appareil, dans les préférences privées de l'application : aucune session Twitch n'est nécessaire et rien n'est envoyé nulle part. Le compteur suit la lecture (rafraîchi toutes les 15 s) et reprend là où il s'était arrêté après une mise à jour.
 - **Le lecteur et la fiche chaîne prennent les codes de Twitch mobile.** Sur téléphone uniquement : panneau de chat en surface sombre à coins supérieurs arrondis avec 8 dp de respiration sous la vidéo, bouton picture-in-picture circulaire, champ de saisie en pastille, fiche chaîne en surface sombre avec avatar rond et boutons pilule. La télévision garde son rendu d'origine, vérifié ressource par ressource (`layout-sw600dp`, `layout-sw540dp`, `layout-television`) et à l'écran en 1920×1080.
@@ -30,10 +30,10 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 
 ## Installation
 
-Télécharger [`Twouich_v1.0.24.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.24/Twouich_v1.0.24.apk) depuis la release publiée.
+Télécharger [`Twouich_v1.0.25.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.25/Twouich_v1.0.25.apk) depuis la release publiée.
 
 ```bash
-adb install -r Twouich_v1.0.24.apk
+adb install -r Twouich_v1.0.25.apk
 ```
 
 
