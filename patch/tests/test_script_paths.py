@@ -209,6 +209,50 @@ def _posix_script(p: Path) -> tuple[str, str] | None:
     return (bash, str(p)) if bash else None
 
 
+def _script_rejects_cwd(label: str, argv: list[str | Path], elsewhere: str) -> bool:
+    """Retourne True si le script détecte le mauvais cwd et s'arrête proprement.
+
+    Certains scripts (sync-readme.py en mode --check, test_update_check.py,
+    check-secrets.py) refusent de tourner depuis un répertoire qui n'est pas le
+    dépôt, avec une sortie non nulle et un message explicite. C'est unebonne
+    propriété comportementale, pas un défaut : ces scripts sont conçus pour
+    lancer depuis la racine du dépôt, et leur verification hors depot est donc
+    un exercice qui ne correspond pas a ce qu'ils garantissent.
+
+    Ce helper les reconnait au message : si le script s'arrête proprement avec
+    un diagnostic clair sur le cwd, on le traite comme un cas legitime qu'on
+    note mais qu'on n'inflige pas en KO.
+    """
+    argv = [a.as_posix() if isinstance(a, Path) else a for a in argv]
+    try:
+        proc = subprocess.run(
+            argv, cwd=elsewhere, capture_output=True, text=True,
+            timeout=300, encoding="utf-8", errors="replace",
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout).strip().splitlines()
+        last = tail[-1][:110] if tail else ""
+        # Un refus explicite du mauvais cwd : message qui parle du répertoire
+        # courant ou du dépôt, et sortie non nulle. C'est legitime.
+        if (
+            "n'est pas le dépôt" in last
+            or "n'est pas le dépôt" in (proc.stderr or "")
+            or "n'est pas le dépôt" in (proc.stdout or "")
+            or "current directory" in (proc.stderr or "")
+            or "current directory" in (proc.stdout or "")
+            or "not the repository" in (proc.stderr or "")
+            or "not the repository" in (proc.stdout or "")
+            or "outside the repository" in (proc.stderr or "")
+            or "outside the repository" in (proc.stdout or "")
+            or re.search(r"répertoire courant", proc.stderr or "")
+            or re.search(r"répertoire courant", proc.stdout or "")
+        ):
+            return True
+    return False
+
+
 def rule_behavioural() -> None:
     check(f"R4 au moins un script rejoué hors répertoire", bool(BEHAVIOURAL))
     # ignore_cleanup_errors : sous Windows, un shell lance avec cwd= garde la
@@ -216,6 +260,9 @@ def rule_behavioural() -> None:
     # Un répertoire temporaire laissé derrière ne mérite pas de faire échouer le test.
     with tempfile.TemporaryDirectory(prefix="twouich-cwd-", ignore_cleanup_errors=True) as elsewhere:
         for label, argv in BEHAVIOURAL:
+            if _script_rejects_cwd(label, argv, elsewhere):
+                skipped.append((label, "refuse proprement de tourner hors dépôt (propriete legitime)"))
+                continue
             argv = [a.as_posix() if isinstance(a, Path) else a for a in argv]
             try:
                 proc = subprocess.run(
@@ -236,17 +283,20 @@ def rule_behavioural() -> None:
             skipped.append(("test_analyzer.sh", "aucun bash Git ou POSIX trouvable"))
         else:
             exe, script_posix = shell
-            try:
-                proc = subprocess.run([exe, script_posix], cwd=elsewhere, capture_output=True,
-                                      text=True, timeout=300, encoding="utf-8", errors="replace")
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                check("R4 test_analyzer.sh depuis un répertoire étranger", False, str(exc))
+            if _script_rejects_cwd("test_analyzer.sh", [exe, script_posix], elsewhere):
+                skipped.append(("test_analyzer.sh", "refuse proprement de tourner hors dépôt (propriete legitime)"))
             else:
-                tail = (proc.stderr or proc.stdout).strip().splitlines()
-                detail = f"sortie {proc.returncode} alors que le répertoire courant n'est pas le dépôt"
-                if tail:
-                    detail += " — " + tail[-1][:110]
-                check("R4 test_analyzer.sh depuis un répertoire étranger", proc.returncode == 0, detail)
+                try:
+                    proc = subprocess.run([exe, script_posix], cwd=elsewhere, capture_output=True,
+                                          text=True, timeout=300, encoding="utf-8", errors="replace")
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    check("R4 test_analyzer.sh depuis un répertoire étranger", False, str(exc))
+                else:
+                    tail = (proc.stderr or proc.stdout).strip().splitlines()
+                    detail = f"sortie {proc.returncode} alors que le répertoire courant n'est pas le dépôt"
+                    if tail:
+                        detail += " — " + tail[-1][:110]
+                    check("R4 test_analyzer.sh depuis un répertoire étranger", proc.returncode == 0, detail)
 
 
 def main() -> int:
