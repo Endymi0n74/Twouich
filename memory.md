@@ -199,9 +199,33 @@ ne juge pas, les autres gardes TV restent actifs. Sur la machine du mainteneur (
   à l'écran avec curseur. **Rien n'a été envoyé** (pas de message publié dans le chat d'autrui) ; champ vidé ensuite.
 - Anti-pub : le sanitizer tourne sur **chaque** rafraîchissement de playlist (206 fois), **0 segment pub retiré** — aucun pod
   SSAI servi pendant la fenêtre : c'est le branchement qui est prouvé, pas le retrait d'un pod.
-- **Défaut trouvé, non corrigé** : un appui sur RETOUR dans le lecteur masque `SendMessageWindow` (`dumpsys activity top` :
-  `V.E` → `G.E`) alors que le joueur reste ouvert et le chat visible ; la barre ne revient pas (tap inopérant) et un second
-  RETOUR sort du lecteur. Reproductible clavier ouvert comme fermé, à chaque ouverture ; il faut quitter puis rouvrir la
-  chaîne pour recomposer. Le RETOUR upstream masque la saisie (comportement TV) sans que notre empilement la rétablisse.
+- **Défaut trouvé (RETOUR masque `SendMessageWindow`), corrigé en v1.0.28** — voir ci-dessous.
 
 Captures et journaux : `work/smoke_*`, `work/rep_*`, `work/smoke_2min.log`.
+
+## RETOUR dans le lecteur : deux causes distinctes (corrigées en v1.0.28, 25/10)
+
+- **Cause 1 — garde inversé dans `onKeyDown`.** Le patch `PHONE_BACK_TV_NEW` sautait vers la branche téléphone
+  avec `if-nez` ; un téléphone rend **0** de `twouichTvInterface()`, donc le téléphone tombait dans la branche **TV**
+  (`setVisibility(8)` sur la barre) et la touche était consommée : barre masquée, aucun journal « RETOUR », second appui
+  qui sort du lecteur. Le retour de `twouichPhoneBack` était lu de la même façon inversée (`if-nez v0, :cond_1` :
+  un appui **non** consommé sortait par `return v3`). Corrigé en `if-eqz` aux deux endroits, avec deux contrôles dans
+  `test_smali_branches.py` (84/84).
+- **Cause 2 — plantage quand le champ a le focus.** Le champ porte un `OnKeyListener` de l'amont : sur RETOUR en
+  `ACTION_DOWN` il vidait le brouillon puis appelait `K1(false)`, qui lit `w2().e()` **sans garde** →
+  `FATAL EXCEPTION: java.lang.NullPointerException: Attempt to invoke virtual method 'boolean A6.g.q()' on a null object
+  reference`, pile `K1` ← `p0` ← `y6/m.onKey` ← `View.dispatchKeyEvent` (mesuré sur BlueStacks, clavier ouvert).
+  `_patch_chat_key_listener` rend la touche à `onKeyDown` sur téléphone (TV inchangée) : plus de `K1`, brouillon conservé.
+- **Comportement final, mesuré sur l'appareil (v1.0.28 / 174 → 175, `install -r`)** :
+  - clavier ouvert, champ focalisé → `RETOUR : clavier ferme, barre de saisie conservee`, `mInputShown=false`,
+    `topResumedActivity` reste `PlayerActivity`, dump : `SendMessageWindow` `[0,1184][720,1280]` et champ
+    `[12,1198][558,1265]` inchangés, texte `brouillonRETOUR` **conservé** (l'amont le vidait), 0 FATAL.
+  - sans clavier → `RETOUR : rendu a la chaine d'origine (touche non consommee)`, retour à `MainActivity` (sortie
+    standard, la chaîne d'origine décide) ; plus d'état « joueur ouvert sans barre ».
+  - réouverture de la chaîne : barre de nouveau présente avec son texte d'invite, même géométrie.
+- Captures : `work/back/B1_avant.png` (clavier ouvert, brouillon) et `work/back/B2_apres.png` (après RETOUR, barre et
+  brouillon intacts). Journal : `work/back/log.txt`. Versions locales 1.0.27 (174, garde seul) et 1.0.28 (175, les deux
+  correctifs) ; **rien n'a été publié ni commité** pour ces deux versions.
+- **Vérification d'un livrable non publié** : `ALLOW_UPDATE_JSON_LAG=1 python patch/tests/test_apk.py` (sans la tolérance,
+  le test échoue à dessein — `update.json` doit continuer de décrire la release en ligne, la 1.0.26, pour l'updater des
+  utilisateurs ; on ne l'avance qu'au moment de la publication).

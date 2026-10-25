@@ -729,6 +729,38 @@ def main():
           and "if-ge v1, v2, :cond_twouich_tv_headers" in patcher,
           "l'etat du panneau etait calcule sur les seuls dp : la TV perdait sa "
           "colonne de navigation (HEADERS_HIDDEN).")
+    # RETOUR dans le lecteur (mesure BlueStacks du 24/10) : le garde telephone de
+    # onKeyDown etait branche a l'envers. Sur telephone la touche prenait la
+    # branche TV -- `setVisibility(8)` sur la barre de saisie -- et la barre ne
+    # revenait jamais ; le retour de twouichPhoneBack etait lu de meme.
+    back_new_start = patcher.index("PHONE_BACK_TV_NEW = ")
+    back_new = patcher[back_new_start:patcher.index("PHONE_BACK_CHAIN = ",
+                                                    back_new_start)]
+    phone_new_start = patcher.index("PHONE_BACK_PHONE = ")
+    phone_new = patcher[phone_new_start:patcher.index("PHONE_BACK_METHOD = ",
+                                                      phone_new_start)]
+    check("lecteur : RETOUR prend la branche telephone sur un telephone",
+          "if-eqz v0, :twouich_back_phone" in back_new
+          and "if-nez v0, :twouich_back_phone" not in back_new,
+          "avec `if-nez`, un telephone (0) tombait dans la branche TV : RETOUR "
+          "masquait la barre de saisie et la touche etait consommee.")
+    # Le champ porte un OnKeyListener de l'amont : RETOUR y appelait K1, qui lit
+    # `w2().e()` sans garde -> NPE (chat non connecte), mesure le 25/10.
+    key_start = patcher.index("PHONE_KEY_TV_NEW = ")
+    key_new = patcher[key_start:patcher.index("PHONE_KEY_PHONE = ", key_start)]
+    key_phone = patcher[patcher.index("PHONE_KEY_PHONE = "):]
+    key_phone = key_phone[:key_phone.index(")]")]
+    check("lecteur : RETOUR sur le champ focalise rend la main sur telephone",
+          "if-eqz v1, :twouich_key_phone" in key_new
+          and ":twouich_key_phone" in key_phone
+          and "const/4 p2, 0x0" in key_phone,
+          "sans ce garde, RETOUR dans le champ vide le brouillon et appelle K1, "
+          "qui lève `NullPointerException: A6.g.q() on a null object reference`.")
+    check("lecteur : RETOUR non consomme rend la main a la chaine d'origine",
+          "if-eqz v0, :cond_1" in phone_new
+          and "if-nez v0, :cond_1" not in phone_new,
+          "avec `if-nez`, `twouichPhoneBack`=faux (0) sortait par `return v3` : "
+          "l'appui etait avale quand rien n'avait ete fait.")
     spec = importlib.util.spec_from_file_location("twouich_patch", PATCHER)
     patch_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(patch_module)

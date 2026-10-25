@@ -308,6 +308,289 @@ def _patch_screen_off_stop(text: str) -> tuple[str, bool]:
     return text[:match.start()] + new_body + text[match.end():], True
 
 
+# ── RETOUR sur telephone : la barre de saisie reste ─────────────────────────
+# `onKeyDown` upstream traite KEYCODE_BACK (et KEYCODE_MENU) comme « masquer le
+# champ de saisie » : sur TV, ou il n'apparait qu'a la demande, c'est le bon
+# comportement. Sur l'empilement telephone la barre fait partie de la
+# disposition ; la masquer laissait un chat visible qu'on ne pouvait plus
+# alimenter jusqu'a quitter et rouvrir la chaine (mesure du 24/10 sur BlueStacks :
+# `SendMessageWindow` V.E -> G.E apres un appui sur RETOUR, second appui = sortie).
+PHONE_BACK_TV_OLD = _smali_lines(
+    "    :cond_0",
+    "    invoke-virtual {p0}, "
+    "Lcom/s0und/s0undtv/activities/PlayerActivity;->Z2()Z",
+)
+PHONE_BACK_TV_NEW = _smali_lines(
+    "    :cond_0",
+    "    # Telephone : la barre de saisie fait partie de l'empilement, RETOUR ne la",
+    "    # retire pas. TV : comportement d'origine, inchange.",
+    "    invoke-direct {p0}, "
+    "Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichTvInterface()Z",
+    "",
+    "    move-result v0",
+    "",
+    "    # if-eqz : on saute vers la branche telephone quand twouichTvInterface",
+    "    # rend FAUX (0). Ecrit if-nez le 24/10, le telephone tombait dans la",
+    "    # branche TV : RETOUR masquait la barre de saisie, touche consommee.",
+    "    if-eqz v0, :twouich_back_phone",
+    "",
+    "    invoke-virtual {p0}, "
+    "Lcom/s0und/s0undtv/activities/PlayerActivity;->Z2()Z",
+)
+PHONE_BACK_CHAIN = _smali_lines(
+    "    :cond_1",
+    "    invoke-virtual {p0}, "
+    "Lcom/s0und/s0undtv/activities/PlayerActivity;->Y2()Z",
+)
+PHONE_BACK_PHONE = _smali_lines(
+    "    # Telephone : on ne retire pas la barre. Si le champ a le focus (clavier",
+    "    # ouvert), on rend le focus et on ferme le clavier ; le brouillon reste.",
+    "    # Renvoie vrai quand l'appui est consomme, sinon la chaine d'origine",
+    "    # reprend (fermeture des panneaux, sortie du lecteur).",
+    "    :twouich_back_phone",
+    "    invoke-direct {p0}, "
+    "Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneBack()Z",
+    "",
+    "    move-result v0",
+    "",
+    "    # if-eqz : appui NON consomme (0) -> la chaine d'origine reprend. Ecrit",
+    "    # if-nez le 24/10 : un appui non consomme sortait par `return v3`, donc",
+    "    # avale sans rien faire, et le second RETOUR ne sortait pas du lecteur.",
+    "    if-eqz v0, :cond_1",
+    "",
+    "    return v3",
+    "",
+)
+PHONE_BACK_METHOD = _smali_lines(
+    ".method private twouichPhoneBack()Z",
+    "    .locals 3",
+    "",
+    "    # Appelee par onKeyDown quand la barre de saisie est visible sur un",
+    "    # telephone (cf. PHONE_BACK_TV_NEW). Vrai = appui consomme : le champ avait",
+    "    # le focus, on rend le focus et on ferme le clavier, sans toucher a la barre",
+    "    # ni au brouillon. Faux = on laisse la chaine d'origine decider.",
+    "    iget-object v0, p0, "
+    "Lcom/s0und/s0undtv/activities/PlayerActivity;->U:Landroid/widget/EditText;",
+    "",
+    "    const/4 v1, 0x0",
+    "",
+    "    if-eqz v0, :twouich_back_free",
+    "",
+    "    invoke-virtual {v0}, Landroid/view/View;->hasFocus()Z",
+    "",
+    "    move-result v2",
+    "",
+    "    if-eqz v2, :twouich_back_free",
+    "",
+    "    invoke-virtual {v0}, Landroid/view/View;->clearFocus()V",
+    "",
+    "    const-string v2, \"input_method\"",
+    "",
+    "    invoke-virtual {p0, v2}, Landroid/content/Context;->getSystemService("
+    "Ljava/lang/String;)Ljava/lang/Object;",
+    "",
+    "    move-result-object v2",
+    "",
+    "    check-cast v2, Landroid/view/inputmethod/InputMethodManager;",
+    "",
+    "    if-eqz v2, :twouich_back_consumed",
+    "",
+    "    invoke-virtual {v0}, Landroid/view/View;->getWindowToken()Landroid/os/IBinder;",
+    "",
+    "    move-result-object v0",
+    "",
+    "    invoke-virtual {v2, v0, v1}, "
+    "Landroid/view/inputmethod/InputMethodManager;->hideSoftInputFromWindow("
+    "Landroid/os/IBinder;I)Z",
+    "",
+    "    :twouich_back_consumed",
+    "    const-string v0, \"Twouich\"",
+    "",
+    "    const-string v1, \"RETOUR : clavier ferme, barre de saisie conservee\"",
+    "",
+    "    invoke-static {v0, v1}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I",
+    "",
+    "    const/4 v0, 0x1",
+    "",
+    "    return v0",
+    "",
+    "    :twouich_back_free",
+    "    const-string v0, \"Twouich\"",
+    "",
+    "    const-string v1, \"RETOUR : rendu a la chaine d'origine (touche non consommee)\"",
+    "",
+    "    invoke-static {v0, v1}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I",
+    "",
+    "    const/4 v0, 0x0",
+    "",
+    "    return v0",
+    ".end method",
+)
+
+
+# Le masquage de la barre de saisie se fait aussi par k3(Z) (bascule TV du champ).
+# Sur telephone la barre fait partie de l'empilement : on saute UNIQUEMENT le
+# setVisibility(GONE), le reste de la branche (clavier) est conserve.
+PHONE_K3_SIGNATURE = ".method k3(Z)V"
+PHONE_K3_HEAD = ".method k3(Z)V\n    .locals 3\n"
+PHONE_K3_TRACE = _smali_lines(
+    "    const-string v0, \"Twouich\"",
+    "",
+    "    const-string v1, \"barre de saisie : bascule demandee (k3)\"",
+    "",
+    "    invoke-static {v0, v1}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I",
+    "",
+)
+PHONE_K3_HIDE_ANCHOR = _smali_lines(
+    "    :cond_2",
+    "    iget-object p1, p0, "
+    "Lcom/s0und/s0undtv/activities/PlayerActivity;->t:Landroid/widget/LinearLayout;",
+)
+PHONE_K3_GUARD = _smali_lines(
+    "    # Telephone : la barre reste. TV : elle se retire comme avant.",
+    "    invoke-direct {p0}, "
+    "Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichTvInterface()Z",
+    "",
+    "    move-result v0",
+    "",
+    "    if-nez v0, :twouich_k3_phone_kept",
+    "",
+)
+PHONE_K3_HIDE_NEW = (
+    _smali_lines("    :cond_2")
+    + PHONE_K3_GUARD
+    + _smali_lines(
+        "    iget-object p1, p0, "
+        "Lcom/s0und/s0undtv/activities/PlayerActivity;->t:Landroid/widget/LinearLayout;",
+    )
+)
+PHONE_K3_SET_GONE = "    invoke-virtual {p1, v2}, Landroid/view/View;->setVisibility(I)V"
+PHONE_K3_KEPT = "    :twouich_k3_phone_kept"
+
+
+def _patch_phone_k3(text: str) -> tuple[str, bool]:
+    """Sur telephone, k3(Z) ne masque plus la barre de saisie.
+
+    Mesure du 25/10 sur BlueStacks : RETOUR n'appelle jamais `onKeyDown` (aucune
+    de nos traces n'apparait), mais la barre passe quand meme a GONE — c'est
+    cette bascule-ci qui la retire, depuis un chemin qu'il reste a nommer.
+    """
+    match = re.search(r"(?ms)^" + re.escape(PHONE_K3_SIGNATURE) + r".*?^[.]end method",
+                      text)
+    if match is None:
+        fail("k3(Z) introuvable dans PlayerActivity.smali (barre de saisie)")
+    body = match.group(0)
+    if PHONE_K3_KEPT in body:
+        return text, False
+    if PHONE_K3_HIDE_ANCHOR not in body:
+        fail("branche de masquage de k3(Z) introuvable")
+    if body.count(PHONE_K3_SET_GONE) != 1:
+        fail("setVisibility(GONE) de k3(Z) absent ou ambigu")
+    new_body = body.replace(PHONE_K3_HIDE_ANCHOR, PHONE_K3_HIDE_NEW, 1)
+    new_body = new_body.replace(PHONE_K3_SET_GONE,
+                                PHONE_K3_SET_GONE + chr(10) + PHONE_K3_KEPT, 1)
+    if PHONE_K3_TRACE not in new_body and PHONE_K3_HEAD in new_body:
+        new_body = new_body.replace(PHONE_K3_HEAD, PHONE_K3_HEAD + PHONE_K3_TRACE, 1)
+    if new_body == body:
+        return text, False
+    return text[:match.start()] + new_body + text[match.end():], True
+
+
+def _patch_phone_back(text: str) -> tuple[str, bool]:
+    """RETOUR telephone : la barre de saisie ne disparait plus (cf. PHONE_BACK_*).
+
+    Sur TV, le corps d'origine est laisse strictement en place : le champ n'y
+    apparait qu'a la demande, et RETOUR doit continuer a le refermer.
+    """
+    match = re.search(
+        r"(?ms)^[.]method public onKeyDown[(]ILandroid/view/KeyEvent;[)]Z.*?^[.]end method",
+        text,
+    )
+    if match is None:
+        fail("onKeyDown() introuvable dans PlayerActivity.smali (RETOUR telephone)")
+    body = match.group(0)
+    if "twouichPhoneBack()Z" in body:
+        return text, False
+    if PHONE_BACK_TV_OLD not in body:
+        fail("branche RETOUR de onKeyDown() introuvable (RETOUR telephone)")
+    if PHONE_BACK_CHAIN not in body:
+        fail("suite de onKeyDown() introuvable (RETOUR telephone)")
+    new_body = body.replace(PHONE_BACK_TV_OLD, PHONE_BACK_TV_NEW, 1)
+    new_body = new_body.replace(PHONE_BACK_CHAIN, PHONE_BACK_PHONE + PHONE_BACK_CHAIN, 1)
+    if new_body == body:
+        return text, False
+    return text[:match.start()] + new_body + text[match.end():], True
+
+
+
+# ── RETOUR sur le champ focalise : plus de plantage ─────────────────────────
+# Le champ de saisie porte un OnKeyListener de l'amont : sur RETOUR (et ECHAP)
+# en ACTION_DOWN, il vide le brouillon puis appelle `K1(false)`, qui lit
+# `w2().e()` SANS garde. Quand le chat n'est pas connecte `e()` rend null et
+# l'appui tue l'application — FATAL EXCEPTION mesuree le 25/10 sur BlueStacks :
+# `NullPointerException: Attempt to invoke virtual method 'boolean A6.g.q()' on
+# a null object reference`, K1 <- p0 <- y6/m.onKey <- View.dispatchKeyEvent.
+# Sur TV le geste reste celui de l'amont ; sur telephone la touche n'est pas
+# consommee : elle remonte a onKeyDown, donc a twouichPhoneBack (clavier ferme,
+# brouillon et barre conserves).
+PHONE_KEY_TV_OLD = _smali_lines(
+    "    :cond_0",
+    "    iget-object p1, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->U:"
+    "Landroid/widget/EditText;",
+)
+PHONE_KEY_TV_NEW = _smali_lines(
+    "    :cond_0",
+    "    # Telephone : RETOUR ne vide pas le brouillon et ne passe pas par K1",
+    "    # (NPE quand le chat n'est pas connecte). L'appui remonte a onKeyDown,",
+    "    # qui ferme le clavier et garde la barre de saisie.",
+    "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;"
+    "->twouichTvInterface()Z",
+    "",
+    "    move-result v1",
+    "",
+    "    if-eqz v1, :twouich_key_phone",
+    "",
+    "    iget-object p1, p0, Lcom/s0und/s0undtv/activities/PlayerActivity;->U:"
+    "Landroid/widget/EditText;",
+)
+PHONE_KEY_PHONE = _smali_lines(
+    "",
+    "    :twouich_key_phone",
+    "    # Rien n'est efface ni envoye : le brouillon et la barre restent en place.",
+    "    const/4 p2, 0x0",
+    "",
+    "    return p2",
+)
+
+def _patch_chat_key_listener(text: str) -> tuple[str, bool]:
+    """RETOUR sur le champ focalise : rendu a onKeyDown sur telephone (cf. PHONE_KEY_*).
+
+    Sur TV, le corps d'origine est laisse strictement en place : le champ n'y
+    apparait qu'a la demande, et RETOUR doit continuer a le refermer.
+    """
+    match = re.search(
+        r"(?ms)^[.]method public static synthetic p0[(]"
+        r"Lcom/s0und/s0undtv/activities/PlayerActivity;Landroid/view/View;"
+        r"ILandroid/view/KeyEvent;[)]Z.*?^[.]end method",
+        text,
+    )
+    if match is None:
+        fail("listener de saisie p0() introuvable (RETOUR sur le champ)")
+    body = match.group(0)
+    if ":twouich_key_phone" in body:
+        return text, False
+    if PHONE_KEY_TV_OLD not in body:
+        fail("branche RETOUR du listener de saisie introuvable")
+    new_body = body.replace(PHONE_KEY_TV_OLD, PHONE_KEY_TV_NEW, 1)
+    # Le retour telephone se pose en fin de methode : aucun chemin n'y tombe,
+    # seule la branche gardee le rejoint.
+    tail = new_body.rindex(".end method")
+    new_body = new_body[:tail] + PHONE_KEY_PHONE + new_body[tail:]
+    if new_body == body:
+        return text, False
+    return text[:match.start()] + new_body + text[match.end():], True
+
+
 # --- Interface TV : une seule source de verite --------------------------------
 # Le mode TV ne se lit PAS dans les dp : un televiseur 1080p en 320 dpi declare
 # 540 dp (mesure du 21/09 sur la Freebox), donc un seuil a 600 dp laissait la
@@ -796,11 +1079,20 @@ PHONE_CHAT_FOCUS_BARE = (
     "    if-eqz p1, :return_focus\n"
     "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V\n"
 )
+# Forme remplacee le 25/10 : la disposition est aussi reappliquee quand la
+# fenetre GAGNE le focus. Mesure sur BlueStacks : un RETOUR dans le lecteur
+# n'appelle ni onKeyDown ni k3(Z) (aucune de nos traces), mais la fenetre
+# regagne le focus juste apres ET la barre de saisie passe a GONE — c'est ce
+# rappel qui la remet. Sortir puis revenir dans l'app la rétablissait deja
+# (la disposition y est reappliquee), d'ou le meme traitement ici.
+PHONE_CHAT_FOCUS_BRANCH = "    if-eqz p1, :return_focus\n"
 PHONE_CHAT_FOCUS_RESTORED = (
-    "    if-eqz p1, :return_focus\n"
     "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichChatRestore()V\n"
     "    invoke-direct {p0}, Lcom/s0und/s0undtv/activities/PlayerActivity;->twouichPhoneStackedLayout()V\n"
 )
+# Forme publiee jusqu'au 24/10 : la disposition n'etait reappliquee qu'en
+# perdant le focus, ce qui laissait la barre masquee apres un RETOUR.
+PHONE_CHAT_FOCUS_PUBLISHED = PHONE_CHAT_FOCUS_BRANCH + PHONE_CHAT_FOCUS_RESTORED
 
 
 def _normalize_phone_on_resume(text: str) -> tuple[str, bool]:
@@ -1841,6 +2133,20 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
     player_text, screen_off_patched = _patch_screen_off_stop(player_text)
     if screen_off_patched:
         log("veille : le demontage d'onStop() est saute quand l'ecran est eteint")
+    player_text, phone_back_patched = _patch_phone_back(player_text)
+    if phone_back_patched:
+        log("lecteur : RETOUR ne retire plus la barre de saisie sur telephone")
+    player_text, phone_k3_patched = _patch_phone_k3(player_text)
+    if phone_k3_patched:
+        log("lecteur : k3(Z) ne masque plus la barre de saisie sur telephone")
+    player_text, phone_key_patched = _patch_chat_key_listener(player_text)
+    if phone_key_patched:
+        log("lecteur : RETOUR sur le champ focalise ne plante plus (telephone)")
+    # Le garde de onKeyDown appelle cette methode : elle doit exister meme sur un
+    # arbre qui aurait deja recu le garde sans elle (reparation d'un arbre ancien).
+    back_method_added = ".method private twouichPhoneBack()Z" not in player_text
+    if back_method_added:
+        player_text = player_text.rstrip() + "\n" + PHONE_BACK_METHOD.rstrip() + "\n"
     # La méthode du bouton Envoyer rejoint le flux d'écriture unique : c'est
     # write_player qui pose la plume (invariant « source unique TV » du 21/09),
     # jamais une écriture directe du smali du lecteur — le verrou de test en
@@ -2679,9 +2985,18 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
             player_fixed = player_fixed.replace(chat_old, PHONE_CHAT_BELOW_NEW, 1)
     # Le rappel de focus conserve la relecture (forme publiée) : un arbre qui
     # l'aurait perdue est ramené à la forme servie, jamais l'inverse.
+    phone_focus_patched = False
     if PHONE_CHAT_FOCUS_BARE in player_fixed:
         player_fixed = player_fixed.replace(PHONE_CHAT_FOCUS_BARE,
                                             PHONE_CHAT_FOCUS_RESTORED, 1)
+        phone_focus_patched = True
+    # Arbre deja patche avec la forme publiee (disposition seulement sur PERTE
+    # de focus) : on la ramene a la forme courante, qui la reapplique aussi a la
+    # prise de focus — c'est ce rappel qui remet la barre de saisie apres RETOUR.
+    elif PHONE_CHAT_FOCUS_PUBLISHED in player_fixed:
+        player_fixed = player_fixed.replace(PHONE_CHAT_FOCUS_PUBLISHED,
+                                            PHONE_CHAT_FOCUS_RESTORED, 1)
+        phone_focus_patched = True
     # Une réparation ancienne a pu laisser un démarrage du service collé à
     # invoke-super (avant la relecture). On élimine ce résidu : le patcher
     # générique place le démarrage juste après twouichChatRestore, et le
@@ -2871,6 +3186,8 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         write_player(player_fixed)
         log("smartphone : chat repliable rebranché sur le lecteur (réparation)")
     elif (player_fixed != player_text or tv_guard_count or screen_off_patched
+          or phone_back_patched or back_method_added or phone_k3_patched
+          or phone_focus_patched
           or service_calls or resume_normalized or send_added or phone_chat_guard_patched
           or phone_chat_layout_patched or relayout_missing):
         write_player(player_fixed)
@@ -2886,7 +3203,8 @@ def patch_smartphone_ux(decoded: pathlib.Path, here: pathlib.Path) -> None:
         "\n".join((CHAT_METHODS, player_methods, pip_methods, TV_INTERFACE_METHOD,
                     PHONE_CHAT_OWN_FADE_METHOD, PHONE_CHAT_FADE_GUARD,
                     PHONE_CHAT_LAYOUT_VISIBLE, PHONE_SCREEN_OFF_GUARD,
-                    PHONE_SCREEN_OFF_KEPT)).encode("utf-8")
+                    PHONE_SCREEN_OFF_KEPT, PHONE_BACK_METHOD, PHONE_BACK_TV_NEW,
+                    PHONE_BACK_PHONE, PHONE_K3_GUARD)).encode("utf-8")
     ).hexdigest()
 
     values = decoded / "res/values/dimens.xml"

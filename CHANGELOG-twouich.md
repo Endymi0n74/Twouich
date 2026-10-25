@@ -1,5 +1,18 @@
 # Journal des modifications — Twouich
 
+## v1.0.28 — 25 octobre 2026
+
+> **Publié le 25 octobre 2026** (`versionCode 175`) : tag `v1.0.28`, release avec l'APK et `changelog.html`, `update.json` poussée après la publication. APK publié : 11 323 517 o, SHA-256 `62323f5b43caeca3f91a0677b1f44ab49d94e93bdf3e9bf0b3aeeff0f2e1571f`. Ce correctif porte sur le retour dans le lecteur téléphone ; c'est la version appuyée sans les points.
+
+- **Le retour dans le lecteur ne masque plus la saisie.** Sur téléphone, un appui sur RETOUR dans le lecteur ne cache plus la barre « Envoyer un message » ; le lecteur reste ouvert, le chat reste visible, et le champ garde son brouillon quand il est focalisé. Un second RETOUR sort du lecteur vers la chaîne d'origine.
+- **Derrière ce correctif, deux causes distinctes.** Le garde `onKeyDown` donnait la touche à la branche TV sur téléphone (donc `setVisibility(8)` sur la saisie, consommation de la touche, plus de journal « RETOUR »), et le champ avait un `OnKeyListener` amont qui vidait le brouillon puis appelait `K1(false)` sans garde — plantage `NullPointerException` quand le lecteur n'est pas ouvert. Les deux sont corrigés sur le bytecode livré : la touche revient à `onKeyDown` téléphone (et nulle part ailleurs), et `K1` n'est plus atteint sur RETOUR.
+- **Preuves hors appareil** : `test_smali_branches.py` **84/84** verrous (dont les deux sommets `if-eqz v0, :twouich_back_phone` dans `onKeyDown` — inverse du bon sens — et les branches `if-eqz v1, :invoke` / `if-eqz v0, :invoke` dans `twouichPhoneBack` — inverse de la porte dérobée), le sélecteur de méthode de retour `twouichPhoneBack` présent dans le dex livré, et l'invariant « source unique TV » : le patch n'écrit jamais `OnKeyListener` sur `SendMessageWindow` (appui de test : substituer un garde `if-nez` sur la méthode montée fausse le test).
+- **Validé sur BlueStacks (v1.0.28, `install -r`)**. Clavier ouvert, champ focalisé : journal `RETOUR : clavier ferme, barre de saisie conservee`, clavier refermé, `topResumedActivity` reste `PlayerActivity`, `SendMessageWindow [0,1184][720,1280]` et champ `[12,1198][558,1265]` inchangés, texte `brouillonRETOUR` conservé, **0 FATAL**. Sans clavier : `RETOUR : rendu a la chaine d'origine (touche non consommee)` et sortie du lecteur vers `MainActivity`. Réouverture de la chaîne : barre de nouveau présente avec son texte d'invite. `ALLOW_UPDATE_JSON_LAG=1 python patch/tests/test_apk.py` → **livrable conforme**.
+
+## v1.0.27 — 25 octobre 2026
+
+> **Non publiée.** Correctif du retour dans le lecteur téléphone — le garde `onKeyDown` seul. Conservé dans `dist/` comme étape intermédiaire du build ; le livrable portant cette correction est la v1.0.28.
+
 ## v1.0.26 — 24 octobre 2026
 
 > **Publié le 24 octobre 2026** (`versionCode 173`) : tag `v1.0.26`, release avec l'APK et `changelog.html`, `update.json` poussée après la publication. APK publié : 11 323 517 o, SHA-256 `ae82fbacc1a72331cd03def99ad46e8dcacb6e2b7d3a35f95e8b1705a7705c80`. Le repli `BASELINE_URL` de `patch/build.sh` (dernière release publiée, l'asset amont `beta_144` ayant disparu) est réparé dans la même passe : un clone neuf reconstruit à nouveau, et la CI repasse au vert.

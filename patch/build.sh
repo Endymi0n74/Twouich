@@ -73,13 +73,13 @@ if [ "$SKIP_SIGNING" != "1" ] && [ -z "$KEY_PASS" ]; then
     exit 1
 fi
 
-VERSION_CODE=173
-VERSION_NAME="v1.0.26"
-APK_NAME="Twouich_v1.0.26.apk"
+VERSION_CODE=175
+VERSION_NAME="v1.0.28"
+APK_NAME="Twouich_v1.0.28.apk"
 # Date AFFICHÉE dans la page « Nouveautés » embarquée — constante figée par
 # version, jamais la date du jour : sinon chaque rebuild change les octets du
 # livrable (build reproductible). À faire évoluer au prochain bump de version.
-VERSION_RELEASE_DATE="2026.10.24"
+VERSION_RELEASE_DATE="2026.10.25"
 
 echo "═══════════════════════════════════════════════"
 echo "  Twouich — build $VERSION_NAME ($VERSION_CODE)"
