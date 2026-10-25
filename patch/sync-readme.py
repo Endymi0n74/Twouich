@@ -77,6 +77,11 @@ EN_SECTION_RE = re.compile(r"^## What's new in (v[0-9][\w.]*)")
 # anglais resté sans traduction — c'est le trou qui a laissé README.en.md
 # glisser jusqu'en v1.0.20 pendant que le français avançait.
 WHATS_NEW_EN: dict[str, list[str]] = {
+    "v1.0.28": [
+        "**The return key no longer hides the compose bar.** On phones, pressing return inside the player no longer hides the compose bar; the player stays open, the chat stays visible, and the message field keeps its draft when it is focused. A second return exits the player back to the original channel.",
+        "**Two separate causes were fixed.** The onKeyDown guard was routing the key to the TV branch on phones (hiding the compose bar, consuming the key, no \"return\" log), and the message field had an upstream OnKeyListener that cleared the draft then called K1(false) with no guard — a NullPointerException when the player was not open. Both are fixed in the delivered bytecode: the key now returns to onKeyDown on phones, and K1 is no longer reached on return.",
+        "**Watch points were already removed in v1.0.26.** This release only fixes the return-key defect.",
+    ],
     "v1.0.26": [
         "**Watch points are removed.** The v1.0.25 counter invented its "
         "numbers: one minute watched counted as one point, while Twitch "

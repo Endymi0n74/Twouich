@@ -20,18 +20,18 @@ Android TV client for Twitch, with local filtering of SSAI ad markers, VOD un-mu
 - **VaFT fallback** `v1.0.16`: if `stitched-ad` survives stripping (new format), attempt clean stream `GQL PlaybackAccessToken embed` → `usher v2` → variant (5s timeout, fallback to stripping) (`VaftFallback`, dormant while `lastCut>0`)
 - **Reproducible build**: canonicalized ZIP (timestamp + order), `SELFTEST 31/31`, `check-release.sh` 4/4
 
-## What's new in v1.0.26 — October 24, 2026
+## What's new in v1.0.28 — October 25, 2026
 
-- **Watch points are removed.** The v1.0.25 counter invented its numbers: one minute watched counted as one point, while Twitch channel points are not earned that way and the app embeds neither GQL/Helix nor a token to read them. The badge, the counter, its ticker and the long-press go away, together with the composer row view and the player methods. The composer row is back to exactly the message field, the send arrow and the player options.
-- **The defect shipped in v1.0.25 goes with it.** The APK published as `v1.0.25` embedded `PointsTicker.run()` calling `PlayerActivity.twouichPhonePointsTick()`, a method **missing from the dex**: a `NoSuchMethodError` fifteen seconds into playback. Two checks now lock the feature out of the delivered dex and layout.
-- **Everything else in v1.0.25 is unchanged**: phone player (dark chat, circular PiP, pill composer), channel page, portrait and landscape geometry, branding and ad filtering. TV mode stays as it was.
+- **The return key no longer hides the compose bar.** On phones, pressing return inside the player no longer hides the compose bar; the player stays open, the chat stays visible, and the message field keeps its draft when it is focused. A second return exits the player back to the original channel.
+- **Two separate causes were fixed.** The onKeyDown guard was routing the key to the TV branch on phones (hiding the compose bar, consuming the key, no "return" log), and the message field had an upstream OnKeyListener that cleared the draft then called K1(false) with no guard — a NullPointerException when the player was not open. Both are fixed in the delivered bytecode: the key now returns to onKeyDown on phones, and K1 is no longer reached on return.
+- **Watch points were already removed in v1.0.26.** This release only fixes the return-key defect.
 
 ## Installation
 
-Download [`Twouich_v1.0.26.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.26/Twouich_v1.0.26.apk) from the published release.
+Download [`Twouich_v1.0.28.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.28/Twouich_v1.0.28.apk) from the published release.
 
 ```bash
-adb install -r Twouich_v1.0.26.apk
+adb install -r Twouich_v1.0.28.apk
 ```
 
 

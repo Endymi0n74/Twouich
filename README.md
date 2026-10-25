@@ -20,18 +20,19 @@ Client Android TV pour Twitch, avec filtrage local des marqueurs publicitaires S
 - **Fallback VaFT** `v1.0.16` : si `stitched-ad` survit au stripping (nouveau format), tentative flux propre `GQL PlaybackAccessToken embed` → `usher v2` → variante (5s timeout, repli stripping) (`VaftFallback`, dormant tant que `lastCut>0`)
 - **Build reproductible** : ZIP canonisé (horodatage + ordre), `SELFTEST 31/31`, `check-release.sh` 4/4
 
-## Nouveautés v1.0.26 — 24 octobre 2026
+## Nouveautés v1.0.28 — 25 octobre 2026
 
-- **Les points de visionnage sont retirés.** Le compteur de la v1.0.25 inventait ses chiffres : une minute de lecture y valait un point, alors que les points de chaîne Twitch ne se gagnent pas ainsi et que l'application n'embarque ni GQL/Helix ni jeton pour les lire. La pastille, le compteur, la cadence et l'appui long disparaissent — greffons `WatchPoints`, `PointsTicker`, `PointsLongPress`, vue de la rangée de saisie et méthodes du lecteur. La rangée de saisie retrouve exactement le champ, la flèche d'envoi et les options du lecteur.
-- **Le défaut de la v1.0.25 publiée disparaît avec la fonctionnalité.** L'APK publié sous `v1.0.25` embarquait `PointsTicker.run()` appelant `PlayerActivity.twouichPhonePointsTick()`, méthode **absente du dex** : `NoSuchMethodError` au premier tir, quinze secondes après le début de lecture. `remove_phone_points()` nettoie aussi un arbre de travail réutilisé et échoue bruyamment s'il reste une trace ; deux contrôles verrouillent l'absence (aucune classe de points dans le dex livré, plus aucune vue dans le layout).
-- **Le reste de la v1.0.25 est inchangé** : lecteur téléphone (chat sombre, PiP circulaire, saisie en pastille), fiche chaîne, géométrie portrait/paysage, identité visuelle et anti-pub. Le mode TV reste intact.
+- **Le retour dans le lecteur ne masque plus la saisie.** Sur téléphone, un appui sur RETOUR dans le lecteur ne cache plus la barre « Envoyer un message » ; le lecteur reste ouvert, le chat reste visible, et le champ garde son brouillon quand il est focalisé. Un second RETOUR sort du lecteur vers la chaîne d'origine.
+- **Derrière ce correctif, deux causes distinctes.** Le garde `onKeyDown` donnait la touche à la branche TV sur téléphone (donc `setVisibility(8)` sur la saisie, consommation de la touche, plus de journal « RETOUR »), et le champ avait un `OnKeyListener` amont qui vidait le brouillon puis appelait `K1(false)` sans garde — plantage `NullPointerException` quand le lecteur n'est pas ouvert. Les deux sont corrigés sur le bytecode livré : la touche revient à `onKeyDown` téléphone (et nulle part ailleurs), et `K1` n'est plus atteint sur RETOUR.
+- **Preuves hors appareil** : `test_smali_branches.py` **84/84** verrous (dont les deux sommets `if-eqz v0, :twouich_back_phone` dans `onKeyDown` — inverse du bon sens — et les branches `if-eqz v1, :invoke` / `if-eqz v0, :invoke` dans `twouichPhoneBack` — inverse de la porte dérobée), le sélecteur de méthode de retour `twouichPhoneBack` présent dans le dex livré, et l'invariant « source unique TV » : le patch n'écrit jamais `OnKeyListener` sur `SendMessageWindow` (appui de test : substituer un garde `if-nez` sur la méthode montée fausse le test).
+- **Validé sur BlueStacks (v1.0.28, `install -r`)**. Clavier ouvert, champ focalisé : journal `RETOUR : clavier ferme, barre de saisie conservee`, clavier refermé, `topResumedActivity` reste `PlayerActivity`, `SendMessageWindow [0,1184][720,1280]` et champ `[12,1198][558,1265]` inchangés, texte `brouillonRETOUR` conservé, **0 FATAL**. Sans clavier : `RETOUR : rendu a la chaine d'origine (touche non consommee)` et sortie du lecteur vers `MainActivity`. Réouverture de la chaîne : barre de nouveau présente avec son texte d'invite. `ALLOW_UPDATE_JSON_LAG=1 python patch/tests/test_apk.py` → **livrable conforme**.
 
 ## Installation
 
-Télécharger [`Twouich_v1.0.26.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.26/Twouich_v1.0.26.apk) depuis la release publiée.
+Télécharger [`Twouich_v1.0.28.apk`](https://github.com/Endymi0n74/Twouich/releases/download/v1.0.28/Twouich_v1.0.28.apk) depuis la release publiée.
 
 ```bash
-adb install -r Twouich_v1.0.26.apk
+adb install -r Twouich_v1.0.28.apk
 ```
 
 
